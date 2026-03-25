@@ -22,10 +22,6 @@
     ],
     "*.{json,md,yaml,yml}": [
       "prettier --write"
-    ],
-    "*.py": [
-      "ruff check --fix",
-      "ruff format"
     ]
   }
 }
