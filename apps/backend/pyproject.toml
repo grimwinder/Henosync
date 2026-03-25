@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "henosync-backend"
+version = "0.1.0"
+description = "Henosync core backend engine"
+authors = ["Henosync Team"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.135.2"
+uvicorn = {extras = ["standard"], version = "^0.42.0"}
+websockets = "^16.0"
+pydantic = "^2.12.5"
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.48"}
+aiosqlite = "^0.22.1"
+alembic = "^1.18.4"
+python-multipart = "^0.0.22"
+aiofiles = "^25.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-asyncio = "*"
+httpx = "*"
+ruff = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
