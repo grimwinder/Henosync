@@ -276,6 +276,12 @@ class MissionEngine:
             elif step.step_type == StepType.PARALLEL:
                 return await self._execute_parallel(step)
 
+            elif step.step_type == StepType.LOOP:
+                return await self._execute_loop(step)
+
+            elif step.step_type == StepType.WAIT_FOR:
+                return await self._execute_wait_for(step)
+
             else:
                 logger.warning(f"Unknown step type: {step.step_type}")
                 return False
@@ -422,6 +428,209 @@ class MissionEngine:
             for r in results
             if not isinstance(r, Exception)
         )
+    
+    async def _execute_loop(self, step: MissionStep) -> bool:
+        """
+        Execute a LOOP step — repeat a sequence of steps.
+
+        Two modes:
+        - loop_count set: repeat exactly N times
+        - loop_condition set: repeat until condition is true
+        - Both set: repeat N times OR until condition, whichever first
+
+        Example parameters:
+            loop_count: 3          # Repeat 3 times
+            loop_condition:        # Or until battery < 20%
+                telemetry_key: "battery_percent"
+                operator: "lt"
+                value: 20
+            loop_step_ids: [...]   # Steps to repeat
+        """
+        mission = self._active_mission
+        loop_steps = [
+            s for s in mission.steps
+            if s.id in step.loop_step_ids
+        ]
+
+        if not loop_steps:
+            logger.warning("LOOP step has no loop_step_ids defined")
+            return True
+
+        loop_count = step.loop_count
+        loop_condition = step.loop_condition
+        iteration = 0
+
+        # Safety limit — prevent infinite loops with no condition
+        # v2: make this configurable
+        MAX_ITERATIONS = 1000
+
+        while True:
+            if self._abort_flag:
+                return False
+
+            # Check iteration count limit
+            if loop_count is not None and iteration >= loop_count:
+                logger.info(
+                    f"Loop complete after {iteration} iterations"
+                )
+                break
+
+            # Safety cap
+            if iteration >= MAX_ITERATIONS:
+                logger.warning(
+                    f"Loop hit safety limit of {MAX_ITERATIONS} iterations"
+                )
+                break
+
+            # Check exit condition if defined
+            if loop_condition:
+                node = node_registry.get_node(loop_condition.node_id)
+                if node:
+                    actual = node.telemetry.get(
+                        loop_condition.telemetry_key
+                    )
+                    if actual is not None:
+                        condition_met = self._evaluate_condition(
+                            float(actual),
+                            loop_condition.operator,
+                            loop_condition.value
+                        )
+                        if condition_met:
+                            logger.info(
+                                f"Loop exit condition met after "
+                                f"{iteration} iterations"
+                            )
+                            break
+
+            logger.info(f"Loop iteration {iteration + 1}")
+            await telemetry_bus.publish_event(
+                title="Loop Iteration",
+                message=f"{step.label or 'Loop'} — "
+                        f"iteration {iteration + 1}"
+                        + (f" of {loop_count}" if loop_count else ""),
+                severity=EventSeverity.INFO
+            )
+
+            # Execute all loop steps in sequence
+            for loop_step in loop_steps:
+                if self._abort_flag:
+                    return False
+
+                # Wait if paused
+                await self._paused_event.wait()
+
+                loop_step.status = StepStatus.ACTIVE
+                success = await self._execute_step(loop_step)
+
+                if not success:
+                    logger.error(
+                        f"Loop step failed on iteration {iteration + 1}"
+                    )
+                    return False
+
+                loop_step.status = StepStatus.COMPLETED
+
+            iteration += 1
+
+        return True
+
+
+    async def _execute_wait_for(self, step: MissionStep) -> bool:
+        """
+        Execute a WAIT_FOR step — block until a telemetry
+        condition becomes true, or fail after timeout.
+
+        Much more useful than a fixed WAIT for robot control
+        because you wait for the robot to actually reach a state
+        rather than guessing how long it will take.
+
+        Example: wait until robot is within 2m of target,
+                or wait until arm is in ready position,
+                or wait until sensor detects something.
+
+        Parameters:
+            wait_for_condition:
+                node_id: "..."
+                telemetry_key: "battery_percent"
+                operator: "lt"
+                value: 50.0
+            wait_for_timeout_seconds: 30.0
+        """
+        condition = step.wait_for_condition
+        if not condition:
+            logger.error("WAIT_FOR step has no wait_for_condition")
+            return False
+
+        timeout = step.wait_for_timeout_seconds
+        poll_interval = 0.5  # Check every 500ms
+        elapsed = 0.0
+
+        logger.info(
+            f"Waiting for: {condition.telemetry_key} "
+            f"{condition.operator} {condition.value} "
+            f"(timeout: {timeout}s)"
+        )
+
+        await telemetry_bus.publish_event(
+            title="Waiting For Condition",
+            message=f"{step.label or 'Waiting'} — "
+                    f"timeout in {timeout}s",
+            severity=EventSeverity.INFO,
+            node_id=condition.node_id
+        )
+
+        while elapsed < timeout:
+            if self._abort_flag:
+                return False
+
+            # Wait if paused
+            await self._paused_event.wait()
+
+            node = node_registry.get_node(condition.node_id)
+            if not node:
+                logger.error(
+                    f"WAIT_FOR node not found: {condition.node_id}"
+                )
+                return False
+
+            actual = node.telemetry.get(condition.telemetry_key)
+            if actual is not None:
+                condition_met = self._evaluate_condition(
+                    float(actual),
+                    condition.operator,
+                    condition.value
+                )
+
+                if condition_met:
+                    logger.info(
+                        f"WAIT_FOR condition met after {elapsed:.1f}s "
+                        f"(actual: {actual})"
+                    )
+                    await telemetry_bus.publish_event(
+                        title="Condition Met",
+                        message=f"{step.label or 'Condition'} met "
+                                f"after {elapsed:.1f}s",
+                        severity=EventSeverity.INFO,
+                        node_id=condition.node_id
+                    )
+                    return True
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        # Timeout reached
+        logger.warning(
+            f"WAIT_FOR timed out after {timeout}s — "
+            f"condition never met"
+        )
+        await telemetry_bus.publish_event(
+            title="Wait For Timeout",
+            message=f"{step.label or 'Condition'} not met "
+                    f"within {timeout}s",
+            severity=EventSeverity.WARNING,
+            node_id=condition.node_id
+        )
+        return False
 
     # ── Helpers ───────────────────────────────────────────────────
 

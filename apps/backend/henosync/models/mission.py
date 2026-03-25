@@ -11,6 +11,8 @@ class StepType(str, Enum):
     WAIT = "wait"
     CONDITION = "condition"
     PARALLEL = "parallel"
+    LOOP = "loop"           # NEW
+    WAIT_FOR = "wait_for"   # NEW
 
 
 class StepStatus(str, Enum):
@@ -48,6 +50,11 @@ class MissionStep(BaseModel):
     then_step_id: Optional[str] = None
     else_step_id: Optional[str] = None
     parallel_step_ids: list[str] = []
+    loop_step_ids: list[str] = []
+    loop_count: Optional[int] = None        
+    loop_condition: Optional[Condition] = None 
+    wait_for_condition: Optional[Condition] = None
+    wait_for_timeout_seconds: float = 30.0 
 
 
 class FailsafeAction(str, Enum):
