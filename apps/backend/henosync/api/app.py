@@ -1,12 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import WebSocket
 from pathlib import Path
 from ..plugin_system.loader import PluginLoader
 from ..core.node_registry import node_registry
+from ..storage.mission_store import mission_store
 from .routes.nodes import router as nodes_router
+from .routes.commands import router as commands_router
+from .routes.missions import router as missions_router
+from .websocket_server import (
+    telemetry_websocket_handler,
+    events_websocket_handler
+)
 import logging
-from .websocket_server import telemetry_websocket_handler, events_websocket_handler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,17 +33,31 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Register routers
+    # REST routes
     app.include_router(nodes_router)
+    app.include_router(commands_router)
+    app.include_router(missions_router)
+
+    # WebSocket routes
+    @app.websocket("/ws/telemetry")
+    async def telemetry_ws(websocket: WebSocket):
+        await telemetry_websocket_handler(websocket)
+
+    @app.websocket("/ws/events")
+    async def events_ws(websocket: WebSocket):
+        await events_websocket_handler(websocket)
 
     @app.on_event("startup")
     async def startup():
         logger.info("Henosync backend starting...")
 
-        # Load plugins first
+        # Load plugins
         loader = PluginLoader(PLUGINS_DIR)
         count = loader.load_all()
         logger.info(f"Plugin loading complete — {count} plugins loaded")
+
+        # Initialize storage
+        await mission_store.initialize()
 
         # Initialize node registry
         await node_registry.initialize()
@@ -63,14 +82,6 @@ def create_app() -> FastAPI:
     async def list_plugins():
         from ..plugin_system.registry import plugin_registry
         return {"plugins": plugin_registry.list_plugins()}
-    
-    @app.websocket("/ws/telemetry")
-    async def telemetry_ws(websocket: WebSocket):
-        await telemetry_websocket_handler(websocket)
-
-    @app.websocket("/ws/events")
-    async def events_ws(websocket: WebSocket):
-        await events_websocket_handler(websocket)
 
     @app.get("/api/transports")
     async def list_transports():
