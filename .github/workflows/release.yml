@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build and package
+        working-directory: apps/desktop
+        run: pnpm build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/desktop/dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
