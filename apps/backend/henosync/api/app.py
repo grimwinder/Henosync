@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import WebSocket
 from pathlib import Path
 from ..plugin_system.loader import PluginLoader
 from ..core.node_registry import node_registry
 from .routes.nodes import router as nodes_router
 import logging
+from .websocket_server import telemetry_websocket_handler, events_websocket_handler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,5 +63,13 @@ def create_app() -> FastAPI:
     async def list_plugins():
         from ..plugin_system.registry import plugin_registry
         return {"plugins": plugin_registry.list_plugins()}
+    
+    @app.websocket("/ws/telemetry")
+    async def telemetry_ws(websocket: WebSocket):
+        await telemetry_websocket_handler(websocket)
+
+    @app.websocket("/ws/events")
+    async def events_ws(websocket: WebSocket):
+        await events_websocket_handler(websocket)
 
     return app

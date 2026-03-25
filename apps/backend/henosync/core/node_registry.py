@@ -4,9 +4,10 @@ import asyncio
 import aiosqlite
 from datetime import datetime, timezone
 from typing import Optional, Callable
-from ..models import Node, NodeStatus, NodeCreate, Position
+from ..models import Node, NodeStatus, NodeCreate, Position, EventSeverity
 from ..storage.database import DB_PATH, init_db
 from ..plugin_system.registry import plugin_registry
+from .telemetry_bus import telemetry_bus
 
 
 logger = logging.getLogger(__name__)
@@ -136,13 +137,20 @@ class NodeRegistry:
                 node.last_seen = datetime.now(timezone.utc)
                 logger.info(f"Connected node: {node.name}")
 
-                # Start telemetry stream in background
+                # Create telemetry queue for this node
+                telemetry_bus.create_node_queue(node.id)
+
+                # Publish connection event
+                await telemetry_bus.publish_event(
+                    title="Node Connected",
+                    message=f"{node.name} is now online",
+                    severity=EventSeverity.INFO,
+                    node_id=node.id
+                )
+
                 asyncio.create_task(
                     self._run_telemetry_stream(node, plugin_instance)
                 )
-            else:
-                await self._update_status(node, NodeStatus.OFFLINE)
-                logger.warning(f"Failed to connect node: {node.name}")
 
         except Exception as e:
             logger.error(f"Error connecting node {node.name}: {e}")
@@ -157,6 +165,9 @@ class NodeRegistry:
             except Exception as e:
                 logger.error(f"Error disconnecting {node.name}: {e}")
             plugin_registry.remove_instance(node.id)
+
+        # Remove telemetry queue
+        telemetry_bus.remove_node_queue(node.id)
 
         await self._update_status(node, NodeStatus.OFFLINE)
 
@@ -176,11 +187,9 @@ class NodeRegistry:
         """Run the telemetry stream for a node in the background."""
         try:
             async for frame in plugin_instance.telemetry_stream(node):
-                # Update node with latest telemetry values
                 node.last_seen = datetime.now(timezone.utc)
                 node.telemetry = frame.values
 
-                # Update standard fields if present
                 if "battery_percent" in frame.values:
                     node.battery_percent = frame.values["battery_percent"]
                 if "signal_strength" in frame.values:
@@ -192,7 +201,9 @@ class NodeRegistry:
                         alt=frame.values.get("alt", 0.0)
                     )
 
-                # Notify listeners of updated telemetry
+                # Publish to telemetry bus
+                await telemetry_bus.publish_telemetry(frame)
+
                 self._notify_listeners(node)
 
         except Exception as e:
