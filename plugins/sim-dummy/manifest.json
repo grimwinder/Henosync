@@ -1,0 +1,28 @@
+{
+  "id": "sim-dummy",
+  "name": "Simulation Node",
+  "version": "0.1.0",
+  "author": "Henosync Team",
+  "description": "A simulated node for testing missions without hardware",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["sim.dummy"],
+  "capabilities": [
+    {
+      "id": "move_to",
+      "label": "Move To",
+      "params": ["lat", "lon", "alt"]
+    },
+    {
+      "id": "wait",
+      "label": "Wait",
+      "params": ["duration_seconds"]
+    },
+    {
+      "id": "return_home",
+      "label": "Return Home",
+      "params": []
+    }
+  ],
+  "transport": "simulation",
+  "icon": "assets/icon.svg"
+}

@@ -1,5 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+from ..plugin_system.loader import PluginLoader
+from ..core.node_registry import node_registry
+from .routes.nodes import router as nodes_router
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+PLUGINS_DIR = Path(__file__).parent.parent.parent.parent.parent / "plugins"
 
 
 def create_app() -> FastAPI:
@@ -16,8 +26,40 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Register routers
+    app.include_router(nodes_router)
+
+    @app.on_event("startup")
+    async def startup():
+        logger.info("Henosync backend starting...")
+
+        # Load plugins first
+        loader = PluginLoader(PLUGINS_DIR)
+        count = loader.load_all()
+        logger.info(f"Plugin loading complete — {count} plugins loaded")
+
+        # Initialize node registry
+        await node_registry.initialize()
+        logger.info("Node registry ready")
+
+    @app.on_event("shutdown")
+    async def shutdown():
+        logger.info("Henosync backend shutting down...")
+        await node_registry.shutdown()
+
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.1.0"}
+        nodes = node_registry.get_all_nodes()
+        return {
+            "status": "ok",
+            "version": "0.1.0",
+            "nodes_total": len(nodes),
+            "nodes_online": len(node_registry.get_online_nodes())
+        }
+
+    @app.get("/api/plugins")
+    async def list_plugins():
+        from ..plugin_system.registry import plugin_registry
+        return {"plugins": plugin_registry.list_plugins()}
 
     return app
