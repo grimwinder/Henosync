@@ -72,4 +72,9 @@ def create_app() -> FastAPI:
     async def events_ws(websocket: WebSocket):
         await events_websocket_handler(websocket)
 
+    @app.get("/api/transports")
+    async def list_transports():
+        from ..transport.registry import transport_registry
+        return {"transports": transport_registry.list_transports()}
+
     return app
