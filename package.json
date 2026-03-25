@@ -1,23 +1,27 @@
 {
-    "name": "henosync",
-    "version": "0.1.0",
-    "private": true,
-    "scripts": {
-      "dev": "pnpm --filter desktop dev",
-      "build": "pnpm --filter desktop build",
-      "test": "pnpm -r test",
-      "lint": "pnpm -r lint",
-      "format": "pnpm -r format"
-    },
-    "devDependencies": {
-      "prettier": "^3.0.0",
-      "eslint": "^8.0.0",
-      "husky": "^9.0.0",
-      "lint-staged": "^15.0.0"
-    },
-    "lint-staged": {
-      "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
-      "*.{json,md,yaml}": ["prettier --write"],
-      "*.py": ["ruff check --fix", "ruff format"]
-    }
+  "name": "henosync",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter desktop dev",
+    "build": "pnpm --filter desktop build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "prettier": "^3.0.0",
+    "eslint": "^9.0.0",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "prettier --write"
+    ]
   }
+}

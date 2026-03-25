@@ -1,0 +1,60 @@
+name: Test
+
+on:
+  push:
+    branches: [develop, "feature/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: curl -sSL https://install.python-poetry.org | python3 -
+
+      - name: Install dependencies
+        working-directory: apps/backend
+        run: poetry install
+
+      - name: Run linting
+        working-directory: apps/backend
+        run: poetry run ruff check .
+
+      - name: Run tests
+        working-directory: apps/backend
+        run: poetry run pytest tests/ -v
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Type check
+        working-directory: apps/desktop
+        run: pnpm exec tsc --noEmit
+
+      - name: Run tests
+        working-directory: apps/desktop
+        run: pnpm test
