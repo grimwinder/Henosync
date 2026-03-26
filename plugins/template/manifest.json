@@ -1,0 +1,50 @@
+{
+  "id": "my-robot",
+  "name": "My Robot",
+  "version": "0.1.0",
+  "author": "Your Name",
+  "description": "Plugin for My Robot",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["my-robot.default"],
+  "capabilities": [
+    {
+      "id": "move_to",
+      "label": "Move To",
+      "params": ["lat", "lon", "alt"],
+      "destructive": false
+    },
+    {
+      "id": "stop",
+      "label": "Stop",
+      "params": [],
+      "destructive": false
+    },
+    {
+      "id": "return_home",
+      "label": "Return Home",
+      "params": [],
+      "destructive": false
+    }
+  ],
+  "transport": "ros2",
+  "config_schema": {
+    "host": {
+      "type": "string",
+      "label": "Robot IP Address",
+      "required": true,
+      "placeholder": "192.168.1.100"
+    },
+    "port": {
+      "type": "number",
+      "label": "rosbridge Port",
+      "required": false,
+      "default": 9090
+    },
+    "namespace": {
+      "type": "string",
+      "label": "ROS2 Namespace",
+      "required": false,
+      "default": ""
+    }
+  }
+}
