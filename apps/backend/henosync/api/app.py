@@ -10,6 +10,7 @@ from .routes.nodes import router as nodes_router
 from .routes.commands import router as commands_router
 from .routes.missions import router as missions_router
 from .routes.execution import router as execution_router
+from .routes.operations import router as operations_router
 from .websocket_server import (
     telemetry_websocket_handler,
     events_websocket_handler
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(missions_router)
     app.include_router(execution_router)
     app.include_router(safety_router)
+    app.include_router(operations_router)
 
     # WebSocket routes
     @app.websocket("/ws/telemetry")

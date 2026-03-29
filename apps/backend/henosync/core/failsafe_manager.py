@@ -122,16 +122,16 @@ class FailsafeManager:
     # ── Failsafe Handlers ─────────────────────────────────────────
 
     async def _on_node_lost(self, node) -> None:
-        """
-        Handle a lost node.
-        Called when a node's heartbeat times out.
-        """
+        """Handle a lost node."""
         logger.critical(
             f"NODE LOST: {node.name} ({node.id}) — "
             f"no heartbeat for {HEARTBEAT_TIMEOUT}s"
         )
 
-        # 1. Invoke plugin safe state immediately
+        # Notify operation manager for graceful degradation
+        from .operation_manager import operation_manager
+        await operation_manager.on_node_lost(node.id)
+
         plugin_instance = plugin_registry.get_instance(node.id)
         if plugin_instance:
             try:
@@ -141,15 +141,11 @@ class FailsafeManager:
                     f"{result.message}"
                 )
             except Exception as e:
-                logger.error(
-                    f"Safe state failed for {node.name}: {e}"
-                )
+                logger.error(f"Safe state failed for {node.name}: {e}")
 
-        # 2. Update node status to ERROR
         from .node_registry import node_registry
         node.status = NodeStatus.ERROR
 
-        # 3. Emit CRITICAL event to operator
         await telemetry_bus.publish_event(
             title="Node Lost",
             message=f"{node.name} has stopped responding. "
@@ -159,7 +155,6 @@ class FailsafeManager:
             node_id=node.id
         )
 
-        # 4. Pause active mission if one is running
         await self._pause_active_mission(node.name)
 
     async def _on_node_recovered(self, node) -> None:
@@ -229,20 +224,38 @@ class FailsafeManager:
     # ── Emergency Stop ────────────────────────────────────────────
 
     async def emergency_stop_all(self) -> None:
-        """
-        Invoke get_safe_state on ALL connected nodes immediately.
-        Called by operator pressing Emergency Stop in the GUI.
-        This cannot be cancelled or overridden.
-        """
+        """Emergency stop all nodes and operations."""
         from .node_registry import node_registry
+        from .operation_manager import operation_manager
 
         logger.critical("EMERGENCY STOP ALL — operator triggered")
 
         await telemetry_bus.publish_event(
             title="Emergency Stop",
-            message="Emergency stop triggered by operator. "
-                    "Safe state invoked on all nodes.",
+            message="Emergency stop triggered. "
+                    "All operations and nodes stopping.",
             severity=EventSeverity.CRITICAL
+        )
+
+        # Stop all control plugin operations first
+        await operation_manager.stop_all_operations()
+
+        # Then abort active mission
+        await self._abort_active_mission()
+
+        # Then safe state all nodes
+        nodes = node_registry.get_online_nodes()
+        tasks = [
+            self._safe_invoke_safe_state(node, plugin_registry.get_instance(node.id))
+            for node in nodes
+            if plugin_registry.get_instance(node.id)
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.critical(
+            f"Emergency stop complete — "
+            f"{len(tasks)} nodes stopped"
         )
 
         # Abort active mission first

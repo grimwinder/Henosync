@@ -48,6 +48,50 @@ class JackalUGVPlugin(NodePlugin):
     PLUGIN_AUTHOR = "Henosync Team — Monash University"
     PLUGIN_DESCRIPTION = "Clearpath Jackal UGV via ROS2 Nav2"
 
+    @staticmethod
+    def get_device_specs(config: dict):
+        """Return device specs for this Jackal configuration."""
+        from henosync.models import (
+            DeviceSpecs, DeviceCategory, DeviceCapability,
+            CapabilitySpec
+        )
+        use_gps = config.get("use_gps", False)
+
+        capabilities = [
+            CapabilitySpec(
+                capability=DeviceCapability.MOVE_2D,
+                max_range=None,
+                notes="Differential drive ground robot"
+            ),
+            CapabilitySpec(capability=DeviceCapability.BATTERY),
+            CapabilitySpec(capability=DeviceCapability.IMU),
+            CapabilitySpec(
+                capability=DeviceCapability.LIDAR,
+                max_range=30.0,
+                dimensions=2,
+                notes="2D planar lidar"
+            ),
+            CapabilitySpec(
+                capability=DeviceCapability.CAMERA,
+                notes="Optional — depends on hardware config"
+            ),
+        ]
+
+        if use_gps:
+            capabilities.append(
+                CapabilitySpec(capability=DeviceCapability.GPS)
+            )
+
+        return DeviceSpecs(
+            category=DeviceCategory.AGV,
+            capabilities=capabilities,
+            weight_kg=17.0,
+            max_speed_ms=2.0,
+            has_gps=use_gps,
+            uses_odometry=True,
+            coordinate_frame="gps" if use_gps else "local"
+        )
+
     def __init__(self):
         # node_id -> running flag
         self._running: dict[str, bool] = {}
@@ -111,6 +155,9 @@ class JackalUGVPlugin(NodePlugin):
         self._subscribe_topics(node.id, transport, namespace, use_gps)
 
         self._telemetry[node.id]["status_text"] = "Online"
+
+        node.specs = self.get_device_specs(config)
+
         logger.info(
             f"Jackal connected: {node.name} at {host}:{port} "
             f"namespace='{namespace}' gps={use_gps}"

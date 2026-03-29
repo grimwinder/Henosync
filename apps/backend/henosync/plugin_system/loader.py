@@ -73,14 +73,27 @@ class PluginLoader:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         except Exception as e:
-            logger.error(f"Failed to load plugin.py in {plugin_dir.name}: {e}")
+            logger.error(
+                f"Failed to load plugin.py in {plugin_dir.name}: {e}"
+            )
             return False
 
-        plugin_class = self._find_plugin_class(module, plugin_dir.name)
+        result = self._find_plugin_class(module, plugin_dir.name)
+        if result is None:
+            return False
+
+        plugin_class, plugin_type = result
         if plugin_class is None:
             return False
 
-        plugin_registry.register(manifest["id"], plugin_class, manifest)
+        if plugin_type == "device":
+            plugin_registry.register(manifest["id"], plugin_class, manifest)
+            logger.info(f"Device plugin loaded: {manifest['id']}")
+        elif plugin_type == "control":
+            from ..core.operation_manager import operation_manager
+            operation_manager.register_control_plugin(plugin_class)
+            logger.info(f"Control plugin loaded: {manifest['id']}")
+
         return True
 
     def _validate_manifest(self, manifest: dict, name: str) -> bool:
@@ -94,17 +107,22 @@ class PluginLoader:
         return True
 
     def _find_plugin_class(self, module, plugin_name: str):
-        """Find the NodePlugin subclass in a loaded module."""
+        """Find NodePlugin or ControlPlugin subclass in module."""
+        from .control_interfaces import ControlPlugin
+
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, NodePlugin)
-                and attr is not NodePlugin
-            ):
-                return attr
+            if not isinstance(attr, type):
+                continue
+
+            if issubclass(attr, NodePlugin) and attr is not NodePlugin:
+                return attr, "device"
+
+            if issubclass(attr, ControlPlugin) and attr is not ControlPlugin:
+                return attr, "control"
 
         logger.error(
-            f"No NodePlugin subclass found in {plugin_name}/plugin.py"
+            f"No NodePlugin or ControlPlugin subclass found "
+            f"in {plugin_name}/plugin.py"
         )
-        return None
+        return None, None
