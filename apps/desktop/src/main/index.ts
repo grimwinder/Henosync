@@ -174,10 +174,12 @@ function createMainWindow(): void {
           ...details.responseHeaders,
           "Content-Security-Policy": [
             "default-src 'self'; " +
-              "script-src 'self'; " +
+              "script-src 'self' blob:; " +
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
               "font-src 'self' https://fonts.gstatic.com; " +
-              "connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765",
+              "img-src 'self' blob: data:; " +
+              "worker-src blob:; " +
+              "connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765 blob:;",
           ],
         },
       });

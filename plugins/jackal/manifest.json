@@ -1,76 +1,11 @@
 {
   "id": "jackal-ugv",
   "name": "Clearpath Jackal UGV",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "author": "Henosync Team — Monash University",
-  "description": "Plugin for Clearpath Jackal UGV using ROS2 Nav2",
+  "description": "Plugin for Clearpath Jackal UGV — not yet implemented",
   "sdk_version": ">=0.1.0",
-  "node_types": ["jackal.ugv"],
-  "capabilities": [
-    {
-      "id": "move_to",
-      "label": "Move To Waypoint",
-      "params": ["lat", "lon", "alt"],
-      "destructive": false
-    },
-    {
-      "id": "stop",
-      "label": "Stop",
-      "params": [],
-      "destructive": false
-    },
-    {
-      "id": "return_home",
-      "label": "Return Home",
-      "params": [],
-      "destructive": false
-    },
-    {
-      "id": "cancel_navigation",
-      "label": "Cancel Navigation",
-      "params": [],
-      "destructive": false
-    }
-  ],
-  "transport": "ros2",
-  "icon": "assets/jackal.svg",
-  "config_schema": {
-    "host": {
-      "type": "string",
-      "label": "Jackal IP Address",
-      "required": true,
-      "placeholder": "192.168.1.100"
-    },
-    "port": {
-      "type": "number",
-      "label": "rosbridge Port",
-      "required": false,
-      "default": 9090
-    },
-    "namespace": {
-      "type": "string",
-      "label": "ROS2 Namespace",
-      "required": false,
-      "default": "",
-      "placeholder": "Leave empty for single robot, e.g. /jackal_2 for multiple"
-    },
-    "use_gps": {
-      "type": "boolean",
-      "label": "GPS Available",
-      "required": false,
-      "default": false
-    },
-    "home_lat": {
-      "type": "number",
-      "label": "Home Latitude",
-      "required": false,
-      "default": 0.0
-    },
-    "home_lon": {
-      "type": "number",
-      "label": "Home Longitude",
-      "required": false,
-      "default": 0.0
-    }
-  }
+  "node_types": [],
+  "capabilities": [],
+  "transport": "ros2"
 }

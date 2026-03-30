@@ -38,4 +38,4 @@ const henosyncAPI = {
 contextBridge.exposeInMainWorld("henosync", henosyncAPI);
 
 // TypeScript declaration for renderer access
-export type HensoyncAPI = typeof henosyncAPI;
+export type HenosyncAPI = typeof henosyncAPI;

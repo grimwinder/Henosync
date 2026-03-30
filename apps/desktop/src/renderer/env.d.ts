@@ -1,9 +1,9 @@
 /// <reference types="vite/client" />
 
-import type { HensoyncAPI } from "../preload/index";
+import type { HenosyncAPI } from "../preload/index";
 
 declare global {
   interface Window {
-    henosync: HensoyncAPI;
+    henosync: HenosyncAPI;
   }
 }
