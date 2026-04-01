@@ -1,6 +1,26 @@
 import { X } from "lucide-react";
 import { useZoneStore } from "../../stores/zoneStore";
-import type { ZoneType } from "../../types";
+import type { ZoneType, GeoPoint } from "../../types";
+
+function polygonAreaM2(points: GeoPoint[]): number {
+  if (points.length < 3) return 0;
+  const R = 6371000;
+  const lat0 = (points[0].lat * Math.PI) / 180;
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    const xi = ((points[i].lon * Math.PI) / 180) * R * Math.cos(lat0);
+    const yi = ((points[i].lat * Math.PI) / 180) * R;
+    const xj = ((points[j].lon * Math.PI) / 180) * R * Math.cos(lat0);
+    const yj = ((points[j].lat * Math.PI) / 180) * R;
+    area += xi * yj - xj * yi;
+  }
+  return Math.abs(area / 2);
+}
+
+function formatArea(m2: number): string {
+  return `${m2.toFixed(1)} m²`;
+}
 
 const ZONE_TYPE_LABELS: Record<ZoneType, string> = {
   perimeter: "Perimeter",
@@ -19,6 +39,42 @@ const ZONE_TYPE_COLORS: Record<ZoneType, string> = {
   alert: "#F5A623",
   custom: "#8B95A3",
 };
+
+function StatBox({
+  label,
+  value,
+  style,
+}: {
+  label: string;
+  value: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        padding: "8px 10px",
+        backgroundColor: "#1C1F24",
+        borderRadius: "6px",
+        ...style,
+      }}
+    >
+      <div style={{ fontSize: "10px", color: "#8B95A3", marginBottom: "3px" }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: "13px",
+          fontWeight: 600,
+          color: "#E8EAED",
+          fontFamily: "JetBrains Mono, monospace",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
 export function vertexLabel(i: number): string {
   if (i < 26) return String.fromCharCode(65 + i);
@@ -230,34 +286,22 @@ export default function ZoneDetailPanel() {
                 color={color}
               />
             )}
-            <div
-              style={{
-                marginTop: "12px",
-                padding: "8px 10px",
-                backgroundColor: "#1C1F24",
-                borderRadius: "6px",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "10px",
-                  color: "#8B95A3",
-                  marginBottom: "3px",
-                }}
-              >
-                RADIUS
-              </div>
-              <div
-                style={{
-                  fontSize: "14px",
-                  fontWeight: 600,
-                  color: "#E8EAED",
-                  fontFamily: "JetBrains Mono, monospace",
-                }}
-              >
-                {zone.radius_m != null ? `${zone.radius_m.toFixed(1)} m` : "—"}
-              </div>
-            </div>
+            <StatBox
+              label="RADIUS"
+              value={
+                zone.radius_m != null ? `${zone.radius_m.toFixed(1)} m` : "—"
+              }
+              style={{ marginTop: "12px" }}
+            />
+            <StatBox
+              label="AREA"
+              value={
+                zone.radius_m != null
+                  ? formatArea(Math.PI * zone.radius_m ** 2)
+                  : "—"
+              }
+              style={{ marginTop: "8px" }}
+            />
           </>
         ) : (
           <>
@@ -281,6 +325,11 @@ export default function ZoneDetailPanel() {
                 color={color}
               />
             ))}
+            <StatBox
+              label="AREA"
+              value={formatArea(polygonAreaM2(zone.points))}
+              style={{ marginTop: "12px" }}
+            />
           </>
         )}
       </div>

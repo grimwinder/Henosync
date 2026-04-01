@@ -367,6 +367,32 @@ export interface ZoneCreate {
   color?: string;
 }
 
+// ── Marker models ─────────────────────────────────────────────────────────────
+
+export type MarkerType =
+  | "home_position"
+  | "waypoint"
+  | "reference"
+  | "hazard"
+  | "custom";
+
+export interface MapMarker {
+  id: string;
+  name: string;
+  marker_type: MarkerType;
+  lat: number;
+  lon: number;
+  color: string;
+}
+
+export interface MapMarkerCreate {
+  name: string;
+  marker_type: MarkerType;
+  lat: number;
+  lon: number;
+  color?: string;
+}
+
 // ── Health ─────────────────────────────────────────────────────────────────────
 
 export interface HealthResponse {

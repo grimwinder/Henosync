@@ -10,6 +10,8 @@ import type {
   RunningOperation,
   Zone,
   ZoneCreate,
+  MapMarker,
+  MapMarkerCreate,
   HealthResponse,
   CommandResult,
 } from "../types";
@@ -184,6 +186,20 @@ export const createZone = (body: ZoneCreate) =>
 
 export const deleteZone = (id: string) =>
   apiFetch<{ success: boolean }>(`/api/zones/${id}`, { method: "DELETE" });
+
+// ── Markers ────────────────────────────────────────────────────────────────────
+
+export const getMarkers = () =>
+  apiFetch<{ markers: MapMarker[] }>("/api/markers").then((r) => r.markers);
+
+export const createMarker = (body: MapMarkerCreate) =>
+  apiFetch<MapMarker>("/api/markers", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const deleteMarker = (id: string) =>
+  apiFetch<{ success: boolean }>(`/api/markers/${id}`, { method: "DELETE" });
 
 // ── Safety ─────────────────────────────────────────────────────────────────────
 

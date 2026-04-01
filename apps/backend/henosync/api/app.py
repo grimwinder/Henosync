@@ -4,6 +4,7 @@ from pathlib import Path
 from ..plugin_system.loader import PluginLoader
 from ..core.node_registry import node_registry
 from ..core.zone_manager import zone_manager
+from ..core.marker_manager import marker_manager
 from ..storage.mission_store import mission_store
 from ..core.failsafe_manager import failsafe_manager
 from .routes.safety import router as safety_router
@@ -13,6 +14,7 @@ from .routes.missions import router as missions_router
 from .routes.execution import router as execution_router
 from .routes.operations import router as operations_router
 from .routes.zones import router as zones_router
+from .routes.markers import router as markers_router
 from .websocket_server import (
     telemetry_websocket_handler,
     events_websocket_handler
@@ -47,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(safety_router)
     app.include_router(operations_router)
     app.include_router(zones_router)
+    app.include_router(markers_router)
 
     # WebSocket routes
     @app.websocket("/ws/telemetry")
@@ -73,6 +76,9 @@ def create_app() -> FastAPI:
 
             await zone_manager.initialize()
             logger.info("Zone manager ready")
+
+            await marker_manager.initialize()
+            logger.info("Marker manager ready")
 
             # Start failsafe manager last
             await failsafe_manager.start()

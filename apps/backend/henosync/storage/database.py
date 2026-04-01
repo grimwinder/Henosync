@@ -39,5 +39,15 @@ async def init_db() -> None:
                 color       TEXT NOT NULL DEFAULT '#4A9EFF'
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS map_markers (
+                id           TEXT PRIMARY KEY,
+                name         TEXT NOT NULL,
+                marker_type  TEXT NOT NULL,
+                lat          REAL NOT NULL,
+                lon          REAL NOT NULL,
+                color        TEXT NOT NULL DEFAULT '#4A9EFF'
+            )
+        """)
         await db.commit()
         logger.info(f"Database initialized at {DB_PATH}")

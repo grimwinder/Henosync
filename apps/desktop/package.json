@@ -12,6 +12,9 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",
+    "@turf/boolean-intersects": "^7.3.4",
+    "@turf/helpers": "^7.3.4",
+    "@turf/union": "^7.3.4",
     "lucide-react": "^0.400.0",
     "maplibre-gl": "^5.21.1",
     "react": "^18.2.0",
@@ -19,6 +22,7 @@
     "zustand": "^4.4.0"
   },
   "devDependencies": {
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",

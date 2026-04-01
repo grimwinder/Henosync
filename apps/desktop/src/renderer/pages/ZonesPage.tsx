@@ -2,18 +2,31 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import maplibregl from "maplibre-gl";
 import MissionMap from "../components/map/MissionMap";
 import ZoneLayer from "../components/zones/ZoneLayer";
+import MarkerLayer from "../components/zones/MarkerLayer";
 import ZoneListPanel from "../components/zones/ZoneListPanel";
+import MapToolbar from "../components/zones/MapToolbar";
 import ZoneDetailPanel, {
   vertexLabel,
 } from "../components/zones/ZoneDetailPanel";
 import CreateZoneModal from "../components/zones/CreateZoneModal";
+import MergeZonesPanel from "../components/zones/MergeZonesPanel";
+import MarkerDetailPanel from "../components/zones/MarkerDetailPanel";
+import PlaceMarkerModal from "../components/zones/PlaceMarkerModal";
+import MeasureOverlay from "../components/zones/MeasureOverlay";
 import { useZones } from "../hooks/useZones";
+import { useMarkers } from "../hooks/useMarkers";
 import { useZoneStore } from "../stores/zoneStore";
 import type { ZoneType as ZT } from "../types";
 
 // Re-export for child components
 export type ZoneType = ZT;
-export type DrawMode = "polygon" | "circle" | null;
+export type DrawMode =
+  | "polygon"
+  | "circle"
+  | "merge"
+  | "marker"
+  | "measure"
+  | null;
 
 // Preview source/layer IDs
 const DRAFT_SOURCE = "draft-source";
@@ -23,12 +36,17 @@ const DRAFT_VERT = "draft-vertices";
 
 export default function ZonesPage() {
   useZones(); // populate store on mount
+  useMarkers(); // populate marker store on mount
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [cursorLatLon, setCursorLatLon] = useState<[number, number] | null>(
     null,
   );
+  const [pendingMarker, setPendingMarker] = useState<{
+    lat: number;
+    lon: number;
+  } | null>(null);
 
   const selectedZoneId = useZoneStore((s) => s.selectedZoneId);
   const setSelectedZone = useZoneStore((s) => s.setSelectedZone);
@@ -64,7 +82,7 @@ export default function ZonesPage() {
       const el = document.createElement("div");
       el.style.cssText = [
         "width:20px;height:20px;border-radius:50%",
-        "background:#4A9EFF22;border:1.5px solid #4A9EFF",
+        "background:#141619;border:1.5px solid #4A9EFF",
         "display:flex;align-items:center;justify-content:center",
         "font-size:9px;font-weight:700;color:#4A9EFF",
         "font-family:Inter,sans-serif;pointer-events:none",
@@ -229,10 +247,25 @@ export default function ZonesPage() {
     };
   }, [map]);
 
+  // ── Marker placement click (when in marker mode) ─────────────────────────
+
+  useEffect(() => {
+    if (!map || drawMode !== "marker") return;
+    map.getCanvas().style.cursor = "crosshair";
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      setPendingMarker({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+    };
+    map.on("click", onClick);
+    return () => {
+      map.getCanvas().style.cursor = "";
+      map.off("click", onClick);
+    };
+  }, [map, drawMode]);
+
   // ── Zone selection via map click (when not drawing) ───────────────────────
 
   useEffect(() => {
-    if (!map || drawMode !== null) return undefined;
+    if (!map || drawMode !== null) return;
 
     const onClickSelect = (e: maplibregl.MapMouseEvent) => {
       const features = map.queryRenderedFeatures(e.point, {
@@ -247,7 +280,9 @@ export default function ZonesPage() {
     };
 
     map.on("click", onClickSelect);
-    return () => map.off("click", onClickSelect);
+    return () => {
+      map.off("click", onClickSelect);
+    };
   }, [map, drawMode, selectedZoneId, setSelectedZone]);
 
   // ── Pointer cursor over zones (when not drawing) ──────────────────────────
@@ -326,17 +361,18 @@ export default function ZonesPage() {
       clearVertexMarkers();
     };
 
-    if (drawMode) {
+    if (drawMode === "polygon" || drawMode === "circle") {
       canvas.style.cursor = "crosshair";
       map.on("mousemove", onMouseMove);
       map.on("click", onClick);
       map.on("dblclick", onDblClick);
-    } else {
-      canvas.style.cursor = "";
     }
+    // marker/measure modes manage their own cursor — don't reset here
 
     return () => {
-      canvas.style.cursor = "";
+      if (drawMode === "polygon" || drawMode === "circle") {
+        canvas.style.cursor = "";
+      }
       map.off("mousemove", onMouseMove);
       map.off("click", onClick);
       map.off("dblclick", onDblClick);
@@ -392,22 +428,15 @@ export default function ZonesPage() {
       <div style={{ position: "absolute", inset: 0 }}>
         <MissionMap onMapReady={setMap} />
         {map && <ZoneLayer map={map} />}
+        {map && <MarkerLayer map={map} />}
       </div>
 
+      {/* Floating toolbar */}
+      <MapToolbar drawMode={drawMode} onSetDrawMode={handleDrawModeChange} />
+
       {/* Left panel */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          height: "100%",
-          zIndex: 10,
-        }}
-      >
-        <ZoneListPanel
-          drawMode={drawMode}
-          onSetDrawMode={handleDrawModeChange}
-        />
+      <div style={{ position: "absolute", top: 0, left: 0, zIndex: 10 }}>
+        <ZoneListPanel />
       </div>
 
       {/* Cursor coordinates overlay */}
@@ -433,8 +462,20 @@ export default function ZonesPage() {
         </div>
       )}
 
-      {/* Right detail panel */}
-      <ZoneDetailPanel />
+      {/* Measure overlay */}
+      {map && drawMode === "measure" && (
+        <MeasureOverlay map={map} onExit={() => setDrawMode(null)} />
+      )}
+
+      {/* Right detail / merge panel */}
+      {drawMode === "merge" ? (
+        <MergeZonesPanel onClose={() => setDrawMode(null)} />
+      ) : (
+        <>
+          <ZoneDetailPanel />
+          <MarkerDetailPanel />
+        </>
+      )}
 
       {/* Zone creation modal */}
       {pendingShape && (
@@ -444,6 +485,15 @@ export default function ZonesPage() {
             setPendingShape(null);
             setDrawMode(null);
           }}
+        />
+      )}
+
+      {/* Place marker modal */}
+      {pendingMarker && (
+        <PlaceMarkerModal
+          lat={pendingMarker.lat}
+          lon={pendingMarker.lon}
+          onClose={() => setPendingMarker(null)}
         />
       )}
     </div>

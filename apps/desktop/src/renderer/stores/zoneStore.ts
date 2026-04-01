@@ -5,17 +5,23 @@ interface ZoneStore {
   // State
   zones: Record<string, Zone>;
   selectedZoneId: string | null;
+  mergeHighlightedIds: Set<string>;
+  showVertexMarkers: boolean;
 
   // Actions
   setZones: (zones: Zone[]) => void;
   upsertZone: (zone: Zone) => void;
   removeZone: (id: string) => void;
   setSelectedZone: (id: string | null) => void;
+  setMergeHighlightedIds: (ids: Set<string>) => void;
+  setShowVertexMarkers: (show: boolean) => void;
 }
 
 export const useZoneStore = create<ZoneStore>((set) => ({
   zones: {},
   selectedZoneId: null,
+  mergeHighlightedIds: new Set(),
+  showVertexMarkers: true,
 
   setZones: (zones) =>
     set({ zones: Object.fromEntries(zones.map((z) => [z.id, z])) }),
@@ -34,4 +40,6 @@ export const useZoneStore = create<ZoneStore>((set) => ({
     }),
 
   setSelectedZone: (id) => set({ selectedZoneId: id }),
+  setMergeHighlightedIds: (ids) => set({ mergeHighlightedIds: ids }),
+  setShowVertexMarkers: (show) => set({ showVertexMarkers: show }),
 }));
