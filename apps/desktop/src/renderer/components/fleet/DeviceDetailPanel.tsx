@@ -83,9 +83,13 @@ function Section({
 
 interface DeviceDetailPanelProps {
   node: Node;
+  readOnly?: boolean;
 }
 
-export default function DeviceDetailPanel({ node }: DeviceDetailPanelProps) {
+export default function DeviceDetailPanel({
+  node,
+  readOnly = false,
+}: DeviceDetailPanelProps) {
   const setSelectedNode = useNodeStore((s) => s.setSelectedNode);
   const { mutate: removeNode, isPending: isRemoving } = useRemoveNode();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -313,80 +317,82 @@ export default function DeviceDetailPanel({ node }: DeviceDetailPanelProps) {
       </div>
 
       {/* ── Delete footer ───────────────────────────────────────── */}
-      <div
-        style={{
-          flexShrink: 0,
-          padding: "12px 14px",
-          borderTop: "1px solid #2A2F38",
-        }}
-      >
-        {confirmDelete ? (
-          <div style={{ display: "flex", gap: "8px" }}>
+      {!readOnly && (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "12px 14px",
+            borderTop: "1px solid #2A2F38",
+          }}
+        >
+          {confirmDelete ? (
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                style={{
+                  flex: 1,
+                  padding: "7px 0",
+                  borderRadius: "6px",
+                  background: "none",
+                  border: "1px solid #2A2F38",
+                  color: "#8B95A3",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                disabled={isRemoving}
+                onClick={() => removeNode(node.id)}
+                style={{
+                  flex: 1,
+                  padding: "7px 0",
+                  borderRadius: "6px",
+                  backgroundColor: isRemoving ? "#2A2F38" : "#F05252",
+                  border: "none",
+                  color: isRemoving ? "#8B95A3" : "white",
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  cursor: isRemoving ? "not-allowed" : "pointer",
+                }}
+              >
+                {isRemoving ? "Deleting…" : "Confirm"}
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={() => setConfirmDelete(false)}
+              onClick={() => setConfirmDelete(true)}
               style={{
-                flex: 1,
+                width: "100%",
                 padding: "7px 0",
                 borderRadius: "6px",
                 background: "none",
-                border: "1px solid #2A2F38",
-                color: "#8B95A3",
+                border: "1px solid #F0525240",
+                color: "#F05252",
                 fontSize: "12px",
                 cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                transition: "background-color 150ms",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#F0525218";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "transparent";
               }}
             >
-              Cancel
+              <Trash2 size={13} />
+              Delete Device
             </button>
-            <button
-              disabled={isRemoving}
-              onClick={() => removeNode(node.id)}
-              style={{
-                flex: 1,
-                padding: "7px 0",
-                borderRadius: "6px",
-                backgroundColor: isRemoving ? "#2A2F38" : "#F05252",
-                border: "none",
-                color: isRemoving ? "#8B95A3" : "white",
-                fontSize: "12px",
-                fontWeight: 500,
-                cursor: isRemoving ? "not-allowed" : "pointer",
-              }}
-            >
-              {isRemoving ? "Deleting…" : "Confirm"}
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            style={{
-              width: "100%",
-              padding: "7px 0",
-              borderRadius: "6px",
-              background: "none",
-              border: "1px solid #F0525240",
-              color: "#F05252",
-              fontSize: "12px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "6px",
-              transition: "background-color 150ms",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                "#F0525218";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                "transparent";
-            }}
-          >
-            <Trash2 size={13} />
-            Delete Device
-          </button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -141,7 +141,11 @@ function DeviceCard({ node }: { node: Node }) {
 
 // ── Panel ──────────────────────────────────────────────────────────────────────
 
-export default function DevicePanel() {
+interface DevicePanelProps {
+  readOnly?: boolean;
+}
+
+export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
   const [showAddModal, setShowAddModal] = useState(false);
 
   // Keep the list fresh from the API
@@ -192,35 +196,37 @@ export default function DevicePanel() {
             <span style={{ fontSize: "11px", color: "#8B95A3" }}>
               {online}/{nodes.length}
             </span>
-            <button
-              title="Add device"
-              onClick={() => setShowAddModal(true)}
-              style={{
-                width: "22px",
-                height: "22px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "4px",
-                border: "none",
-                backgroundColor: "transparent",
-                color: "#8B95A3",
-                cursor: "pointer",
-                transition: "background-color 150ms, color 150ms",
-              }}
-              onMouseEnter={(e) => {
-                const b = e.currentTarget as HTMLButtonElement;
-                b.style.backgroundColor = "#252A31";
-                b.style.color = "#4A9EFF";
-              }}
-              onMouseLeave={(e) => {
-                const b = e.currentTarget as HTMLButtonElement;
-                b.style.backgroundColor = "transparent";
-                b.style.color = "#8B95A3";
-              }}
-            >
-              <Plus size={13} />
-            </button>
+            {!readOnly && (
+              <button
+                title="Add device"
+                onClick={() => setShowAddModal(true)}
+                style={{
+                  width: "22px",
+                  height: "22px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: "4px",
+                  border: "none",
+                  backgroundColor: "transparent",
+                  color: "#8B95A3",
+                  cursor: "pointer",
+                  transition: "background-color 150ms, color 150ms",
+                }}
+                onMouseEnter={(e) => {
+                  const b = e.currentTarget as HTMLButtonElement;
+                  b.style.backgroundColor = "#252A31";
+                  b.style.color = "#4A9EFF";
+                }}
+                onMouseLeave={(e) => {
+                  const b = e.currentTarget as HTMLButtonElement;
+                  b.style.backgroundColor = "transparent";
+                  b.style.color = "#8B95A3";
+                }}
+              >
+                <Plus size={13} />
+              </button>
+            )}
           </div>
         </div>
 

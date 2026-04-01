@@ -279,11 +279,15 @@ export interface PluginCapabilityDef {
 }
 
 export interface PluginConfigField {
-  type: "string" | "number" | "boolean";
+  type: "string" | "number" | "boolean" | "select";
   label: string;
   required?: boolean;
   default?: unknown;
   placeholder?: string;
+  description?: string;
+  options?: Array<{ label: string; value: string | number }>;
+  min?: number;
+  max?: number;
 }
 
 export interface PluginManifest {
@@ -301,7 +305,7 @@ export interface PluginManifest {
 }
 
 export interface UIContribution {
-  config_schema: Record<string, unknown>;
+  config_schema: Record<string, PluginConfigField>;
   display_name: string;
   description: string;
   icon: string;

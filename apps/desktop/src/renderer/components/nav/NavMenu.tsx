@@ -1,4 +1,4 @@
-import { Home, Map } from "lucide-react";
+import { Home, Map, Cpu, Plug } from "lucide-react";
 import type { AppPage } from "../../types/ui";
 
 interface NavItem {
@@ -10,6 +10,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "home", label: "Home", icon: <Home size={18} /> },
   { id: "zones", label: "Zones", icon: <Map size={18} /> },
+  { id: "devices", label: "Devices", icon: <Cpu size={18} /> },
+  { id: "plugins", label: "Plugins", icon: <Plug size={18} /> },
 ];
 
 interface NavMenuProps {

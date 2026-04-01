@@ -6,6 +6,7 @@ import {
   EyeOff,
   MapPin,
   Ruler,
+  LocateFixed,
 } from "lucide-react";
 import type { DrawMode } from "../../pages/ZonesPage";
 import { useZoneStore } from "../../stores/zoneStore";
@@ -13,6 +14,7 @@ import { useZoneStore } from "../../stores/zoneStore";
 interface MapToolbarProps {
   drawMode: DrawMode;
   onSetDrawMode: (mode: DrawMode) => void;
+  onFlyToHub: () => void;
 }
 
 interface ToolButtonProps {
@@ -64,6 +66,7 @@ function ToolButton({ icon, label, active, onClick }: ToolButtonProps) {
 export default function MapToolbar({
   drawMode,
   onSetDrawMode,
+  onFlyToHub,
 }: MapToolbarProps) {
   const showVertexMarkers = useZoneStore((s) => s.showVertexMarkers);
   const setShowVertexMarkers = useZoneStore((s) => s.setShowVertexMarkers);
@@ -115,6 +118,24 @@ export default function MapToolbar({
         label="Measure distance"
         active={drawMode === "measure"}
         onClick={() => onSetDrawMode(drawMode === "measure" ? null : "measure")}
+      />
+
+      {/* Divider */}
+      <div
+        style={{
+          width: "1px",
+          height: "20px",
+          backgroundColor: "#2A2F38",
+          margin: "0 2px",
+          flexShrink: 0,
+        }}
+      />
+
+      <ToolButton
+        icon={<LocateFixed size={15} />}
+        label="Fly to hub"
+        active={false}
+        onClick={onFlyToHub}
       />
 
       {/* Divider */}

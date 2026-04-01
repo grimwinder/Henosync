@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import maplibregl from "maplibre-gl";
 import MissionMap from "../components/map/MissionMap";
+import HubMarker from "../components/map/HubMarker";
 import ZoneLayer from "../components/zones/ZoneLayer";
 import MarkerLayer from "../components/zones/MarkerLayer";
 import ZoneListPanel from "../components/zones/ZoneListPanel";
@@ -15,6 +16,7 @@ import PlaceMarkerModal from "../components/zones/PlaceMarkerModal";
 import MeasureOverlay from "../components/zones/MeasureOverlay";
 import { useZones } from "../hooks/useZones";
 import { useMarkers } from "../hooks/useMarkers";
+import { useHubLocation } from "../hooks/useHubLocation";
 import { useZoneStore } from "../stores/zoneStore";
 import type { ZoneType as ZT } from "../types";
 
@@ -37,6 +39,7 @@ const DRAFT_VERT = "draft-vertices";
 export default function ZonesPage() {
   useZones(); // populate store on mount
   useMarkers(); // populate marker store on mount
+  const hubLocation = useHubLocation();
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
@@ -429,10 +432,17 @@ export default function ZonesPage() {
         <MissionMap onMapReady={setMap} />
         {map && <ZoneLayer map={map} />}
         {map && <MarkerLayer map={map} />}
+        {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 
       {/* Floating toolbar */}
-      <MapToolbar drawMode={drawMode} onSetDrawMode={handleDrawModeChange} />
+      <MapToolbar
+        drawMode={drawMode}
+        onSetDrawMode={handleDrawModeChange}
+        onFlyToHub={() =>
+          map?.flyTo({ center: hubLocation, zoom: 15, duration: 1200 })
+        }
+      />
 
       {/* Left panel */}
       <div style={{ position: "absolute", top: 0, left: 0, zIndex: 10 }}>

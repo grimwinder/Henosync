@@ -5,12 +5,15 @@ import DevicePanel from "../components/fleet/DevicePanel";
 import DeviceDetailPanel from "../components/fleet/DeviceDetailPanel";
 import MissionMap from "../components/map/MissionMap";
 import NodeMarkers from "../components/map/NodeMarkers";
+import HubMarker from "../components/map/HubMarker";
+import { useHubLocation } from "../hooks/useHubLocation";
 
 export default function HomePage() {
   const selectedNodeId = useNodeStore((s) => s.selectedNodeId);
   const nodes = useNodeStore((s) => s.nodes);
   const selectedNode = selectedNodeId ? nodes[selectedNodeId] : null;
   const [map, setMap] = useState<maplibregl.Map | null>(null);
+  const hubLocation = useHubLocation();
 
   return (
     <div
@@ -25,6 +28,7 @@ export default function HomePage() {
       <div style={{ position: "absolute", inset: 0 }}>
         <MissionMap onMapReady={setMap} />
         {map && <NodeMarkers map={map} />}
+        {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 
       {/* Fleet panel — top-left, half height */}
@@ -37,7 +41,7 @@ export default function HomePage() {
           zIndex: 10,
         }}
       >
-        <DevicePanel />
+        <DevicePanel readOnly />
       </div>
 
       {/* Detail panel — right side, full height */}
@@ -51,7 +55,7 @@ export default function HomePage() {
             zIndex: 10,
           }}
         >
-          <DeviceDetailPanel node={selectedNode} />
+          <DeviceDetailPanel node={selectedNode} readOnly />
         </div>
       )}
     </div>

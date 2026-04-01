@@ -3,7 +3,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 // Default centre — Monash University Clayton campus
-const DEFAULT_CENTER: [number, number] = [145.1312, -37.9105];
+export const HUB_LOCATION: [number, number] = [145.1312, -37.9105]; // [lng, lat]
+const DEFAULT_CENTER = HUB_LOCATION;
 const DEFAULT_ZOOM = 15;
 
 interface MissionMapProps {

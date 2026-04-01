@@ -1,0 +1,10 @@
+{
+  "id": "area-patrol",
+  "name": "Area Patrol",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Autonomously patrols a defined area using available fleet devices",
+  "sdk_version": ">=0.1.0",
+  "node_types": [],
+  "capabilities": []
+}

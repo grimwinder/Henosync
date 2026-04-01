@@ -7,6 +7,8 @@ import { useSystemStore } from "./stores/systemStore";
 import NavMenu from "./components/nav/NavMenu";
 import HomePage from "./pages/HomePage";
 import ZonesPage from "./pages/ZonesPage";
+import DevicesPage from "./pages/DevicesPage";
+import PluginsPage from "./pages/PluginsPage";
 import type { AppPage } from "./types/ui";
 
 type DragStyle = React.CSSProperties & { WebkitAppRegion: string };
@@ -157,6 +159,24 @@ function AppInner() {
           }}
         >
           <ZonesPage />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: page === "devices" ? "flex" : "none",
+          }}
+        >
+          <DevicesPage />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: page === "plugins" ? "flex" : "none",
+          }}
+        >
+          <PluginsPage />
         </div>
       </div>
     </div>
