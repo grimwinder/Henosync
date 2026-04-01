@@ -3,8 +3,12 @@ import maplibregl from "maplibre-gl";
 import MissionMap from "../components/map/MissionMap";
 import ZoneLayer from "../components/zones/ZoneLayer";
 import ZoneListPanel from "../components/zones/ZoneListPanel";
+import ZoneDetailPanel, {
+  vertexLabel,
+} from "../components/zones/ZoneDetailPanel";
 import CreateZoneModal from "../components/zones/CreateZoneModal";
 import { useZones } from "../hooks/useZones";
+import { useZoneStore } from "../stores/zoneStore";
 import type { ZoneType as ZT } from "../types";
 
 // Re-export for child components
@@ -22,6 +26,12 @@ export default function ZonesPage() {
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
+  const [cursorLatLon, setCursorLatLon] = useState<[number, number] | null>(
+    null,
+  );
+
+  const selectedZoneId = useZoneStore((s) => s.selectedZoneId);
+  const setSelectedZone = useZoneStore((s) => s.setSelectedZone);
 
   // Polygon draw state
   const polyPoints = useRef<[number, number][]>([]); // [lng, lat]
@@ -30,12 +40,47 @@ export default function ZonesPage() {
   // Circle draw state
   const circleCenter = useRef<[number, number] | null>(null); // [lng, lat]
 
+  // Vertex label HTML markers
+  const labelMarkersRef = useRef<maplibregl.Marker[]>([]);
+
   // Modal state — called when shape is finished
   const [pendingShape, setPendingShape] = useState<
     | { type: "polygon"; points: [number, number][] }
     | { type: "circle"; center: [number, number]; radiusM: number }
     | null
   >(null);
+
+  // ── Vertex label markers ──────────────────────────────────────────────────
+
+  function updateVertexMarkers(
+    points: [number, number][],
+    currentMap: maplibregl.Map,
+  ) {
+    labelMarkersRef.current.forEach((m) => m.remove());
+    labelMarkersRef.current = [];
+
+    points.forEach(([lng, lat], i) => {
+      const label = vertexLabel(i);
+      const el = document.createElement("div");
+      el.style.cssText = [
+        "width:20px;height:20px;border-radius:50%",
+        "background:#4A9EFF22;border:1.5px solid #4A9EFF",
+        "display:flex;align-items:center;justify-content:center",
+        "font-size:9px;font-weight:700;color:#4A9EFF",
+        "font-family:Inter,sans-serif;pointer-events:none",
+      ].join(";");
+      el.textContent = label;
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat([lng, lat])
+        .addTo(currentMap);
+      labelMarkersRef.current.push(marker);
+    });
+  }
+
+  function clearVertexMarkers() {
+    labelMarkersRef.current.forEach((m) => m.remove());
+    labelMarkersRef.current = [];
+  }
 
   // ── Draft GeoJSON helpers ─────────────────────────────────────────────────
 
@@ -67,10 +112,13 @@ export default function ZonesPage() {
             properties: {},
           });
         }
-        features.push({
-          type: "Feature",
-          geometry: { type: "MultiPoint", coordinates: pts },
-          properties: {},
+        // Individual points (no MultiPoint — label markers handle these visually)
+        pts.forEach(([lng, lat]) => {
+          features.push({
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [lng, lat] },
+            properties: {},
+          });
         });
       }
 
@@ -145,7 +193,7 @@ export default function ZonesPage() {
       id: DRAFT_VERT,
       type: "circle",
       source: DRAFT_SOURCE,
-      filter: ["in", "$type", "Point", "MultiPoint"],
+      filter: ["==", "$type", "Point"],
       paint: {
         "circle-radius": 4,
         "circle-color": "#4A9EFF",
@@ -155,14 +203,72 @@ export default function ZonesPage() {
     });
 
     return () => {
+      clearVertexMarkers();
       [DRAFT_VERT, DRAFT_LINE, DRAFT_FILL].forEach((l) => {
         if (map.getLayer(l)) map.removeLayer(l);
       });
       if (map.getSource(DRAFT_SOURCE)) map.removeSource(DRAFT_SOURCE);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
-  // ── Map event handlers ────────────────────────────────────────────────────
+  // ── Cursor coordinate tracking (always active) ────────────────────────────
+
+  useEffect(() => {
+    if (!map) return;
+    const onMove = (e: maplibregl.MapMouseEvent) => {
+      setCursorLatLon([e.lngLat.lat, e.lngLat.lng]);
+    };
+    const canvas = map.getCanvas();
+    const onLeave = () => setCursorLatLon(null);
+    map.on("mousemove", onMove);
+    canvas.addEventListener("mouseleave", onLeave);
+    return () => {
+      map.off("mousemove", onMove);
+      canvas.removeEventListener("mouseleave", onLeave);
+    };
+  }, [map]);
+
+  // ── Zone selection via map click (when not drawing) ───────────────────────
+
+  useEffect(() => {
+    if (!map || drawMode !== null) return undefined;
+
+    const onClickSelect = (e: maplibregl.MapMouseEvent) => {
+      const features = map.queryRenderedFeatures(e.point, {
+        layers: ["zones-fill"],
+      });
+      if (features.length > 0) {
+        const zoneId = features[0].properties?.id as string;
+        setSelectedZone(selectedZoneId === zoneId ? null : zoneId);
+      } else {
+        setSelectedZone(null);
+      }
+    };
+
+    map.on("click", onClickSelect);
+    return () => map.off("click", onClickSelect);
+  }, [map, drawMode, selectedZoneId, setSelectedZone]);
+
+  // ── Pointer cursor over zones (when not drawing) ──────────────────────────
+
+  useEffect(() => {
+    if (!map) return;
+    const setPointer = () => {
+      if (!drawMode) map.getCanvas().style.cursor = "pointer";
+    };
+    const clearPointer = () => {
+      if (!drawMode) map.getCanvas().style.cursor = "";
+    };
+    map.on("mouseenter", "zones-fill", setPointer);
+    map.on("mouseleave", "zones-fill", clearPointer);
+    return () => {
+      map.off("mouseenter", "zones-fill", setPointer);
+      map.off("mouseleave", "zones-fill", clearPointer);
+    };
+  }, [map, drawMode]);
+
+  // ── Map draw event handlers ───────────────────────────────────────────────
 
   useEffect(() => {
     if (!map) return;
@@ -181,11 +287,11 @@ export default function ZonesPage() {
           [e.lngLat.lng, e.lngLat.lat],
         ];
         updateDraft(map);
+        updateVertexMarkers(polyPoints.current, map);
       } else if (drawMode === "circle") {
         if (!circleCenter.current) {
           circleCenter.current = [e.lngLat.lng, e.lngLat.lat];
         } else {
-          // Second click — compute radius and open modal
           const [cLng, cLat] = circleCenter.current;
           const R = 6371000;
           const dLat = ((e.lngLat.lat - cLat) * Math.PI) / 180;
@@ -217,6 +323,7 @@ export default function ZonesPage() {
       polyPoints.current = [];
       mousePos.current = null;
       clearDraft(map);
+      clearVertexMarkers();
     };
 
     if (drawMode) {
@@ -259,15 +366,16 @@ export default function ZonesPage() {
     circleCenter.current = null;
     mousePos.current = null;
     if (map) clearDraft(map);
+    clearVertexMarkers();
     setDrawMode(null);
   }
 
   function handleDrawModeChange(mode: DrawMode) {
-    // Reset in-progress state when switching modes
     polyPoints.current = [];
     circleCenter.current = null;
     mousePos.current = null;
     if (map) clearDraft(map);
+    clearVertexMarkers();
     setDrawMode(mode);
   }
 
@@ -302,6 +410,32 @@ export default function ZonesPage() {
         />
       </div>
 
+      {/* Cursor coordinates overlay */}
+      {cursorLatLon && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "32px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor: "#141619CC",
+            border: "1px solid #2A2F38",
+            borderRadius: "6px",
+            padding: "4px 10px",
+            zIndex: 10,
+            display: "flex",
+            gap: "14px",
+            pointerEvents: "none",
+          }}
+        >
+          <CoordDisplay label="LAT" value={cursorLatLon[0]} />
+          <CoordDisplay label="LON" value={cursorLatLon[1]} />
+        </div>
+      )}
+
+      {/* Right detail panel */}
+      <ZoneDetailPanel />
+
       {/* Zone creation modal */}
       {pendingShape && (
         <CreateZoneModal
@@ -312,6 +446,25 @@ export default function ZonesPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function CoordDisplay({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}>
+      <span style={{ fontSize: "9px", color: "#8B95A3", letterSpacing: "1px" }}>
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: "11px",
+          color: "#E8EAED",
+          fontFamily: "JetBrains Mono, monospace",
+        }}
+      >
+        {value.toFixed(6)}°
+      </span>
     </div>
   );
 }

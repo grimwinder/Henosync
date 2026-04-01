@@ -28,7 +28,10 @@ function startBackend(): Promise<void> {
       return;
     }
 
-    const venvPython = join(backendDir, ".venv", "Scripts", "python.exe");
+    const venvPython =
+      process.platform === "win32"
+        ? join(backendDir, ".venv", "Scripts", "python.exe")
+        : join(backendDir, ".venv", "bin", "python");
     backendProcess = spawn(venvPython, ["main.py"], {
       cwd: backendDir,
       env: { ...process.env },

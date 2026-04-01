@@ -1,7 +1,8 @@
 import { Trash2, Pentagon, Circle, Plus } from "lucide-react";
 import { useZoneStore } from "../../stores/zoneStore";
 import { useDeleteZone } from "../../hooks/useZones";
-import type { ZoneType, DrawMode } from "./ZonesPage";
+import type { ZoneType } from "../../types";
+import type { DrawMode } from "../../pages/ZonesPage";
 
 const ZONE_TYPE_LABELS: Record<ZoneType, string> = {
   perimeter: "Perimeter",
@@ -31,6 +32,8 @@ export default function ZoneListPanel({
   onSetDrawMode,
 }: ZoneListPanelProps) {
   const zones = useZoneStore((s) => Object.values(s.zones));
+  const selectedZoneId = useZoneStore((s) => s.selectedZoneId);
+  const setSelectedZone = useZoneStore((s) => s.setSelectedZone);
   const { mutate: deleteZone } = useDeleteZone();
 
   const isDrawing = drawMode !== null;
@@ -137,15 +140,22 @@ export default function ZoneListPanel({
               zone.color ||
               ZONE_TYPE_COLORS[zone.zone_type as ZoneType] ||
               "#8B95A3";
+            const isSelected = selectedZoneId === zone.id;
             return (
               <div
                 key={zone.id}
+                onClick={() => setSelectedZone(isSelected ? null : zone.id)}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "10px",
                   padding: "9px 14px",
                   borderBottom: "1px solid #1C1F24",
+                  cursor: "pointer",
+                  backgroundColor: isSelected ? "#1C1F24" : "transparent",
+                  borderLeft: isSelected
+                    ? `2px solid ${color}`
+                    : "2px solid transparent",
                 }}
               >
                 {/* Color swatch */}

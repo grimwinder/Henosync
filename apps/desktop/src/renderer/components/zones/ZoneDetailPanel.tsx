@@ -1,0 +1,289 @@
+import { X } from "lucide-react";
+import { useZoneStore } from "../../stores/zoneStore";
+import type { ZoneType } from "../../types";
+
+const ZONE_TYPE_LABELS: Record<ZoneType, string> = {
+  perimeter: "Perimeter",
+  no_go: "No-Go",
+  safe_return: "Safe Return",
+  coverage: "Coverage",
+  alert: "Alert",
+  custom: "Custom",
+};
+
+const ZONE_TYPE_COLORS: Record<ZoneType, string> = {
+  perimeter: "#4A9EFF",
+  no_go: "#F05252",
+  safe_return: "#3DD68C",
+  coverage: "#A78BFA",
+  alert: "#F5A623",
+  custom: "#8B95A3",
+};
+
+export function vertexLabel(i: number): string {
+  if (i < 26) return String.fromCharCode(65 + i);
+  return (
+    String.fromCharCode(64 + Math.floor(i / 26)) +
+    String.fromCharCode(65 + (i % 26))
+  );
+}
+
+function CoordRow({
+  label,
+  lat,
+  lon,
+  color,
+}: {
+  label: string;
+  lat: number;
+  lon: number;
+  color: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        padding: "7px 0",
+        borderBottom: "1px solid #1C1F24",
+      }}
+    >
+      <div
+        style={{
+          width: "20px",
+          height: "20px",
+          borderRadius: "50%",
+          backgroundColor: `${color}22`,
+          border: `1.5px solid ${color}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            fontSize: "9px",
+            fontWeight: 700,
+            color,
+            fontFamily: "Inter, sans-serif",
+          }}
+        >
+          {label}
+        </span>
+      </div>
+      <div>
+        <div
+          style={{
+            fontSize: "11px",
+            color: "#E8EAED",
+            fontFamily: "JetBrains Mono, monospace",
+            lineHeight: 1.4,
+          }}
+        >
+          {lat.toFixed(6)}°
+        </div>
+        <div
+          style={{
+            fontSize: "11px",
+            color: "#E8EAED",
+            fontFamily: "JetBrains Mono, monospace",
+            lineHeight: 1.4,
+          }}
+        >
+          {lon.toFixed(6)}°
+        </div>
+        <div style={{ fontSize: "9px", color: "#8B95A3", marginTop: "1px" }}>
+          lat · lon
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ZoneDetailPanel() {
+  const selectedZoneId = useZoneStore((s) => s.selectedZoneId);
+  const zones = useZoneStore((s) => s.zones);
+  const setSelectedZone = useZoneStore((s) => s.setSelectedZone);
+
+  const zone = selectedZoneId ? zones[selectedZoneId] : null;
+  if (!zone) return null;
+
+  const color =
+    zone.color || ZONE_TYPE_COLORS[zone.zone_type as ZoneType] || "#8B95A3";
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        height: "100%",
+        width: "260px",
+        backgroundColor: "#141619",
+        borderLeft: "1px solid #2A2F38",
+        display: "flex",
+        flexDirection: "column",
+        zIndex: 10,
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: "12px 14px",
+          borderBottom: "1px solid #2A2F38",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                marginBottom: "3px",
+              }}
+            >
+              <div
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "2px",
+                  backgroundColor: color,
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#E8EAED",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {zone.name}
+              </span>
+            </div>
+            <div style={{ fontSize: "10px", color: "#8B95A3" }}>
+              {ZONE_TYPE_LABELS[zone.zone_type as ZoneType] ?? zone.zone_type}
+              {" · "}
+              {zone.shape === "circle"
+                ? "Circle"
+                : `${zone.points.length} vertices`}
+            </div>
+          </div>
+          <button
+            onClick={() => setSelectedZone(null)}
+            title="Close"
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B95A3",
+              cursor: "pointer",
+              padding: "2px",
+              display: "flex",
+              flexShrink: 0,
+              marginLeft: "8px",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+        {zone.shape === "circle" ? (
+          <>
+            <div
+              style={{
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "1px",
+                color: "#8B95A3",
+                marginBottom: "8px",
+              }}
+            >
+              CENTRE POINT
+            </div>
+            {zone.center && (
+              <CoordRow
+                label="C"
+                lat={zone.center.lat}
+                lon={zone.center.lon}
+                color={color}
+              />
+            )}
+            <div
+              style={{
+                marginTop: "12px",
+                padding: "8px 10px",
+                backgroundColor: "#1C1F24",
+                borderRadius: "6px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "10px",
+                  color: "#8B95A3",
+                  marginBottom: "3px",
+                }}
+              >
+                RADIUS
+              </div>
+              <div
+                style={{
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: "#E8EAED",
+                  fontFamily: "JetBrains Mono, monospace",
+                }}
+              >
+                {zone.radius_m != null ? `${zone.radius_m.toFixed(1)} m` : "—"}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div
+              style={{
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "1px",
+                color: "#8B95A3",
+                marginBottom: "8px",
+              }}
+            >
+              VERTICES
+            </div>
+            {zone.points.map((pt, i) => (
+              <CoordRow
+                key={i}
+                label={vertexLabel(i)}
+                lat={pt.lat}
+                lon={pt.lon}
+                color={color}
+              />
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
