@@ -6,6 +6,7 @@ import { useHealth } from "./hooks/useSystem";
 import { useSystemStore } from "./stores/systemStore";
 import NavMenu from "./components/nav/NavMenu";
 import HomePage from "./pages/HomePage";
+import ZonesPage from "./pages/ZonesPage";
 import type { AppPage } from "./types/ui";
 
 type DragStyle = React.CSSProperties & { WebkitAppRegion: string };
@@ -139,7 +140,24 @@ function AppInner() {
       {/* ── Body: nav + page content ───────────────────────────────── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <NavMenu activePage={page} onNavigate={setPage} />
-        {page === "home" && <HomePage />}
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: page === "home" ? "flex" : "none",
+          }}
+        >
+          <HomePage />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: page === "zones" ? "flex" : "none",
+          }}
+        >
+          <ZonesPage />
+        </div>
       </div>
     </div>
   );

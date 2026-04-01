@@ -1,10 +1,13 @@
 import math
+import json
 import logging
 import uuid
+import aiosqlite
 from typing import Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 from ..models import Position
+from ..storage.database import DB_PATH, init_db
 
 logger = logging.getLogger(__name__)
 
@@ -72,19 +75,49 @@ class ZoneManager:
     def __init__(self):
         self._zones: dict[str, Zone] = {}
 
+    # ── Lifecycle ──────────────────────────────────────────────
+
+    async def initialize(self) -> None:
+        """Load persisted zones from database on startup."""
+        await init_db()
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM zones WHERE active = 1") as cur:
+                rows = await cur.fetchall()
+        for row in rows:
+            center = None
+            if row["center_lat"] is not None and row["center_lon"] is not None:
+                center = GeoPoint(lat=row["center_lat"], lon=row["center_lon"])
+            points = [GeoPoint(**p) for p in json.loads(row["points"])]
+            zone = Zone(
+                id=row["id"],
+                name=row["name"],
+                zone_type=ZoneType(row["zone_type"]),
+                shape=ZoneShape(row["shape"]),
+                points=points,
+                center=center,
+                radius_m=row["radius_m"],
+                created_by=row["created_by"],
+                active=bool(row["active"]),
+                color=row["color"],
+            )
+            self._zones[zone.id] = zone
+        logger.info(f"Zone manager loaded {len(self._zones)} zones")
+
     # ── Zone CRUD ──────────────────────────────────────────────
 
-    def create_zone(
+    async def create_zone(
         self,
         name: str,
         zone_type: ZoneType,
-        points: list[GeoPoint] = [],
+        points: Optional[list[GeoPoint]] = None,
         center: Optional[GeoPoint] = None,
         radius_m: Optional[float] = None,
         created_by: str = "operator",
-        color: str = "#F05252"
+        color: str = "#4A9EFF"
     ) -> Zone:
-        """Create a new zone."""
+        """Create a new zone and persist to database."""
+        points = points or []
         shape = ZoneShape.CIRCLE if center and radius_m else ZoneShape.POLYGON
         zone = Zone(
             name=name,
@@ -97,17 +130,34 @@ class ZoneManager:
             color=color
         )
         self._zones[zone.id] = zone
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO zones
+                (id, name, zone_type, shape, points, center_lat, center_lon,
+                 radius_m, created_by, active, color)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                zone.id, zone.name, zone.zone_type.value, zone.shape.value,
+                json.dumps([p.model_dump() for p in zone.points]),
+                center.lat if center else None,
+                center.lon if center else None,
+                radius_m, created_by, 1, color
+            ))
+            await db.commit()
         logger.info(f"Zone created: {name} ({zone_type}) by {created_by}")
         return zone
 
-    def delete_zone(self, zone_id: str) -> bool:
-        """Delete a zone."""
-        if zone_id in self._zones:
-            name = self._zones[zone_id].name
-            del self._zones[zone_id]
-            logger.info(f"Zone deleted: {name}")
-            return True
-        return False
+    async def delete_zone(self, zone_id: str) -> bool:
+        """Delete a zone and remove from database."""
+        if zone_id not in self._zones:
+            return False
+        name = self._zones[zone_id].name
+        del self._zones[zone_id]
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
+            await db.commit()
+        logger.info(f"Zone deleted: {name}")
+        return True
 
     def get_zone(self, zone_id: str) -> Optional[Zone]:
         """Get a zone by ID."""

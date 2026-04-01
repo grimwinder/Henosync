@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from ..plugin_system.loader import PluginLoader
 from ..core.node_registry import node_registry
+from ..core.zone_manager import zone_manager
 from ..storage.mission_store import mission_store
 from ..core.failsafe_manager import failsafe_manager
 from .routes.safety import router as safety_router
@@ -11,6 +12,7 @@ from .routes.commands import router as commands_router
 from .routes.missions import router as missions_router
 from .routes.execution import router as execution_router
 from .routes.operations import router as operations_router
+from .routes.zones import router as zones_router
 from .websocket_server import (
     telemetry_websocket_handler,
     events_websocket_handler
@@ -32,7 +34,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173"],
+        allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -44,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(execution_router)
     app.include_router(safety_router)
     app.include_router(operations_router)
+    app.include_router(zones_router)
 
     # WebSocket routes
     @app.websocket("/ws/telemetry")
@@ -56,19 +59,29 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup():
+        import traceback
         logger.info("Henosync backend starting...")
 
-        loader = PluginLoader(PLUGINS_DIR)
-        count = loader.load_all()
-        logger.info(f"Plugin loading complete — {count} plugins loaded")
+        try:
+            loader = PluginLoader(PLUGINS_DIR)
+            count = loader.load_all()
+            logger.info(f"Plugin loading complete — {count} plugins loaded")
 
-        await mission_store.initialize()
-        await node_registry.initialize()
-        logger.info("Node registry ready")
+            await mission_store.initialize()
+            await node_registry.initialize()
+            logger.info("Node registry ready")
 
-        # Start failsafe manager last
-        await failsafe_manager.start()
-        logger.info("Failsafe manager running")
+            await zone_manager.initialize()
+            logger.info("Zone manager ready")
+
+            # Start failsafe manager last
+            await failsafe_manager.start()
+            logger.info("Failsafe manager running")
+
+        except Exception as e:
+            logger.error(f"STARTUP FAILED: {e}")
+            logger.error(traceback.format_exc())
+            raise
 
     @app.on_event("shutdown")
     async def shutdown():

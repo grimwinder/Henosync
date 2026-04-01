@@ -19,10 +19,20 @@ export const BACKEND_URL = "http://127.0.0.1:8765";
 // ── Base fetch ─────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BACKEND_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
+  const url = `${BACKEND_URL}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "Content-Type": "application/json", ...init?.headers },
+      ...init,
+    });
+  } catch (err) {
+    console.error(
+      `[apiFetch] Network error for ${init?.method ?? "GET"} ${url}:`,
+      err,
+    );
+    throw err;
+  }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(detail?.detail ?? `HTTP ${res.status}`);

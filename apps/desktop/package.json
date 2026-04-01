@@ -4,7 +4,7 @@
   "private": true,
   "main": "out/main/main/index.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && npm run start:electron\"",
+    "dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:5173 && npm run start:electron\"",
     "start:electron": "npx tsc --outDir out/main --module CommonJS --target ES2020 --moduleResolution node --esModuleInterop true --skipLibCheck true --strict false src/main/index.ts src/preload/index.ts && electron .",
     "build": "vite build",
     "lint": "eslint src --ext .ts,.tsx",
@@ -25,6 +25,7 @@
     "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.4.0",
     "concurrently": "^8.0.0",
+    "cross-env": "^7.0.3",
     "electron": "^30.5.1",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",

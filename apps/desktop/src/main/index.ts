@@ -28,24 +28,13 @@ function startBackend(): Promise<void> {
       return;
     }
 
-    backendProcess = spawn(
-      "poetry",
-      [
-        "run",
-        "uvicorn",
-        "main:app",
-        "--host",
-        BACKEND_HOST,
-        "--port",
-        String(BACKEND_PORT),
-      ],
-      {
-        cwd: backendDir,
-        env: { ...process.env },
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: true,
-      },
-    );
+    const venvPython = join(backendDir, ".venv", "Scripts", "python.exe");
+    backendProcess = spawn(venvPython, ["main.py"], {
+      cwd: backendDir,
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+    });
 
     backendProcess.stdout?.on("data", (data: Buffer) => {
       console.log(`[backend] ${data.toString().trim()}`);

@@ -24,5 +24,20 @@ async def init_db() -> None:
                 created_at  TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS zones (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                zone_type   TEXT NOT NULL,
+                shape       TEXT NOT NULL,
+                points      TEXT NOT NULL DEFAULT '[]',
+                center_lat  REAL,
+                center_lon  REAL,
+                radius_m    REAL,
+                created_by  TEXT NOT NULL DEFAULT 'operator',
+                active      INTEGER NOT NULL DEFAULT 1,
+                color       TEXT NOT NULL DEFAULT '#4A9EFF'
+            )
+        """)
         await db.commit()
         logger.info(f"Database initialized at {DB_PATH}")

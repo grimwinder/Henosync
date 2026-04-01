@@ -8,7 +8,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.11"
 fastapi = "^0.135.2"
-uvicorn = {extras = ["standard"], version = "^0.42.0"}
+uvicorn = "^0.42.0"
 websockets = "^16.0"
 pydantic = "^2.12.5"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.48"}
