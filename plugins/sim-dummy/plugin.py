@@ -9,7 +9,10 @@ from typing import AsyncGenerator, Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../apps/backend'))
 
 from henosync.plugin_system.interfaces import NodePlugin
-from henosync.models import Node, TelemetryFrame, CommandResult
+from henosync.models import (
+    Node, TelemetryFrame, CommandResult,
+    DeviceSpecs, DeviceCategory, CapabilitySpec, DeviceCapability,
+)
 
 
 class SimDummyPlugin(NodePlugin):
@@ -37,7 +40,24 @@ class SimDummyPlugin(NodePlugin):
             "lon": config.get("home_lon", 144.9631),
             "alt": 0.0
         }
-        print(f"[sim-dummy] Connected node: {node.name}")
+
+        # Build device specs from selected capabilities
+        selected_caps = config.get("selected_capabilities", [])
+        cap_specs = []
+        for cap_id in selected_caps:
+            try:
+                cap_specs.append(CapabilitySpec(capability=DeviceCapability(cap_id)))
+            except ValueError:
+                pass  # ignore unknown capability ids
+
+        node.specs = DeviceSpecs(
+            category=DeviceCategory.DRONE,
+            capabilities=cap_specs,
+            has_gps="gps" in selected_caps,
+            coordinate_frame="gps",
+        )
+
+        print(f"[sim-dummy] Connected node: {node.name} with caps: {selected_caps}")
         return True
 
     async def disconnect(self, node: Node) -> None:

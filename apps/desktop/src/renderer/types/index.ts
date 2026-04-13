@@ -302,6 +302,9 @@ export interface PluginManifest {
   transport: string;
   icon?: string;
   config_schema?: Record<string, PluginConfigField>;
+  category?: DeviceCategory;
+  fixed_capabilities?: DeviceCapability[];
+  optional_capabilities?: DeviceCapability[];
 }
 
 export interface UIContribution {

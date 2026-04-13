@@ -11,7 +11,7 @@ export function useDevicePlugins() {
   return useQuery({
     queryKey: PLUGIN_KEYS.device,
     queryFn: api.getDevicePlugins,
-    staleTime: Infinity,
+    staleTime: 30_000,
   });
 }
 
@@ -19,7 +19,7 @@ export function useControlPlugins() {
   return useQuery({
     queryKey: PLUGIN_KEYS.control,
     queryFn: api.getControlPlugins,
-    staleTime: Infinity,
+    staleTime: 30_000,
   });
 }
 

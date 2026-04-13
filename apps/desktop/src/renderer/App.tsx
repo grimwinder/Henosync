@@ -9,6 +9,7 @@ import HomePage from "./pages/HomePage";
 import ZonesPage from "./pages/ZonesPage";
 import DevicesPage from "./pages/DevicesPage";
 import PluginsPage from "./pages/PluginsPage";
+import MissionPage from "./pages/MissionPage";
 import type { AppPage } from "./types/ui";
 
 type DragStyle = React.CSSProperties & { WebkitAppRegion: string };
@@ -177,6 +178,15 @@ function AppInner() {
           }}
         >
           <PluginsPage />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: page === "mission" ? "flex" : "none",
+          }}
+        >
+          <MissionPage />
         </div>
       </div>
     </div>

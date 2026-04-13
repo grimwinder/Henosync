@@ -1,1 +1,1 @@
-export type AppPage = "home" | "zones" | "devices" | "plugins";
+export type AppPage = "home" | "zones" | "devices" | "plugins" | "mission";

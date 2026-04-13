@@ -1,11 +1,32 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import {
+  Plus,
+  MapPin,
+  Camera,
+  ScanLine,
+  Waves,
+  Thermometer,
+  Activity,
+  Navigation,
+  Volume2,
+  Lightbulb,
+  Package,
+  Wrench,
+  Battery,
+  Zap,
+} from "lucide-react";
 import { useNodeStore } from "../../stores/nodeStore";
 import { useNodes } from "../../hooks/useNodes";
 import AddNodeModal from "./AddNodeModal";
-import type { Node, NodeStatus } from "../../types";
+import DeviceIcon from "./DeviceIcon";
+import type {
+  Node,
+  NodeStatus,
+  DeviceCategory,
+  DeviceCapability,
+} from "../../types";
 
-// ── Status dot ─────────────────────────────────────────────────────────────────
+// ── Lookups ─────────────────────────────────────────────────────────────────────
 
 const STATUS_COLOR: Record<NodeStatus, string> = {
   online: "#3DD68C",
@@ -15,56 +36,84 @@ const STATUS_COLOR: Record<NodeStatus, string> = {
   error: "#F05252",
 };
 
-function StatusDot({ status }: { status: NodeStatus }) {
+const STATUS_BADGE: Record<NodeStatus, string> = {
+  online: "ON",
+  connecting: "…",
+  degraded: "DG",
+  offline: "—",
+  error: "ER",
+};
+
+const CATEGORY_LABEL: Record<DeviceCategory, string> = {
+  drone: "Quadcopter",
+  plane: "Fixed-Wing UAV",
+  agv: "Ground Vehicle",
+  boat: "Surface Vessel",
+  rov: "Underwater ROV",
+  arm: "Robotic Arm",
+  unknown: "Unknown",
+};
+
+const CAPABILITY_ICON: Record<DeviceCapability, React.ReactNode> = {
+  camera: <Camera size={12} />,
+  gps: <MapPin size={12} />,
+  lidar: <ScanLine size={12} />,
+  sonar: <Waves size={12} />,
+  thermal: <Thermometer size={12} />,
+  imu: <Activity size={12} />,
+  move_2d: <Navigation size={12} />,
+  move_3d: <Navigation size={12} />,
+  horn: <Volume2 size={12} />,
+  lights: <Lightbulb size={12} />,
+  payload: <Package size={12} />,
+  arm_tool: <Wrench size={12} />,
+  battery: <Battery size={12} />,
+  charging: <Zap size={12} />,
+};
+
+const CAPABILITY_LABEL: Record<DeviceCapability, string> = {
+  camera: "Camera",
+  gps: "GPS",
+  lidar: "LiDAR",
+  sonar: "Sonar",
+  thermal: "Thermal",
+  imu: "IMU",
+  move_2d: "2D Motion",
+  move_3d: "3D Motion",
+  horn: "Horn",
+  lights: "Lights",
+  payload: "Payload",
+  arm_tool: "Arm Tool",
+  battery: "Battery",
+  charging: "Charging",
+};
+
+// ── Capability badge ─────────────────────────────────────────────────────────────
+
+function CapabilityBadge({
+  cap,
+  color,
+}: {
+  cap: DeviceCapability;
+  color: string;
+}) {
   return (
     <div
+      title={CAPABILITY_LABEL[cap]}
       style={{
-        width: "7px",
-        height: "7px",
-        borderRadius: "50%",
-        backgroundColor: STATUS_COLOR[status],
+        width: "22px",
+        height: "22px",
+        borderRadius: "5px",
+        backgroundColor: `${color}18`,
+        border: `1px solid ${color}40`,
+        color: color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         flexShrink: 0,
       }}
-    />
-  );
-}
-
-// ── Battery bar ────────────────────────────────────────────────────────────────
-
-function BatteryBar({ percent }: { percent: number | null }) {
-  if (percent === null) return null;
-  const color = percent > 50 ? "#3DD68C" : percent > 20 ? "#F5A623" : "#F05252";
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-      <div
-        style={{
-          width: "36px",
-          height: "4px",
-          borderRadius: "2px",
-          backgroundColor: "#252A31",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            width: `${Math.max(0, Math.min(100, percent))}%`,
-            height: "100%",
-            backgroundColor: color,
-            borderRadius: "2px",
-            transition: "width 500ms ease",
-          }}
-        />
-      </div>
-      <span
-        style={{
-          fontSize: "10px",
-          color: "#8B95A3",
-          fontFamily: "JetBrains Mono, monospace",
-          minWidth: "28px",
-        }}
-      >
-        {Math.round(percent)}%
-      </span>
+    >
+      {CAPABILITY_ICON[cap]}
     </div>
   );
 }
@@ -75,6 +124,11 @@ function DeviceCard({ node }: { node: Node }) {
   const selectedNodeId = useNodeStore((s) => s.selectedNodeId);
   const setSelectedNode = useNodeStore((s) => s.setSelectedNode);
   const selected = selectedNodeId === node.id;
+
+  const category = node.specs?.category ?? "unknown";
+  const capabilities = node.specs?.capabilities ?? [];
+  const statusColor = STATUS_COLOR[node.status];
+  const shortId = node.id.slice(0, 6).toUpperCase();
 
   return (
     <button
@@ -88,8 +142,9 @@ function DeviceCard({ node }: { node: Node }) {
         borderBottom: "1px solid #2A2F38",
         cursor: "pointer",
         display: "flex",
-        flexDirection: "column",
-        gap: "6px",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: "10px",
         transition: "background-color 150ms",
       }}
       onMouseEnter={(e) => {
@@ -103,37 +158,94 @@ function DeviceCard({ node }: { node: Node }) {
             "transparent";
       }}
     >
-      {/* Name + status */}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <StatusDot status={node.status} />
-        <span
-          style={{
-            fontSize: "12px",
-            fontWeight: 500,
-            color: "#E8EAED",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flex: 1,
-          }}
-        >
-          {node.name}
-        </span>
+      {/* Device type icon */}
+      <div style={{ flexShrink: 0 }}>
+        <DeviceIcon category={category} size={36} color={statusColor} />
       </div>
 
-      {/* Plugin + battery */}
+      {/* Right content */}
       <div
         style={{
+          flex: 1,
+          minWidth: 0,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingLeft: "15px",
+          flexDirection: "column",
+          gap: "3px",
         }}
       >
+        {/* Name + status badge */}
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "#E8EAED",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+            }}
+          >
+            {node.name}
+          </span>
+          <div
+            style={{
+              minWidth: "22px",
+              height: "18px",
+              paddingInline: "4px",
+              borderRadius: "4px",
+              backgroundColor: `${statusColor}22`,
+              border: `1px solid ${statusColor}55`,
+              color: statusColor,
+              fontSize: "9px",
+              fontWeight: 700,
+              fontFamily: "JetBrains Mono, monospace",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              letterSpacing: "0.5px",
+            }}
+          >
+            {STATUS_BADGE[node.status]}
+          </div>
+        </div>
+
+        {/* Category label */}
         <span style={{ fontSize: "10px", color: "#8B95A3" }}>
-          {node.plugin_id}
+          {CATEGORY_LABEL[category]}
         </span>
-        <BatteryBar percent={node.battery_percent} />
+
+        {/* Capabilities + short ID */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: "2px",
+          }}
+        >
+          <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+            {capabilities.slice(0, 5).map((cs) => (
+              <CapabilityBadge
+                key={cs.capability}
+                cap={cs.capability}
+                color="#4A9EFF"
+              />
+            ))}
+          </div>
+          <span
+            style={{
+              fontSize: "9px",
+              color: "#555F6E",
+              fontFamily: "JetBrains Mono, monospace",
+              flexShrink: 0,
+              marginLeft: "6px",
+            }}
+          >
+            {shortId}
+          </span>
+        </div>
       </div>
     </button>
   );
@@ -158,7 +270,7 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
     <>
       <div
         style={{
-          width: "220px",
+          width: "240px",
           height: "100%",
           backgroundColor: "#141619",
           borderRight: "1px solid #2A2F38",

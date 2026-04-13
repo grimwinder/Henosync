@@ -24,5 +24,74 @@
     }
   ],
   "transport": "simulation",
-  "icon": "assets/icon.svg"
+  "icon": "assets/icon.svg",
+  "category": "drone",
+  "fixed_capabilities": [],
+  "optional_capabilities": [
+    "move_2d",
+    "move_3d",
+    "gps",
+    "lidar",
+    "camera",
+    "sonar",
+    "imu",
+    "thermal",
+    "horn",
+    "lights",
+    "payload",
+    "arm_tool",
+    "battery",
+    "charging"
+  ],
+  "config_schema": {
+    "home_lat": {
+      "type": "number",
+      "label": "Home Latitude",
+      "required": false,
+      "default": -37.8136,
+      "description": "Starting latitude for the simulated device."
+    },
+    "home_lon": {
+      "type": "number",
+      "label": "Home Longitude",
+      "required": false,
+      "default": 144.9631,
+      "description": "Starting longitude for the simulated device."
+    },
+    "tick_rate_hz": {
+      "type": "select",
+      "label": "Telemetry Rate",
+      "required": false,
+      "default": "1",
+      "description": "How often the simulated node emits a telemetry update.",
+      "options": [
+        { "label": "0.5 Hz (every 2 s)", "value": "0.5" },
+        { "label": "1 Hz (every 1 s)", "value": "1" },
+        { "label": "2 Hz (every 0.5 s)", "value": "2" },
+        { "label": "5 Hz (every 0.2 s)", "value": "5" }
+      ]
+    },
+    "battery_drain_rate": {
+      "type": "number",
+      "label": "Battery Drain Rate (%/s)",
+      "required": false,
+      "default": 0.01,
+      "min": 0,
+      "max": 1,
+      "description": "How quickly the simulated battery depletes per second."
+    },
+    "random_signal": {
+      "type": "boolean",
+      "label": "Simulate Signal Variation",
+      "default": true,
+      "description": "Randomly vary signal strength to simulate a real radio environment."
+    },
+    "device_label": {
+      "type": "string",
+      "label": "Device Label",
+      "required": false,
+      "placeholder": "e.g. Test Bot Alpha",
+      "description": "Optional label reported in the status_text telemetry field."
+    }
+  }
 }

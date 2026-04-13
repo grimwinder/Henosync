@@ -1,6 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import maplibregl from "maplibre-gl";
-import MissionMap from "../components/map/MissionMap";
+import MissionMap, {
+  type MapBase,
+  type MapTheme,
+} from "../components/map/MissionMap";
+import MapStylePicker from "../components/map/MapStylePicker";
 import HubMarker from "../components/map/HubMarker";
 import ZoneLayer from "../components/zones/ZoneLayer";
 import MarkerLayer from "../components/zones/MarkerLayer";
@@ -42,6 +46,29 @@ export default function ZonesPage() {
   const hubLocation = useHubLocation();
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
+  const [mapBase, setMapBase] = useState<MapBase>("standard");
+  const [mapTheme, setMapTheme] = useState<MapTheme>("dark");
+  const [savedView, setSavedView] = useState<{
+    center: [number, number];
+    zoom: number;
+  } | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+
+  function handleMapReady(m: maplibregl.Map) {
+    mapRef.current = m;
+    setMap(m);
+  }
+
+  function saveAndSwitch(base: MapBase, theme: MapTheme) {
+    if (mapRef.current) {
+      const c = mapRef.current.getCenter();
+      setSavedView({ center: [c.lng, c.lat], zoom: mapRef.current.getZoom() });
+    }
+    setMap(null);
+    setMapBase(base);
+    setMapTheme(theme);
+  }
+
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [cursorLatLon, setCursorLatLon] = useState<[number, number] | null>(
     null,
@@ -429,11 +456,27 @@ export default function ZonesPage() {
     >
       {/* Map fills full background */}
       <div style={{ position: "absolute", inset: 0 }}>
-        <MissionMap onMapReady={setMap} />
+        <MissionMap
+          key={`${mapBase}-${mapTheme}`}
+          mapBase={mapBase}
+          mapTheme={mapTheme}
+          initialCenter={savedView?.center}
+          initialZoom={savedView?.zoom}
+          onMapReady={handleMapReady}
+        />
         {map && <ZoneLayer map={map} />}
         {map && <MarkerLayer map={map} />}
         {map && <HubMarker map={map} location={hubLocation} />}
       </div>
+
+      {/* Map style picker — top-right (avoids overlap with center toolbar) */}
+      <MapStylePicker
+        mapBase={mapBase}
+        mapTheme={mapTheme}
+        onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
+        onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
+        position="top-right"
+      />
 
       {/* Floating toolbar */}
       <MapToolbar
