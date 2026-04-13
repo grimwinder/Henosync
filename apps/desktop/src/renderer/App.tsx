@@ -35,8 +35,8 @@ function AppInner() {
         flexDirection: "column",
         height: "100vh",
         width: "100vw",
-        backgroundColor: "#0D0F12",
-        color: "#E8EAED",
+        backgroundColor: "#0D0D0D",
+        color: "#EFEFEF",
         fontFamily: "Inter, sans-serif",
         overflow: "hidden",
       }}
@@ -50,8 +50,8 @@ function AppInner() {
             justifyContent: "space-between",
             height: "32px",
             padding: "0 12px",
-            backgroundColor: "#141619",
-            borderBottom: "1px solid #2A2F38",
+            backgroundColor: "#0D0D0D",
+            borderBottom: "1px solid #2D2D2D",
             flexShrink: 0,
             WebkitAppRegion: "drag",
           } as DragStyle
@@ -104,12 +104,12 @@ function AppInner() {
                 backgroundColor: backendConnected ? "#3DD68C" : "#F05252",
               }}
             />
-            <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+            <span style={{ fontSize: "11px", color: "#999999" }}>
               {backendConnected ? "Connected" : "Connecting..."}
             </span>
           </div>
           {backendConnected && (
-            <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+            <span style={{ fontSize: "11px", color: "#999999" }}>
               {onlineCount}/{nodeCount} online
             </span>
           )}
@@ -211,7 +211,7 @@ function winBtnStyle(danger: boolean): React.CSSProperties {
     alignItems: "center",
     justifyContent: "center",
     fontSize: "12px",
-    color: "#8B95A3",
+    color: "#999999",
     backgroundColor: "transparent",
     border: "none",
     cursor: "pointer",

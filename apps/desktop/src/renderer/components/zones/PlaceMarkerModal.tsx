@@ -63,8 +63,8 @@ export default function PlaceMarkerModal({
     >
       <div
         style={{
-          backgroundColor: "#141619",
-          border: "1px solid #2A2F38",
+          backgroundColor: "#141414",
+          border: "1px solid #2D2D2D",
           borderRadius: "10px",
           width: "300px",
           display: "flex",
@@ -76,7 +76,7 @@ export default function PlaceMarkerModal({
         <div
           style={{
             padding: "12px 14px",
-            borderBottom: "1px solid #2A2F38",
+            borderBottom: "1px solid #2D2D2D",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -87,7 +87,7 @@ export default function PlaceMarkerModal({
               fontSize: "11px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
             }}
           >
             PLACE MARKER
@@ -97,16 +97,16 @@ export default function PlaceMarkerModal({
             style={{
               background: "none",
               border: "none",
-              color: "#8B95A3",
+              color: "#999999",
               cursor: "pointer",
               padding: "2px",
               display: "flex",
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+              (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
             }}
             onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+              (e.currentTarget as HTMLButtonElement).style.color = "#999999";
             }}
           >
             <X size={14} />
@@ -118,9 +118,9 @@ export default function PlaceMarkerModal({
           <div
             style={{
               fontSize: "10px",
-              color: "#8B95A3",
+              color: "#999999",
               marginBottom: "12px",
-              fontFamily: "JetBrains Mono, monospace",
+              fontFamily: "Inter, sans-serif",
             }}
           >
             {lat.toFixed(6)}°, {lon.toFixed(6)}°
@@ -132,7 +132,7 @@ export default function PlaceMarkerModal({
               fontSize: "10px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               marginBottom: "6px",
             }}
           >
@@ -151,9 +151,9 @@ export default function PlaceMarkerModal({
               boxSizing: "border-box",
               padding: "7px 10px",
               borderRadius: "5px",
-              border: "1px solid #2A2F38",
-              backgroundColor: "#1C1F24",
-              color: "#E8EAED",
+              border: "1px solid #2D2D2D",
+              backgroundColor: "#1C1C1C",
+              color: "#EFEFEF",
               fontSize: "12px",
               outline: "none",
               marginBottom: "14px",
@@ -166,7 +166,7 @@ export default function PlaceMarkerModal({
               fontSize: "10px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               marginBottom: "8px",
             }}
           >
@@ -191,9 +191,9 @@ export default function PlaceMarkerModal({
                     style={{
                       padding: "6px 8px",
                       borderRadius: "5px",
-                      border: `1px solid ${active ? color : "#2A2F38"}`,
+                      border: `1px solid ${active ? color : "#2D2D2D"}`,
                       backgroundColor: active ? `${color}22` : "transparent",
-                      color: active ? color : "#8B95A3",
+                      color: active ? color : "#999999",
                       fontSize: "11px",
                       cursor: "pointer",
                       textAlign: "left",
@@ -231,8 +231,8 @@ export default function PlaceMarkerModal({
               backgroundColor:
                 name.trim() && !isPending
                   ? MARKER_TYPE_COLORS[markerType]
-                  : "#2A2F38",
-              color: name.trim() && !isPending ? "#fff" : "#8B95A3",
+                  : "#2D2D2D",
+              color: name.trim() && !isPending ? "#fff" : "#999999",
               fontSize: "12px",
               fontWeight: 600,
               cursor: name.trim() && !isPending ? "pointer" : "not-allowed",

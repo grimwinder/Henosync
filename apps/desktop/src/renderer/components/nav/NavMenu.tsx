@@ -26,8 +26,8 @@ export default function NavMenu({ activePage, onNavigate }: NavMenuProps) {
       style={{
         width: "52px",
         height: "100%",
-        backgroundColor: "#141619",
-        borderRight: "1px solid #2A2F38",
+        backgroundColor: "#0D0D0D",
+        borderRight: "1px solid #2D2D2D",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -52,22 +52,22 @@ export default function NavMenu({ activePage, onNavigate }: NavMenuProps) {
               border: "none",
               cursor: "pointer",
               marginBottom: "4px",
-              backgroundColor: active ? "#1C1F24" : "transparent",
-              color: active ? "#4A9EFF" : "#8B95A3",
+              backgroundColor: active ? "#1C1C1C" : "transparent",
+              color: active ? "#EFEFEF" : "#999999",
               transition: "background-color 150ms, color 150ms",
             }}
             onMouseEnter={(e) => {
               if (!active) {
                 (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                  "#1C1F24";
-                (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+                  "#1C1C1C";
+                (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
               }
             }}
             onMouseLeave={(e) => {
               if (!active) {
                 (e.currentTarget as HTMLButtonElement).style.backgroundColor =
                   "transparent";
-                (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+                (e.currentTarget as HTMLButtonElement).style.color = "#999999";
               }
             }}
           >

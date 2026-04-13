@@ -46,7 +46,7 @@ function Section({
           fontSize: "10px",
           fontWeight: 600,
           letterSpacing: "1px",
-          color: "#8B95A3",
+          color: "#999999",
           textTransform: "uppercase",
           marginBottom: "12px",
         }}
@@ -67,17 +67,17 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
         alignItems: "baseline",
         gap: "8px",
         padding: "5px 0",
-        borderBottom: "1px solid #252A31",
+        borderBottom: "1px solid #242424",
       }}
     >
-      <span style={{ fontSize: "11px", color: "#8B95A3", flexShrink: 0 }}>
+      <span style={{ fontSize: "11px", color: "#999999", flexShrink: 0 }}>
         {label}
       </span>
       <span
         style={{
           fontSize: "11px",
-          color: "#E8EAED",
-          fontFamily: "JetBrains Mono, monospace",
+          color: "#EFEFEF",
+          fontFamily: "Inter, sans-serif",
           textAlign: "right",
           wordBreak: "break-all",
         }}
@@ -99,7 +99,7 @@ function Chip({ label, color = "#4A9EFF" }: { label: string; color?: string }) {
         fontSize: "10px",
         fontWeight: 500,
         color,
-        fontFamily: "JetBrains Mono, monospace",
+        fontFamily: "Inter, sans-serif",
         cursor: "default",
         whiteSpace: "nowrap",
       }}
@@ -127,8 +127,8 @@ function SidebarSectionHeader({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        borderBottom: "1px solid #2A2F38",
-        backgroundColor: "#0D0F1280",
+        borderBottom: "1px solid #2D2D2D",
+        backgroundColor: "#0D0D0D",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -145,7 +145,7 @@ function SidebarSectionHeader({
             fontSize: "10px",
             fontWeight: 600,
             letterSpacing: "1px",
-            color: "#8B95A3",
+            color: "#999999",
             textTransform: "uppercase",
           }}
         >
@@ -155,8 +155,8 @@ function SidebarSectionHeader({
       <span
         style={{
           fontSize: "10px",
-          color: "#8B95A3",
-          backgroundColor: "#252A31",
+          color: "#999999",
+          backgroundColor: "#242424",
           padding: "1px 6px",
           borderRadius: "8px",
         }}
@@ -194,9 +194,9 @@ function PluginRow({
         width: "100%",
         textAlign: "left",
         padding: "10px 14px",
-        backgroundColor: selected ? "#1C1F24" : "transparent",
+        backgroundColor: selected ? "#1C1C1C" : "transparent",
         border: "none",
-        borderBottom: "1px solid #2A2F38",
+        borderBottom: "1px solid #2D2D2D",
         cursor: "pointer",
         display: "flex",
         alignItems: "flex-start",
@@ -206,7 +206,7 @@ function PluginRow({
       onMouseEnter={(e) => {
         if (!selected)
           (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-            "#1C1F24";
+            "#1C1C1C";
       }}
       onMouseLeave={(e) => {
         if (!selected)
@@ -220,7 +220,7 @@ function PluginRow({
           width: "3px",
           alignSelf: "stretch",
           borderRadius: "2px",
-          backgroundColor: selected ? accentColor : "#252A31",
+          backgroundColor: selected ? accentColor : "#242424",
           flexShrink: 0,
           transition: "background-color 150ms",
         }}
@@ -230,7 +230,7 @@ function PluginRow({
           style={{
             fontSize: "12px",
             fontWeight: 500,
-            color: selected ? "#E8EAED" : "#C8CAD0",
+            color: selected ? "#EFEFEF" : "#C8CAD0",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -240,14 +240,14 @@ function PluginRow({
           {name}
         </div>
         <div
-          style={{ fontSize: "10px", color: "#8B95A3", marginBottom: "3px" }}
+          style={{ fontSize: "10px", color: "#999999", marginBottom: "3px" }}
         >
           v{version}
         </div>
         <div
           style={{
             fontSize: "10px",
-            color: "#8B95A3",
+            color: "#999999",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -280,8 +280,8 @@ function PluginHero({
     <div
       style={{
         padding: "24px 32px 20px",
-        borderBottom: "1px solid #2A2F38",
-        backgroundColor: "#0D0F12",
+        borderBottom: "1px solid #2D2D2D",
+        backgroundColor: "#0D0D0D",
         flexShrink: 0,
         display: "flex",
         alignItems: "flex-start",
@@ -313,7 +313,7 @@ function PluginHero({
             marginBottom: "6px",
           }}
         >
-          <span style={{ fontSize: "18px", fontWeight: 600, color: "#E8EAED" }}>
+          <span style={{ fontSize: "18px", fontWeight: 600, color: "#EFEFEF" }}>
             {name}
           </span>
           <span
@@ -331,7 +331,7 @@ function PluginHero({
             {badgeLabel}
           </span>
         </div>
-        <div style={{ fontSize: "12px", color: "#8B95A3", lineHeight: 1.6 }}>
+        <div style={{ fontSize: "12px", color: "#999999", lineHeight: 1.6 }}>
           {description}
         </div>
       </div>
@@ -431,7 +431,7 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
             <p
               style={{
                 fontSize: "11px",
-                color: "#8B95A3",
+                color: "#999999",
                 lineHeight: 1.6,
                 marginBottom: "10px",
               }}
@@ -503,16 +503,16 @@ export default function PluginsPage() {
         display: "flex",
         flex: 1,
         overflow: "hidden",
-        backgroundColor: "#0D0F12",
+        backgroundColor: "#0D0D0D",
       }}
     >
       {/* ── Left sidebar ────────────────────────────────────────────────── */}
       <div
         style={{
-          width: "280px",
+          width: "240px",
           flexShrink: 0,
-          backgroundColor: "#141619",
-          borderRight: "1px solid #2A2F38",
+          backgroundColor: "#141414",
+          borderRight: "1px solid #2D2D2D",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -526,7 +526,7 @@ export default function PluginsPage() {
             display: "flex",
             alignItems: "center",
             padding: "0 14px",
-            borderBottom: "1px solid #2A2F38",
+            borderBottom: "1px solid #2D2D2D",
           }}
         >
           <span
@@ -534,7 +534,7 @@ export default function PluginsPage() {
               fontSize: "11px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               textTransform: "uppercase",
             }}
           >
@@ -549,7 +549,7 @@ export default function PluginsPage() {
               style={{
                 padding: "24px 14px",
                 textAlign: "center",
-                color: "#8B95A3",
+                color: "#999999",
                 fontSize: "11px",
               }}
             >
@@ -568,9 +568,9 @@ export default function PluginsPage() {
                   style={{
                     padding: "12px 14px 16px",
                     fontSize: "11px",
-                    color: "#8B95A3",
+                    color: "#999999",
                     fontStyle: "italic",
-                    borderBottom: "1px solid #2A2F38",
+                    borderBottom: "1px solid #2D2D2D",
                   }}
                 >
                   No device plugins installed.
@@ -602,7 +602,7 @@ export default function PluginsPage() {
                   style={{
                     padding: "12px 14px 16px",
                     fontSize: "11px",
-                    color: "#8B95A3",
+                    color: "#999999",
                     fontStyle: "italic",
                   }}
                 >
@@ -645,8 +645,8 @@ export default function PluginsPage() {
               gap: "12px",
             }}
           >
-            <Plug size={40} color="#2A2F38" />
-            <span style={{ fontSize: "13px", color: "#8B95A3" }}>
+            <Plug size={40} color="#2D2D2D" />
+            <span style={{ fontSize: "13px", color: "#999999" }}>
               Select a plugin to view its details and configuration
             </span>
           </div>

@@ -43,7 +43,7 @@ const ZONE_COLORS: Record<string, string> = {
   safe_return: "#3DD68C",
   coverage: "#A78BFA",
   alert: "#F5A623",
-  custom: "#8B95A3",
+  custom: "#999999",
 };
 
 /** Convert a circle (center + radius_m) to a GeoJSON polygon approximation. */
@@ -81,7 +81,7 @@ function zoneToFeature(zone: Zone, selected: boolean): Feature | null {
     coordinates = [ring];
   }
 
-  const color = zone.color || ZONE_COLORS[zone.zone_type] || "#8B95A3";
+  const color = zone.color || ZONE_COLORS[zone.zone_type] || "#999999";
 
   return {
     type: "Feature",
@@ -212,14 +212,14 @@ export default function ZoneLayer({ map }: ZoneLayerProps) {
 
     for (const zone of zonesToShow) {
       if (!zone) continue;
-      const color = zone.color || ZONE_COLORS[zone.zone_type] || "#8B95A3";
+      const color = zone.color || ZONE_COLORS[zone.zone_type] || "#999999";
 
       if (zone.shape === "circle" && zone.center) {
         // Dot marker for circle center
         const el = document.createElement("div");
         el.style.cssText = [
           "width:10px;height:10px;border-radius:50%",
-          `background:${color};border:1.5px solid #0D0F12`,
+          `background:${color};border:1.5px solid #0D0D0D`,
           "pointer-events:none",
         ].join(";");
         const marker = new maplibregl.Marker({ element: el, anchor: "center" })
@@ -232,7 +232,7 @@ export default function ZoneLayer({ map }: ZoneLayerProps) {
           const el = document.createElement("div");
           el.style.cssText = [
             "width:20px;height:20px;border-radius:50%",
-            "background:#141619;border:1.5px solid " + color,
+            "background:#141414;border:1.5px solid " + color,
             "display:flex;align-items:center;justify-content:center",
             `font-size:9px;font-weight:700;color:${color}`,
             "font-family:Inter,sans-serif;pointer-events:none",

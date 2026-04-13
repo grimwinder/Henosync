@@ -36,7 +36,7 @@ const ZONE_TYPES: {
   {
     value: "custom",
     label: "Custom",
-    color: "#8B95A3",
+    color: "#999999",
     desc: "Plugin-defined",
   },
 ];
@@ -118,8 +118,8 @@ export default function CreateZoneModal({
           transform: "translate(-50%, -50%)",
           zIndex: 21,
           width: "340px",
-          backgroundColor: "#1C1F24",
-          border: "1px solid #2A2F38",
+          backgroundColor: "#1C1C1C",
+          border: "1px solid #2D2D2D",
           borderRadius: "10px",
           padding: "20px",
           display: "flex",
@@ -127,10 +127,10 @@ export default function CreateZoneModal({
           gap: "16px",
         }}
       >
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#E8EAED" }}>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: "#EFEFEF" }}>
           New Zone
           <span
-            style={{ fontWeight: 400, color: "#8B95A3", marginLeft: "8px" }}
+            style={{ fontWeight: 400, color: "#999999", marginLeft: "8px" }}
           >
             {shape.type === "circle"
               ? `Circle · ${Math.round(shape.radiusM)}m radius`
@@ -140,7 +140,7 @@ export default function CreateZoneModal({
 
         {/* Name */}
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <label style={{ fontSize: "11px", color: "#8B95A3" }}>Name</label>
+          <label style={{ fontSize: "11px", color: "#999999" }}>Name</label>
           <input
             autoFocus
             value={name}
@@ -153,10 +153,10 @@ export default function CreateZoneModal({
             }}
             placeholder="e.g. Search Area Alpha"
             style={{
-              background: "#0D0F12",
-              border: "1px solid #2A2F38",
+              background: "#0D0D0D",
+              border: "1px solid #2D2D2D",
               borderRadius: "6px",
-              color: "#E8EAED",
+              color: "#EFEFEF",
               fontSize: "13px",
               padding: "8px 10px",
               outline: "none",
@@ -166,7 +166,7 @@ export default function CreateZoneModal({
 
         {/* Zone type */}
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <label style={{ fontSize: "11px", color: "#8B95A3" }}>Type</label>
+          <label style={{ fontSize: "11px", color: "#999999" }}>Type</label>
           <div
             style={{
               display: "grid",
@@ -184,7 +184,7 @@ export default function CreateZoneModal({
                   gap: "7px",
                   padding: "7px 10px",
                   borderRadius: "6px",
-                  border: `1px solid ${zoneType === t.value ? t.color : "#2A2F38"}`,
+                  border: `1px solid ${zoneType === t.value ? t.color : "#2D2D2D"}`,
                   backgroundColor:
                     zoneType === t.value ? `${t.color}18` : "transparent",
                   cursor: "pointer",
@@ -205,12 +205,12 @@ export default function CreateZoneModal({
                     style={{
                       fontSize: "11px",
                       fontWeight: 500,
-                      color: "#E8EAED",
+                      color: "#EFEFEF",
                     }}
                   >
                     {t.label}
                   </div>
-                  <div style={{ fontSize: "9px", color: "#8B95A3" }}>
+                  <div style={{ fontSize: "9px", color: "#999999" }}>
                     {t.desc}
                   </div>
                 </div>
@@ -232,8 +232,8 @@ export default function CreateZoneModal({
               padding: "8px 0",
               borderRadius: "6px",
               background: "none",
-              border: "1px solid #2A2F38",
-              color: "#8B95A3",
+              border: "1px solid #2D2D2D",
+              color: "#999999",
               fontSize: "12px",
               cursor: "pointer",
             }}
@@ -247,9 +247,9 @@ export default function CreateZoneModal({
               flex: 1,
               padding: "8px 0",
               borderRadius: "6px",
-              backgroundColor: isPending ? "#2A2F38" : selectedType.color,
+              backgroundColor: isPending ? "#2D2D2D" : selectedType.color,
               border: "none",
-              color: isPending ? "#8B95A3" : "#fff",
+              color: isPending ? "#999999" : "#fff",
               fontSize: "12px",
               fontWeight: 500,
               cursor: isPending ? "not-allowed" : "pointer",

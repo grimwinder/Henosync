@@ -1,6 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import * as api from "../lib/api";
 import { useSystemStore } from "../stores";
+import type { MissionEngineStatus } from "../types";
 
 export function useHealth() {
   const setHealth = useSystemStore((s) => s.setHealth);
@@ -24,4 +25,13 @@ export function useHealth() {
 
 export function useEmergencyStop() {
   return useMutation({ mutationFn: api.emergencyStop });
+}
+
+export function useMissionEngineStatus() {
+  return useQuery<MissionEngineStatus>({
+    queryKey: ["mission-engine-status"],
+    queryFn: api.getMissionEngineStatus,
+    refetchInterval: 2_000,
+    retry: false,
+  });
 }

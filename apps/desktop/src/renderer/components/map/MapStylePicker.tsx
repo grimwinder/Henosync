@@ -7,6 +7,7 @@ import {
   ScanLine,
   Moon,
   Sun,
+  Crosshair,
 } from "lucide-react";
 import type { MapBase, MapTheme } from "./MissionMap";
 
@@ -28,6 +29,8 @@ interface MapStylePickerProps {
   onChangeTheme: (theme: MapTheme) => void;
   /** Where the trigger button sits on the map */
   position?: "top-center" | "top-right";
+  /** Optional: render a center-on-hub button alongside the layers button */
+  onCenterHub?: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -38,6 +41,7 @@ export default function MapStylePicker({
   onChangeBase,
   onChangeTheme,
   position = "top-center",
+  onCenterHub,
 }: MapStylePickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -75,43 +79,69 @@ export default function MapStylePicker({
       ? { left: "50%", transform: "translateX(-50%)" }
       : { right: 0 };
 
+  const btnStyle = (active: boolean): React.CSSProperties => ({
+    width: "32px",
+    height: "32px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "8px",
+    backgroundColor: active ? "#4A9EFF22" : "#141414",
+    border: `1px solid ${active ? "#4A9EFF" : "#2D2D2D"}`,
+    color: active ? "#4A9EFF" : "#999999",
+    cursor: "pointer",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+    transition: "all 150ms",
+  });
+
+  function addHover(btn: HTMLButtonElement, active: boolean) {
+    if (!active) {
+      btn.style.backgroundColor = "#1C1C1C";
+      btn.style.color = "#EFEFEF";
+    }
+  }
+  function removeHover(btn: HTMLButtonElement, active: boolean) {
+    if (!active) {
+      btn.style.backgroundColor = "#141414";
+      btn.style.color = "#999999";
+    }
+  }
+
   return (
     <div ref={ref} style={triggerStyle}>
-      {/* Trigger button */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        title="Map style"
-        style={{
-          width: "32px",
-          height: "32px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: "8px",
-          backgroundColor: open ? "#4A9EFF22" : "#141619",
-          border: `1px solid ${open ? "#4A9EFF" : "#2A2F38"}`,
-          color: open ? "#4A9EFF" : "#8B95A3",
-          cursor: "pointer",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-          transition: "all 150ms",
-        }}
-        onMouseEnter={(e) => {
-          if (!open) {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#1C1F24";
-            (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+      {/* Button row: optional hub button + layers button */}
+      <div style={{ display: "flex", gap: "6px" }}>
+        {onCenterHub && (
+          <button
+            onClick={onCenterHub}
+            title="Center on hub"
+            style={btnStyle(false)}
+            onMouseEnter={(e) =>
+              addHover(e.currentTarget as HTMLButtonElement, false)
+            }
+            onMouseLeave={(e) =>
+              removeHover(e.currentTarget as HTMLButtonElement, false)
+            }
+          >
+            <Crosshair size={15} />
+          </button>
+        )}
+
+        {/* Layers / map style button */}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          title="Map style"
+          style={btnStyle(open)}
+          onMouseEnter={(e) =>
+            addHover(e.currentTarget as HTMLButtonElement, open)
           }
-        }}
-        onMouseLeave={(e) => {
-          if (!open) {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#141619";
-            (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+          onMouseLeave={(e) =>
+            removeHover(e.currentTarget as HTMLButtonElement, open)
           }
-        }}
-      >
-        <Layers size={15} />
-      </button>
+        >
+          <Layers size={15} />
+        </button>
+      </div>
 
       {/* Popup */}
       {open && (
@@ -120,8 +150,8 @@ export default function MapStylePicker({
             position: "absolute",
             top: "calc(100% + 8px)",
             ...popupAlign,
-            backgroundColor: "#141619",
-            border: "1px solid #2A2F38",
+            backgroundColor: "#141414",
+            border: "1px solid #2D2D2D",
             borderRadius: "10px",
             padding: "14px",
             boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
@@ -138,7 +168,7 @@ export default function MapStylePicker({
                 fontSize: "10px",
                 fontWeight: 600,
                 letterSpacing: "0.8px",
-                color: "#555F6E",
+                color: "#666666",
                 textTransform: "uppercase",
               }}
             >
@@ -167,9 +197,9 @@ export default function MapStylePicker({
                       gap: "5px",
                       padding: "10px 6px",
                       borderRadius: "7px",
-                      border: `1px solid ${active ? "#4A9EFF" : "#2A2F38"}`,
-                      backgroundColor: active ? "#4A9EFF18" : "#0D0F12",
-                      color: active ? "#4A9EFF" : "#8B95A3",
+                      border: `1px solid ${active ? "#4A9EFF" : "#2D2D2D"}`,
+                      backgroundColor: active ? "#4A9EFF18" : "#0D0D0D",
+                      color: active ? "#4A9EFF" : "#999999",
                       cursor: "pointer",
                       fontSize: "10px",
                       fontWeight: 500,
@@ -179,18 +209,18 @@ export default function MapStylePicker({
                       if (!active) {
                         (
                           e.currentTarget as HTMLButtonElement
-                        ).style.backgroundColor = "#1C1F24";
+                        ).style.backgroundColor = "#1C1C1C";
                         (e.currentTarget as HTMLButtonElement).style.color =
-                          "#E8EAED";
+                          "#EFEFEF";
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (!active) {
                         (
                           e.currentTarget as HTMLButtonElement
-                        ).style.backgroundColor = "#0D0F12";
+                        ).style.backgroundColor = "#0D0D0D";
                         (e.currentTarget as HTMLButtonElement).style.color =
-                          "#8B95A3";
+                          "#999999";
                       }
                     }}
                   >
@@ -203,7 +233,7 @@ export default function MapStylePicker({
           </div>
 
           {/* Divider */}
-          <div style={{ height: "1px", backgroundColor: "#2A2F38" }} />
+          <div style={{ height: "1px", backgroundColor: "#2D2D2D" }} />
 
           {/* Theme toggle */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -212,7 +242,7 @@ export default function MapStylePicker({
                 fontSize: "10px",
                 fontWeight: 600,
                 letterSpacing: "0.8px",
-                color: "#555F6E",
+                color: "#666666",
                 textTransform: "uppercase",
               }}
             >
@@ -236,9 +266,9 @@ export default function MapStylePicker({
                       gap: "5px",
                       padding: "7px 0",
                       borderRadius: "7px",
-                      border: `1px solid ${active ? "#4A9EFF" : "#2A2F38"}`,
-                      backgroundColor: active ? "#4A9EFF18" : "#0D0F12",
-                      color: active ? "#4A9EFF" : "#8B95A3",
+                      border: `1px solid ${active ? "#4A9EFF" : "#2D2D2D"}`,
+                      backgroundColor: active ? "#4A9EFF18" : "#0D0D0D",
+                      color: active ? "#4A9EFF" : "#999999",
                       cursor: "pointer",
                       fontSize: "11px",
                       fontWeight: 500,
@@ -248,18 +278,18 @@ export default function MapStylePicker({
                       if (!active) {
                         (
                           e.currentTarget as HTMLButtonElement
-                        ).style.backgroundColor = "#1C1F24";
+                        ).style.backgroundColor = "#1C1C1C";
                         (e.currentTarget as HTMLButtonElement).style.color =
-                          "#E8EAED";
+                          "#EFEFEF";
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (!active) {
                         (
                           e.currentTarget as HTMLButtonElement
-                        ).style.backgroundColor = "#0D0F12";
+                        ).style.backgroundColor = "#0D0D0D";
                         (e.currentTarget as HTMLButtonElement).style.color =
-                          "#8B95A3";
+                          "#999999";
                       }
                     }}
                   >

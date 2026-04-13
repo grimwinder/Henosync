@@ -23,7 +23,7 @@ const ZONE_TYPE_COLORS: Record<ZoneType, string> = {
   safe_return: "#3DD68C",
   coverage: "#A78BFA",
   alert: "#F5A623",
-  custom: "#8B95A3",
+  custom: "#999999",
 };
 
 /** Approximate a circle as a closed GeoJSON ring [lon, lat][]. */
@@ -160,8 +160,8 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
         right: 0,
         height: "100%",
         width: "260px",
-        backgroundColor: "#141619",
-        borderLeft: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        borderLeft: "1px solid #2D2D2D",
         display: "flex",
         flexDirection: "column",
         zIndex: 10,
@@ -171,7 +171,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
       <div
         style={{
           padding: "12px 14px",
-          borderBottom: "1px solid #2A2F38",
+          borderBottom: "1px solid #2D2D2D",
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
@@ -183,7 +183,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
             fontSize: "11px",
             fontWeight: 600,
             letterSpacing: "1px",
-            color: "#8B95A3",
+            color: "#999999",
           }}
         >
           MERGE ZONES
@@ -194,16 +194,16 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
           style={{
             background: "none",
             border: "none",
-            color: "#8B95A3",
+            color: "#999999",
             cursor: "pointer",
             padding: "2px",
             display: "flex",
           }}
           onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+            (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+            (e.currentTarget as HTMLButtonElement).style.color = "#999999";
           }}
         >
           <X size={14} />
@@ -214,14 +214,14 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
       <div style={{ flex: 1, overflowY: "auto" }}>
         {/* Name input */}
         <div
-          style={{ padding: "12px 14px", borderBottom: "1px solid #2A2F38" }}
+          style={{ padding: "12px 14px", borderBottom: "1px solid #2D2D2D" }}
         >
           <div
             style={{
               fontSize: "10px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               marginBottom: "8px",
             }}
           >
@@ -236,9 +236,9 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
               boxSizing: "border-box",
               padding: "7px 10px",
               borderRadius: "5px",
-              border: "1px solid #2A2F38",
-              backgroundColor: "#1C1F24",
-              color: "#E8EAED",
+              border: "1px solid #2D2D2D",
+              backgroundColor: "#1C1C1C",
+              color: "#EFEFEF",
               fontSize: "12px",
               outline: "none",
             }}
@@ -247,14 +247,14 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
 
         {/* Zone selector */}
         <div
-          style={{ padding: "12px 14px", borderBottom: "1px solid #2A2F38" }}
+          style={{ padding: "12px 14px", borderBottom: "1px solid #2D2D2D" }}
         >
           <div
             style={{
               fontSize: "10px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               marginBottom: "8px",
             }}
           >
@@ -278,7 +278,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
             </div>
           )}
           {zones.length === 0 ? (
-            <div style={{ fontSize: "11px", color: "#8B95A3" }}>
+            <div style={{ fontSize: "11px", color: "#999999" }}>
               No zones available.
             </div>
           ) : (
@@ -286,7 +286,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
               const color =
                 zone.color ||
                 ZONE_TYPE_COLORS[zone.zone_type as ZoneType] ||
-                "#8B95A3";
+                "#999999";
               const checked = selectedIds.has(zone.id);
               return (
                 <div
@@ -298,7 +298,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
                     gap: "10px",
                     padding: "7px 0",
                     cursor: "pointer",
-                    borderBottom: "1px solid #1C1F24",
+                    borderBottom: "1px solid #1C1C1C",
                   }}
                 >
                   <div
@@ -306,7 +306,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
                       width: "14px",
                       height: "14px",
                       borderRadius: "3px",
-                      border: `1.5px solid ${checked ? color : "#2A2F38"}`,
+                      border: `1.5px solid ${checked ? color : "#2D2D2D"}`,
                       backgroundColor: checked ? `${color}33` : "transparent",
                       flexShrink: 0,
                       display: "flex",
@@ -338,7 +338,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
                     <div
                       style={{
                         fontSize: "12px",
-                        color: "#E8EAED",
+                        color: "#EFEFEF",
                         fontWeight: 500,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -347,7 +347,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
                     >
                       {zone.name}
                     </div>
-                    <div style={{ fontSize: "10px", color: "#8B95A3" }}>
+                    <div style={{ fontSize: "10px", color: "#999999" }}>
                       {ZONE_TYPE_LABELS[zone.zone_type as ZoneType] ??
                         zone.zone_type}
                     </div>
@@ -365,7 +365,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
               fontSize: "10px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               marginBottom: "8px",
             }}
           >
@@ -389,9 +389,9 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
                     style={{
                       padding: "6px 8px",
                       borderRadius: "5px",
-                      border: `1px solid ${active ? color : "#2A2F38"}`,
+                      border: `1px solid ${active ? color : "#2D2D2D"}`,
                       backgroundColor: active ? `${color}22` : "transparent",
-                      color: active ? color : "#8B95A3",
+                      color: active ? color : "#999999",
                       fontSize: "11px",
                       cursor: "pointer",
                       textAlign: "left",
@@ -411,7 +411,7 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
       <div
         style={{
           padding: "12px 14px",
-          borderTop: "1px solid #2A2F38",
+          borderTop: "1px solid #2D2D2D",
           flexShrink: 0,
         }}
       >
@@ -423,8 +423,8 @@ export default function MergeZonesPanel({ onClose }: MergeZonesPanelProps) {
             padding: "9px",
             borderRadius: "6px",
             border: "none",
-            backgroundColor: canCreate ? "#4A9EFF" : "#2A2F38",
-            color: canCreate ? "#fff" : "#8B95A3",
+            backgroundColor: canCreate ? "#4A9EFF" : "#2D2D2D",
+            color: canCreate ? "#fff" : "#999999",
             fontSize: "12px",
             fontWeight: 600,
             cursor: canCreate ? "pointer" : "not-allowed",

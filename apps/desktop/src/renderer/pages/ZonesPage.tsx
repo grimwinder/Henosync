@@ -112,7 +112,7 @@ export default function ZonesPage() {
       const el = document.createElement("div");
       el.style.cssText = [
         "width:20px;height:20px;border-radius:50%",
-        "background:#141619;border:1.5px solid #4A9EFF",
+        "background:#141414;border:1.5px solid #4A9EFF",
         "display:flex;align-items:center;justify-content:center",
         "font-size:9px;font-weight:700;color:#4A9EFF",
         "font-family:Inter,sans-serif;pointer-events:none",
@@ -246,7 +246,7 @@ export default function ZonesPage() {
         "circle-radius": 4,
         "circle-color": "#4A9EFF",
         "circle-stroke-width": 1.5,
-        "circle-stroke-color": "#0D0F12",
+        "circle-stroke-color": "#0D0D0D",
       },
     });
 
@@ -500,8 +500,8 @@ export default function ZonesPage() {
             bottom: "32px",
             left: "50%",
             transform: "translateX(-50%)",
-            backgroundColor: "#141619CC",
-            border: "1px solid #2A2F38",
+            backgroundColor: "#141414CC",
+            border: "1px solid #2D2D2D",
             borderRadius: "6px",
             padding: "4px 10px",
             zIndex: 10,
@@ -556,14 +556,14 @@ export default function ZonesPage() {
 function CoordDisplay({ label, value }: { label: string; value: number }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}>
-      <span style={{ fontSize: "9px", color: "#8B95A3", letterSpacing: "1px" }}>
+      <span style={{ fontSize: "9px", color: "#999999", letterSpacing: "1px" }}>
         {label}
       </span>
       <span
         style={{
           fontSize: "11px",
-          color: "#E8EAED",
-          fontFamily: "JetBrains Mono, monospace",
+          color: "#EFEFEF",
+          fontFamily: "Inter, sans-serif",
         }}
       >
         {value.toFixed(6)}°

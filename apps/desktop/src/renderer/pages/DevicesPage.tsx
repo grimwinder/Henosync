@@ -12,7 +12,7 @@ const STATUS_COLOR: Record<NodeStatus, string> = {
   online: "#3DD68C",
   connecting: "#F5A623",
   degraded: "#F5A623",
-  offline: "#8B95A3",
+  offline: "#999999",
   error: "#F05252",
 };
 
@@ -71,7 +71,7 @@ function Section({
           fontSize: "10px",
           fontWeight: 600,
           letterSpacing: "1px",
-          color: "#8B95A3",
+          color: "#999999",
           textTransform: "uppercase",
           marginBottom: "8px",
         }}
@@ -92,17 +92,17 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
         alignItems: "baseline",
         gap: "8px",
         padding: "5px 0",
-        borderBottom: "1px solid #252A31",
+        borderBottom: "1px solid #242424",
       }}
     >
-      <span style={{ fontSize: "11px", color: "#8B95A3", flexShrink: 0 }}>
+      <span style={{ fontSize: "11px", color: "#999999", flexShrink: 0 }}>
         {label}
       </span>
       <span
         style={{
           fontSize: "11px",
-          color: "#E8EAED",
-          fontFamily: "JetBrains Mono, monospace",
+          color: "#EFEFEF",
+          fontFamily: "Inter, sans-serif",
           textAlign: "right",
           wordBreak: "break-all",
         }}
@@ -127,9 +127,9 @@ function DeviceRow({ node }: { node: Node }) {
         width: "100%",
         textAlign: "left",
         padding: "10px 14px",
-        backgroundColor: selected ? "#1C1F24" : "transparent",
+        backgroundColor: selected ? "#1C1C1C" : "transparent",
         border: "none",
-        borderBottom: "1px solid #2A2F38",
+        borderBottom: "1px solid #2D2D2D",
         cursor: "pointer",
         display: "flex",
         alignItems: "center",
@@ -139,7 +139,7 @@ function DeviceRow({ node }: { node: Node }) {
       onMouseEnter={(e) => {
         if (!selected)
           (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-            "#1C1F24";
+            "#1C1C1C";
       }}
       onMouseLeave={(e) => {
         if (!selected)
@@ -151,14 +151,14 @@ function DeviceRow({ node }: { node: Node }) {
       <DeviceIcon
         category={node.specs?.category}
         size={20}
-        color={selected ? "#4A9EFF" : "#8B95A3"}
+        color={selected ? "#4A9EFF" : "#999999"}
       />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
             fontSize: "12px",
             fontWeight: 500,
-            color: "#E8EAED",
+            color: "#EFEFEF",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -211,8 +211,8 @@ function DeviceConfigPanel({ node }: { node: Node }) {
       <div
         style={{
           padding: "24px 32px 20px",
-          borderBottom: "1px solid #2A2F38",
-          backgroundColor: "#0D0F12",
+          borderBottom: "1px solid #2D2D2D",
+          backgroundColor: "#0D0D0D",
           display: "flex",
           alignItems: "center",
           gap: "20px",
@@ -225,7 +225,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
             style={{
               fontSize: "18px",
               fontWeight: 600,
-              color: "#E8EAED",
+              color: "#EFEFEF",
               marginBottom: "8px",
             }}
           >
@@ -283,7 +283,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
                   borderRadius: "12px",
                   backgroundColor: "transparent",
                   border: "1px solid #4A9EFF40",
-                  color: isReconnecting ? "#8B95A3" : "#4A9EFF",
+                  color: isReconnecting ? "#999999" : "#4A9EFF",
                   fontSize: "11px",
                   fontWeight: 500,
                   cursor: isReconnecting ? "not-allowed" : "pointer",
@@ -333,7 +333,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
             <p
               style={{
                 fontSize: "11px",
-                color: "#8B95A3",
+                color: "#999999",
                 fontStyle: "italic",
                 margin: 0,
                 paddingBottom: "4px",
@@ -441,7 +441,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
                     fontSize: "10px",
                     fontWeight: 500,
                     color: cap.destructive ? "#F05252" : "#4A9EFF",
-                    fontFamily: "JetBrains Mono, monospace",
+                    fontFamily: "Inter, sans-serif",
                     cursor: "default",
                   }}
                 >
@@ -507,7 +507,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
         <div
           style={{
             paddingTop: "20px",
-            borderTop: "1px solid #2A2F38",
+            borderTop: "1px solid #2D2D2D",
           }}
         >
           <div
@@ -515,7 +515,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
               fontSize: "10px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               textTransform: "uppercase",
               marginBottom: "12px",
             }}
@@ -527,7 +527,7 @@ function DeviceConfigPanel({ node }: { node: Node }) {
               <p
                 style={{
                   fontSize: "12px",
-                  color: "#E8EAED",
+                  color: "#EFEFEF",
                   marginBottom: "14px",
                   lineHeight: "1.6",
                 }}
@@ -543,8 +543,8 @@ function DeviceConfigPanel({ node }: { node: Node }) {
                     padding: "8px 0",
                     borderRadius: "6px",
                     background: "none",
-                    border: "1px solid #2A2F38",
-                    color: "#8B95A3",
+                    border: "1px solid #2D2D2D",
+                    color: "#999999",
                     fontSize: "12px",
                     cursor: "pointer",
                   }}
@@ -562,9 +562,9 @@ function DeviceConfigPanel({ node }: { node: Node }) {
                     flex: 1,
                     padding: "8px 0",
                     borderRadius: "6px",
-                    backgroundColor: isRemoving ? "#2A2F38" : "#F05252",
+                    backgroundColor: isRemoving ? "#2D2D2D" : "#F05252",
                     border: "none",
-                    color: isRemoving ? "#8B95A3" : "white",
+                    color: isRemoving ? "#999999" : "white",
                     fontSize: "12px",
                     fontWeight: 500,
                     cursor: isRemoving ? "not-allowed" : "pointer",
@@ -652,16 +652,16 @@ export default function DevicesPage() {
         display: "flex",
         flex: 1,
         overflow: "hidden",
-        backgroundColor: "#0D0F12",
+        backgroundColor: "#0D0D0D",
       }}
     >
       {/* ── Left sidebar ────────────────────────────────────────────────── */}
       <div
         style={{
-          width: "260px",
+          width: "240px",
           flexShrink: 0,
-          backgroundColor: "#141619",
-          borderRight: "1px solid #2A2F38",
+          backgroundColor: "#141414",
+          borderRight: "1px solid #2D2D2D",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -676,7 +676,8 @@ export default function DevicesPage() {
             alignItems: "center",
             justifyContent: "space-between",
             padding: "0 8px 0 14px",
-            borderBottom: "1px solid #2A2F38",
+            backgroundColor: "#0D0D0D",
+            borderBottom: "1px solid #2D2D2D",
           }}
         >
           <span
@@ -684,14 +685,14 @@ export default function DevicesPage() {
               fontSize: "11px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               textTransform: "uppercase",
             }}
           >
             Devices
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+            <span style={{ fontSize: "11px", color: "#999999" }}>
               {online}/{nodes.length}
             </span>
             <button
@@ -706,19 +707,19 @@ export default function DevicesPage() {
                 borderRadius: "4px",
                 border: "none",
                 backgroundColor: "transparent",
-                color: "#8B95A3",
+                color: "#999999",
                 cursor: "pointer",
                 transition: "background-color 150ms, color 150ms",
               }}
               onMouseEnter={(e) => {
                 const b = e.currentTarget as HTMLButtonElement;
-                b.style.backgroundColor = "#252A31";
+                b.style.backgroundColor = "#242424";
                 b.style.color = "#4A9EFF";
               }}
               onMouseLeave={(e) => {
                 const b = e.currentTarget as HTMLButtonElement;
                 b.style.backgroundColor = "transparent";
-                b.style.color = "#8B95A3";
+                b.style.color = "#999999";
               }}
             >
               <Plus size={13} />
@@ -730,14 +731,14 @@ export default function DevicesPage() {
         <div
           style={{
             padding: "8px 10px",
-            borderBottom: "1px solid #2A2F38",
+            borderBottom: "1px solid #2D2D2D",
             flexShrink: 0,
             display: "flex",
             alignItems: "center",
             gap: "6px",
           }}
         >
-          <Search size={12} color="#8B95A3" style={{ flexShrink: 0 }} />
+          <Search size={12} color="#999999" style={{ flexShrink: 0 }} />
           <input
             type="text"
             placeholder="Search devices…"
@@ -749,7 +750,7 @@ export default function DevicesPage() {
               border: "none",
               outline: "none",
               fontSize: "12px",
-              color: "#E8EAED",
+              color: "#EFEFEF",
               fontFamily: "Inter, sans-serif",
             }}
           />
@@ -760,7 +761,7 @@ export default function DevicesPage() {
           style={{
             display: "flex",
             flexShrink: 0,
-            borderBottom: "1px solid #2A2F38",
+            borderBottom: "1px solid #2D2D2D",
           }}
         >
           {(["all", "online", "offline"] as FilterTab[]).map((tab) => (
@@ -775,7 +776,7 @@ export default function DevicesPage() {
                 fontSize: "10px",
                 fontWeight: 500,
                 letterSpacing: "0.5px",
-                color: filter === tab ? "#4A9EFF" : "#8B95A3",
+                color: filter === tab ? "#4A9EFF" : "#999999",
                 borderBottom: `2px solid ${filter === tab ? "#4A9EFF" : "transparent"}`,
                 cursor: "pointer",
                 transition: "color 150ms",
@@ -793,7 +794,7 @@ export default function DevicesPage() {
               style={{
                 padding: "24px 14px",
                 textAlign: "center",
-                color: "#8B95A3",
+                color: "#999999",
                 fontSize: "11px",
                 lineHeight: "1.6",
               }}
@@ -830,8 +831,8 @@ export default function DevicesPage() {
               gap: "12px",
             }}
           >
-            <Cpu size={40} color="#2A2F38" />
-            <span style={{ fontSize: "13px", color: "#8B95A3" }}>
+            <Cpu size={40} color="#2D2D2D" />
+            <span style={{ fontSize: "13px", color: "#999999" }}>
               Select a device to view its configuration
             </span>
             {nodes.length === 0 && (

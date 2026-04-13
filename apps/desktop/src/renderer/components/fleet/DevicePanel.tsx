@@ -32,7 +32,7 @@ const STATUS_COLOR: Record<NodeStatus, string> = {
   online: "#3DD68C",
   connecting: "#F5A623",
   degraded: "#F5A623",
-  offline: "#8B95A3",
+  offline: "#999999",
   error: "#F05252",
 };
 
@@ -137,9 +137,9 @@ function DeviceCard({ node }: { node: Node }) {
         width: "100%",
         textAlign: "left",
         padding: "10px 12px",
-        backgroundColor: selected ? "#1C1F24" : "transparent",
+        backgroundColor: selected ? "#1C1C1C" : "transparent",
         border: "none",
-        borderBottom: "1px solid #2A2F38",
+        borderBottom: "1px solid #2D2D2D",
         cursor: "pointer",
         display: "flex",
         flexDirection: "row",
@@ -150,7 +150,7 @@ function DeviceCard({ node }: { node: Node }) {
       onMouseEnter={(e) => {
         if (!selected)
           (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-            "#1C1F24";
+            "#1C1C1C";
       }}
       onMouseLeave={(e) => {
         if (!selected)
@@ -160,7 +160,7 @@ function DeviceCard({ node }: { node: Node }) {
     >
       {/* Device type icon */}
       <div style={{ flexShrink: 0 }}>
-        <DeviceIcon category={category} size={36} color={statusColor} />
+        <DeviceIcon category={category} size={36} color="#EFEFEF" />
       </div>
 
       {/* Right content */}
@@ -179,7 +179,7 @@ function DeviceCard({ node }: { node: Node }) {
             style={{
               fontSize: "12px",
               fontWeight: 600,
-              color: "#E8EAED",
+              color: "#EFEFEF",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -199,7 +199,7 @@ function DeviceCard({ node }: { node: Node }) {
               color: statusColor,
               fontSize: "9px",
               fontWeight: 700,
-              fontFamily: "JetBrains Mono, monospace",
+              fontFamily: "Inter, sans-serif",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -212,7 +212,7 @@ function DeviceCard({ node }: { node: Node }) {
         </div>
 
         {/* Category label */}
-        <span style={{ fontSize: "10px", color: "#8B95A3" }}>
+        <span style={{ fontSize: "10px", color: "#999999" }}>
           {CATEGORY_LABEL[category]}
         </span>
 
@@ -230,15 +230,15 @@ function DeviceCard({ node }: { node: Node }) {
               <CapabilityBadge
                 key={cs.capability}
                 cap={cs.capability}
-                color="#4A9EFF"
+                color="#666666"
               />
             ))}
           </div>
           <span
             style={{
               fontSize: "9px",
-              color: "#555F6E",
-              fontFamily: "JetBrains Mono, monospace",
+              color: "#666666",
+              fontFamily: "Inter, sans-serif",
               flexShrink: 0,
               marginLeft: "6px",
             }}
@@ -246,6 +246,56 @@ function DeviceCard({ node }: { node: Node }) {
             {shortId}
           </span>
         </div>
+
+        {/* Battery bar */}
+        {node.battery_percent !== null &&
+          node.battery_percent !== undefined && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                marginTop: "4px",
+              }}
+            >
+              <div
+                style={{
+                  flex: 1,
+                  height: "3px",
+                  borderRadius: "2px",
+                  backgroundColor: "#2D2D2D",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, Math.max(0, node.battery_percent))}%`,
+                    borderRadius: "2px",
+                    backgroundColor:
+                      node.battery_percent > 50
+                        ? "#3DD68C"
+                        : node.battery_percent > 20
+                          ? "#F5A623"
+                          : "#F05252",
+                    transition: "width 400ms ease",
+                  }}
+                />
+              </div>
+              <span
+                style={{
+                  fontSize: "9px",
+                  color: "#666666",
+                  fontFamily: "Inter, sans-serif",
+                  flexShrink: 0,
+                  minWidth: "24px",
+                  textAlign: "right",
+                }}
+              >
+                {Math.round(node.battery_percent)}%
+              </span>
+            </div>
+          )}
       </div>
     </button>
   );
@@ -272,9 +322,9 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
         style={{
           width: "240px",
           height: "100%",
-          backgroundColor: "#141619",
-          borderRight: "1px solid #2A2F38",
-          borderBottom: "1px solid #2A2F38",
+          backgroundColor: "#141414",
+          borderRight: "1px solid #2D2D2D",
+          borderBottom: "1px solid #2D2D2D",
           borderBottomRightRadius: "8px",
           display: "flex",
           flexDirection: "column",
@@ -286,7 +336,8 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
           style={{
             padding: "0 8px 0 12px",
             height: "36px",
-            borderBottom: "1px solid #2A2F38",
+            backgroundColor: "#0D0D0D",
+            borderBottom: "1px solid #2D2D2D",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -298,14 +349,14 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
               fontSize: "11px",
               fontWeight: 600,
               letterSpacing: "1px",
-              color: "#8B95A3",
+              color: "#999999",
               textTransform: "uppercase",
             }}
           >
             Fleet
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+            <span style={{ fontSize: "11px", color: "#999999" }}>
               {online}/{nodes.length}
             </span>
             {!readOnly && (
@@ -321,19 +372,19 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
                   borderRadius: "4px",
                   border: "none",
                   backgroundColor: "transparent",
-                  color: "#8B95A3",
+                  color: "#999999",
                   cursor: "pointer",
                   transition: "background-color 150ms, color 150ms",
                 }}
                 onMouseEnter={(e) => {
                   const b = e.currentTarget as HTMLButtonElement;
-                  b.style.backgroundColor = "#252A31";
+                  b.style.backgroundColor = "#242424";
                   b.style.color = "#4A9EFF";
                 }}
                 onMouseLeave={(e) => {
                   const b = e.currentTarget as HTMLButtonElement;
                   b.style.backgroundColor = "transparent";
-                  b.style.color = "#8B95A3";
+                  b.style.color = "#999999";
                 }}
               >
                 <Plus size={13} />
@@ -349,7 +400,7 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
               style={{
                 padding: "24px 12px",
                 textAlign: "center",
-                color: "#8B95A3",
+                color: "#999999",
                 fontSize: "11px",
                 lineHeight: "1.6",
               }}

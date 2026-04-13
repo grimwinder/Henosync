@@ -19,7 +19,7 @@ const STATUS_COLOR: Record<NodeStatus, string> = {
   online: "#3DD68C",
   connecting: "#F5A623",
   degraded: "#F5A623",
-  offline: "#8B95A3",
+  offline: "#999999",
   error: "#F05252",
 };
 
@@ -32,17 +32,17 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
         alignItems: "baseline",
         gap: "8px",
         padding: "5px 0",
-        borderBottom: "1px solid #252A31",
+        borderBottom: "1px solid #242424",
       }}
     >
-      <span style={{ fontSize: "11px", color: "#8B95A3", flexShrink: 0 }}>
+      <span style={{ fontSize: "11px", color: "#999999", flexShrink: 0 }}>
         {label}
       </span>
       <span
         style={{
           fontSize: "11px",
-          color: "#E8EAED",
-          fontFamily: "JetBrains Mono, monospace",
+          color: "#EFEFEF",
+          fontFamily: "Inter, sans-serif",
           textAlign: "right",
           wordBreak: "break-all",
         }}
@@ -67,7 +67,7 @@ function Section({
           fontSize: "10px",
           fontWeight: 600,
           letterSpacing: "1px",
-          color: "#8B95A3",
+          color: "#999999",
           textTransform: "uppercase",
           marginBottom: "6px",
         }}
@@ -119,8 +119,8 @@ export default function DeviceDetailPanel({
       style={{
         width: "260px",
         height: "100%",
-        backgroundColor: "#141619",
-        borderLeft: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        borderLeft: "1px solid #2D2D2D",
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
@@ -144,7 +144,8 @@ export default function DeviceDetailPanel({
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 8px 0 12px",
-          borderBottom: "1px solid #2A2F38",
+          backgroundColor: "#0D0D0D",
+          borderBottom: "1px solid #2D2D2D",
         }}
       >
         <span
@@ -152,7 +153,7 @@ export default function DeviceDetailPanel({
             fontSize: "11px",
             fontWeight: 600,
             letterSpacing: "1px",
-            color: "#8B95A3",
+            color: "#999999",
             textTransform: "uppercase",
           }}
         >
@@ -164,16 +165,16 @@ export default function DeviceDetailPanel({
             background: "none",
             border: "none",
             cursor: "pointer",
-            color: "#8B95A3",
+            color: "#999999",
             display: "flex",
             padding: "4px",
             borderRadius: "4px",
           }}
           onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+            (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+            (e.currentTarget as HTMLButtonElement).style.color = "#999999";
           }}
         >
           <X size={13} />
@@ -190,8 +191,8 @@ export default function DeviceDetailPanel({
             alignItems: "center",
             justifyContent: "center",
             padding: "24px 16px 20px",
-            backgroundColor: "#0D0F12",
-            borderBottom: "1px solid #2A2F38",
+            backgroundColor: "#0D0D0D",
+            borderBottom: "1px solid #2D2D2D",
             gap: "12px",
           }}
         >
@@ -202,7 +203,7 @@ export default function DeviceDetailPanel({
             style={{
               fontSize: "14px",
               fontWeight: 600,
-              color: "#E8EAED",
+              color: "#EFEFEF",
               textAlign: "center",
             }}
           >
@@ -322,7 +323,7 @@ export default function DeviceDetailPanel({
           style={{
             flexShrink: 0,
             padding: "12px 14px",
-            borderTop: "1px solid #2A2F38",
+            borderTop: "1px solid #2D2D2D",
           }}
         >
           {confirmDelete ? (
@@ -334,8 +335,8 @@ export default function DeviceDetailPanel({
                   padding: "7px 0",
                   borderRadius: "6px",
                   background: "none",
-                  border: "1px solid #2A2F38",
-                  color: "#8B95A3",
+                  border: "1px solid #2D2D2D",
+                  color: "#999999",
                   fontSize: "12px",
                   cursor: "pointer",
                 }}
@@ -349,9 +350,9 @@ export default function DeviceDetailPanel({
                   flex: 1,
                   padding: "7px 0",
                   borderRadius: "6px",
-                  backgroundColor: isRemoving ? "#2A2F38" : "#F05252",
+                  backgroundColor: isRemoving ? "#2D2D2D" : "#F05252",
                   border: "none",
-                  color: isRemoving ? "#8B95A3" : "white",
+                  color: isRemoving ? "#999999" : "white",
                   fontSize: "12px",
                   fontWeight: 500,
                   cursor: isRemoving ? "not-allowed" : "pointer",

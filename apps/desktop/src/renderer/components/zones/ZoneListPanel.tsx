@@ -21,7 +21,7 @@ const ZONE_TYPE_COLORS: Record<ZoneType, string> = {
   safe_return: "#3DD68C",
   coverage: "#A78BFA",
   alert: "#F5A623",
-  custom: "#8B95A3",
+  custom: "#999999",
 };
 
 const MARKER_TYPE_LABELS: Record<MarkerType, string> = {
@@ -69,10 +69,10 @@ export default function ZoneListPanel() {
   return (
     <div
       style={{
-        width: "220px",
-        backgroundColor: "#141619",
-        borderRight: "1px solid #2A2F38",
-        borderBottom: "1px solid #2A2F38",
+        width: "240px",
+        backgroundColor: "#141414",
+        borderRight: "1px solid #2D2D2D",
+        borderBottom: "1px solid #2D2D2D",
         borderBottomRightRadius: "8px",
         display: "flex",
         flexDirection: "column",
@@ -83,8 +83,10 @@ export default function ZoneListPanel() {
       {/* ── ZONES section ── */}
       <div
         style={{
-          padding: "10px 14px 8px",
-          borderBottom: "1px solid #2A2F38",
+          height: "36px",
+          padding: "0 10px 0 14px",
+          backgroundColor: "#0D0D0D",
+          borderBottom: "1px solid #2D2D2D",
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
@@ -96,12 +98,12 @@ export default function ZoneListPanel() {
             fontSize: "11px",
             fontWeight: 600,
             letterSpacing: "1px",
-            color: "#8B95A3",
+            color: "#999999",
           }}
         >
           ZONES
         </span>
-        <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+        <span style={{ fontSize: "11px", color: "#999999" }}>
           {zones.length}
         </span>
       </div>
@@ -114,7 +116,7 @@ export default function ZoneListPanel() {
             style={{
               padding: "16px 14px",
               textAlign: "center",
-              color: "#8B95A3",
+              color: "#999999",
               fontSize: "11px",
               lineHeight: 1.5,
             }}
@@ -127,7 +129,7 @@ export default function ZoneListPanel() {
             const color =
               zone.color ||
               ZONE_TYPE_COLORS[zone.zone_type as ZoneType] ||
-              "#8B95A3";
+              "#999999";
             const isSelected = selectedZoneId === zone.id;
             return (
               <div
@@ -138,9 +140,9 @@ export default function ZoneListPanel() {
                   alignItems: "center",
                   gap: "10px",
                   padding: "9px 14px",
-                  borderBottom: "1px solid #1C1F24",
+                  borderBottom: "1px solid #1C1C1C",
                   cursor: "pointer",
-                  backgroundColor: isSelected ? "#1C1F24" : "transparent",
+                  backgroundColor: isSelected ? "#1C1C1C" : "transparent",
                   borderLeft: isSelected
                     ? `2px solid ${color}`
                     : "2px solid transparent",
@@ -159,7 +161,7 @@ export default function ZoneListPanel() {
                   <div
                     style={{
                       fontSize: "12px",
-                      color: "#E8EAED",
+                      color: "#EFEFEF",
                       fontWeight: 500,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -171,7 +173,7 @@ export default function ZoneListPanel() {
                   <div
                     style={{
                       fontSize: "10px",
-                      color: "#8B95A3",
+                      color: "#999999",
                       marginTop: "1px",
                     }}
                   >
@@ -199,9 +201,9 @@ export default function ZoneListPanel() {
                         fontSize: "9px",
                         padding: "2px 5px",
                         borderRadius: "3px",
-                        border: "1px solid #2A2F38",
+                        border: "1px solid #2D2D2D",
                         backgroundColor: "transparent",
-                        color: "#8B95A3",
+                        color: "#999999",
                         cursor: "pointer",
                       }}
                     >
@@ -235,7 +237,7 @@ export default function ZoneListPanel() {
                     style={{
                       background: "none",
                       border: "none",
-                      color: "#8B95A3",
+                      color: "#999999",
                       cursor: "pointer",
                       padding: "2px",
                       display: "flex",
@@ -247,7 +249,7 @@ export default function ZoneListPanel() {
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.color =
-                        "#8B95A3";
+                        "#999999";
                     }}
                   >
                     <Trash2 size={13} />
@@ -262,9 +264,11 @@ export default function ZoneListPanel() {
       {/* ── MARKERS section ── */}
       <div
         style={{
-          padding: "10px 14px 8px",
-          borderTop: "1px solid #2A2F38",
-          borderBottom: "1px solid #2A2F38",
+          height: "36px",
+          padding: "0 10px 0 14px",
+          backgroundColor: "#0D0D0D",
+          borderTop: "1px solid #2D2D2D",
+          borderBottom: "1px solid #2D2D2D",
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
@@ -276,12 +280,12 @@ export default function ZoneListPanel() {
             fontSize: "11px",
             fontWeight: 600,
             letterSpacing: "1px",
-            color: "#8B95A3",
+            color: "#999999",
           }}
         >
           MARKERS
         </span>
-        <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+        <span style={{ fontSize: "11px", color: "#999999" }}>
           {markers.length}
         </span>
       </div>
@@ -294,7 +298,7 @@ export default function ZoneListPanel() {
             style={{
               padding: "16px 14px",
               textAlign: "center",
-              color: "#8B95A3",
+              color: "#999999",
               fontSize: "11px",
               lineHeight: 1.5,
             }}
@@ -307,7 +311,7 @@ export default function ZoneListPanel() {
             const color =
               marker.color ||
               MARKER_TYPE_COLORS[marker.marker_type as MarkerType] ||
-              "#8B95A3";
+              "#999999";
             const isSelected = selectedMarkerId === marker.id;
             return (
               <div
@@ -318,9 +322,9 @@ export default function ZoneListPanel() {
                   alignItems: "center",
                   gap: "10px",
                   padding: "9px 14px",
-                  borderBottom: "1px solid #1C1F24",
+                  borderBottom: "1px solid #1C1C1C",
                   cursor: "pointer",
-                  backgroundColor: isSelected ? "#1C1F24" : "transparent",
+                  backgroundColor: isSelected ? "#1C1C1C" : "transparent",
                   borderLeft: isSelected
                     ? `2px solid ${color}`
                     : "2px solid transparent",
@@ -331,7 +335,7 @@ export default function ZoneListPanel() {
                   <div
                     style={{
                       fontSize: "12px",
-                      color: "#E8EAED",
+                      color: "#EFEFEF",
                       fontWeight: 500,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -343,7 +347,7 @@ export default function ZoneListPanel() {
                   <div
                     style={{
                       fontSize: "10px",
-                      color: "#8B95A3",
+                      color: "#999999",
                       marginTop: "1px",
                     }}
                   >
@@ -367,9 +371,9 @@ export default function ZoneListPanel() {
                         fontSize: "9px",
                         padding: "2px 5px",
                         borderRadius: "3px",
-                        border: "1px solid #2A2F38",
+                        border: "1px solid #2D2D2D",
                         backgroundColor: "transparent",
-                        color: "#8B95A3",
+                        color: "#999999",
                         cursor: "pointer",
                       }}
                     >
@@ -403,7 +407,7 @@ export default function ZoneListPanel() {
                     style={{
                       background: "none",
                       border: "none",
-                      color: "#8B95A3",
+                      color: "#999999",
                       cursor: "pointer",
                       padding: "2px",
                       display: "flex",
@@ -415,7 +419,7 @@ export default function ZoneListPanel() {
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.color =
-                        "#8B95A3";
+                        "#999999";
                     }}
                   >
                     <Trash2 size={13} />

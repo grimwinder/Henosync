@@ -232,7 +232,7 @@ export default function MissionMap({
     <div
       ref={containerRef}
       className={className}
-      style={{ width: "100%", height: "100%", backgroundColor: "#0D0F12" }}
+      style={{ width: "100%", height: "100%", backgroundColor: "#0D0D0D" }}
     />
   );
 }

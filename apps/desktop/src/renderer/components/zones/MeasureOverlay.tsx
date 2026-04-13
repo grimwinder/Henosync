@@ -93,7 +93,7 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
         "circle-radius": 5,
         "circle-color": "#F5A623",
         "circle-stroke-width": 2,
-        "circle-stroke-color": "#0D0F12",
+        "circle-stroke-color": "#0D0D0D",
       },
     });
 
@@ -167,11 +167,11 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
 
       const el = document.createElement("div");
       el.style.cssText = [
-        "background:#F5A623;color:#0D0F12",
+        "background:#F5A623;color:#0D0D0D",
         "font-size:11px;font-weight:700",
-        "font-family:JetBrains Mono,monospace",
+        "font-family:Inter, sans-serif",
         "padding:3px 8px;border-radius:4px",
-        "border:1.5px solid #0D0F12",
+        "border:1.5px solid #0D0D0D",
         "box-shadow:0 2px 8px rgba(0,0,0,0.5)",
         "white-space:nowrap;pointer-events:none",
       ].join(";");
@@ -202,8 +202,8 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 20,
-        backgroundColor: "#141619CC",
-        border: "1px solid #2A2F38",
+        backgroundColor: "#141414CC",
+        border: "1px solid #2D2D2D",
         borderRadius: "8px",
         padding: "8px 14px",
         display: "flex",
@@ -223,12 +223,12 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
         MEASURE
       </span>
       {points.length === 0 && (
-        <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+        <span style={{ fontSize: "11px", color: "#999999" }}>
           Click two points on the map
         </span>
       )}
       {points.length === 1 && (
-        <span style={{ fontSize: "11px", color: "#8B95A3" }}>
+        <span style={{ fontSize: "11px", color: "#999999" }}>
           Click a second point
         </span>
       )}
@@ -237,8 +237,8 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
           style={{
             fontSize: "13px",
             fontWeight: 700,
-            color: "#E8EAED",
-            fontFamily: "JetBrains Mono, monospace",
+            color: "#EFEFEF",
+            fontFamily: "Inter, sans-serif",
           }}
         >
           {distance}
@@ -252,9 +252,9 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
           }}
           style={{
             fontSize: "10px",
-            color: "#8B95A3",
+            color: "#999999",
             background: "none",
-            border: "1px solid #2A2F38",
+            border: "1px solid #2D2D2D",
             borderRadius: "4px",
             padding: "2px 7px",
             cursor: "pointer",
@@ -269,16 +269,16 @@ export default function MeasureOverlay({ map, onExit }: MeasureOverlayProps) {
         style={{
           background: "none",
           border: "none",
-          color: "#8B95A3",
+          color: "#999999",
           cursor: "pointer",
           padding: "2px",
           display: "flex",
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+          (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+          (e.currentTarget as HTMLButtonElement).style.color = "#999999";
         }}
       >
         <X size={14} />

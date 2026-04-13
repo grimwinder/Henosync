@@ -31,20 +31,20 @@ function StatBox({
     <div
       style={{
         padding: "8px 10px",
-        backgroundColor: "#1C1F24",
+        backgroundColor: "#1C1C1C",
         borderRadius: "6px",
         ...style,
       }}
     >
-      <div style={{ fontSize: "10px", color: "#8B95A3", marginBottom: "3px" }}>
+      <div style={{ fontSize: "10px", color: "#999999", marginBottom: "3px" }}>
         {label}
       </div>
       <div
         style={{
           fontSize: "13px",
           fontWeight: 600,
-          color: "#E8EAED",
-          fontFamily: "JetBrains Mono, monospace",
+          color: "#EFEFEF",
+          fontFamily: "Inter, sans-serif",
         }}
       >
         {value}
@@ -64,7 +64,7 @@ export default function MarkerDetailPanel() {
   const color =
     marker.color ||
     MARKER_TYPE_COLORS[marker.marker_type as MarkerType] ||
-    "#8B95A3";
+    "#999999";
 
   return (
     <div
@@ -74,8 +74,8 @@ export default function MarkerDetailPanel() {
         right: 0,
         height: "100%",
         width: "260px",
-        backgroundColor: "#141619",
-        borderLeft: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        borderLeft: "1px solid #2D2D2D",
         display: "flex",
         flexDirection: "column",
         zIndex: 10,
@@ -85,7 +85,8 @@ export default function MarkerDetailPanel() {
       <div
         style={{
           padding: "12px 14px",
-          borderBottom: "1px solid #2A2F38",
+          backgroundColor: "#0D0D0D",
+          borderBottom: "1px solid #2D2D2D",
           flexShrink: 0,
         }}
       >
@@ -110,7 +111,7 @@ export default function MarkerDetailPanel() {
                 style={{
                   fontSize: "12px",
                   fontWeight: 600,
-                  color: "#E8EAED",
+                  color: "#EFEFEF",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -119,7 +120,7 @@ export default function MarkerDetailPanel() {
                 {marker.name}
               </span>
             </div>
-            <div style={{ fontSize: "10px", color: "#8B95A3" }}>
+            <div style={{ fontSize: "10px", color: "#999999" }}>
               {MARKER_TYPE_LABELS[marker.marker_type as MarkerType] ??
                 marker.marker_type}
             </div>
@@ -130,7 +131,7 @@ export default function MarkerDetailPanel() {
             style={{
               background: "none",
               border: "none",
-              color: "#8B95A3",
+              color: "#999999",
               cursor: "pointer",
               padding: "2px",
               display: "flex",
@@ -138,10 +139,10 @@ export default function MarkerDetailPanel() {
               marginLeft: "8px",
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+              (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
             }}
             onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+              (e.currentTarget as HTMLButtonElement).style.color = "#999999";
             }}
           >
             <X size={14} />
@@ -156,7 +157,7 @@ export default function MarkerDetailPanel() {
             fontSize: "10px",
             fontWeight: 600,
             letterSpacing: "1px",
-            color: "#8B95A3",
+            color: "#999999",
             marginBottom: "8px",
           }}
         >
@@ -175,7 +176,7 @@ export default function MarkerDetailPanel() {
               alignItems: "center",
               gap: "10px",
               padding: "7px 0",
-              borderBottom: "1px solid #1C1F24",
+              borderBottom: "1px solid #1C1C1C",
             }}
           >
             <div
@@ -205,8 +206,8 @@ export default function MarkerDetailPanel() {
             <div
               style={{
                 fontSize: "12px",
-                color: "#E8EAED",
-                fontFamily: "JetBrains Mono, monospace",
+                color: "#EFEFEF",
+                fontFamily: "Inter, sans-serif",
               }}
             >
               {value}

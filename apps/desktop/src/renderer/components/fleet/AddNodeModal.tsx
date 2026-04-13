@@ -12,11 +12,11 @@ interface AddNodeModalProps {
 
 const fieldStyle: React.CSSProperties = {
   padding: "7px 10px",
-  backgroundColor: "#141619",
-  border: "1px solid #2A2F38",
+  backgroundColor: "#141414",
+  border: "1px solid #2D2D2D",
   borderRadius: "6px",
   fontSize: "12px",
-  color: "#E8EAED",
+  color: "#EFEFEF",
   outline: "none",
   fontFamily: "Inter, sans-serif",
   width: "100%",
@@ -57,7 +57,7 @@ function ConfigField({
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-      <label style={{ fontSize: "11px", color: "#8B95A3", fontWeight: 500 }}>
+      <label style={{ fontSize: "11px", color: "#999999", fontWeight: 500 }}>
         {field.label}
         {field.required && (
           <span style={{ color: "#F05252", marginLeft: "3px" }}>*</span>
@@ -80,9 +80,9 @@ function ConfigField({
                   fontSize: "12px",
                   fontWeight: 500,
                   cursor: "pointer",
-                  border: `1px solid ${active ? "#4A9EFF" : "#2A2F38"}`,
+                  border: `1px solid ${active ? "#4A9EFF" : "#2D2D2D"}`,
                   backgroundColor: active ? "#4A9EFF18" : "transparent",
-                  color: active ? "#4A9EFF" : "#8B95A3",
+                  color: active ? "#4A9EFF" : "#999999",
                   transition: "all 150ms",
                 }}
               >
@@ -162,9 +162,9 @@ function CapChip({
   onToggle?: () => void;
 }) {
   const label = CAPABILITY_LABEL[cap] ?? cap;
-  const color = locked ? "#555F6E" : selected ? "#4A9EFF" : "#555F6E";
-  const bg = locked ? "#252A3188" : selected ? "#4A9EFF18" : "transparent";
-  const border = locked ? "#2A2F38" : selected ? "#4A9EFF55" : "#2A2F38";
+  const color = locked ? "#666666" : selected ? "#4A9EFF" : "#666666";
+  const bg = locked ? "#24242488" : selected ? "#4A9EFF18" : "transparent";
+  const border = locked ? "#2D2D2D" : selected ? "#4A9EFF55" : "#2D2D2D";
 
   return (
     <button
@@ -309,8 +309,8 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
           maxHeight: "82vh",
           display: "flex",
           flexDirection: "column",
-          backgroundColor: "#1C1F24",
-          border: "1px solid #2A2F38",
+          backgroundColor: "#1C1C1C",
+          border: "1px solid #2D2D2D",
           borderRadius: "8px",
           overflow: "hidden",
         }}
@@ -322,11 +322,11 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
             alignItems: "center",
             justifyContent: "space-between",
             padding: "12px 16px",
-            borderBottom: "1px solid #2A2F38",
+            borderBottom: "1px solid #2D2D2D",
             flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: "13px", fontWeight: 600, color: "#E8EAED" }}>
+          <span style={{ fontSize: "13px", fontWeight: 600, color: "#EFEFEF" }}>
             Add Device
           </span>
           <button
@@ -335,7 +335,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: "#8B95A3",
+              color: "#999999",
               display: "flex",
               padding: "2px",
             }}
@@ -358,18 +358,18 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
           {/* Plugin selector */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <label
-              style={{ fontSize: "11px", color: "#8B95A3", fontWeight: 500 }}
+              style={{ fontSize: "11px", color: "#999999", fontWeight: 500 }}
             >
               Plugin
             </label>
             {isLoading ? (
               <div
-                style={{ ...fieldStyle, color: "#8B95A3", fontStyle: "italic" }}
+                style={{ ...fieldStyle, color: "#999999", fontStyle: "italic" }}
               >
                 Loading plugins…
               </div>
             ) : plugins.length === 0 ? (
-              <div style={{ ...fieldStyle, color: "#8B95A3" }}>
+              <div style={{ ...fieldStyle, color: "#999999" }}>
                 No device plugins installed
               </div>
             ) : (
@@ -395,7 +395,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
             )}
             {selectedPlugin && (
               <span
-                style={{ fontSize: "10px", color: "#8B95A3", lineHeight: 1.5 }}
+                style={{ fontSize: "10px", color: "#999999", lineHeight: 1.5 }}
               >
                 {selectedPlugin.description}
               </span>
@@ -405,7 +405,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
           {/* Device name */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <label
-              style={{ fontSize: "11px", color: "#8B95A3", fontWeight: 500 }}
+              style={{ fontSize: "11px", color: "#999999", fontWeight: 500 }}
             >
               Device Name <span style={{ color: "#F05252" }}>*</span>
             </label>
@@ -424,7 +424,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
               }}
               style={{
                 ...fieldStyle,
-                borderColor: error ? "#F05252" : "#2A2F38",
+                borderColor: error ? "#F05252" : "#2D2D2D",
                 userSelect: "text",
               }}
             />
@@ -456,14 +456,14 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                 <label
                   style={{
                     fontSize: "11px",
-                    color: "#8B95A3",
+                    color: "#999999",
                     fontWeight: 500,
                   }}
                 >
                   Device Capabilities
                 </label>
                 {optionalCaps.length > 0 && (
-                  <span style={{ fontSize: "10px", color: "#555F6E" }}>
+                  <span style={{ fontSize: "10px", color: "#666666" }}>
                     {selectedCaps.size - fixedCaps.length}/{optionalCaps.length}{" "}
                     optional selected
                   </span>
@@ -482,7 +482,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                   <span
                     style={{
                       fontSize: "10px",
-                      color: "#555F6E",
+                      color: "#666666",
                       fontWeight: 500,
                     }}
                   >
@@ -511,7 +511,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                     <span
                       style={{
                         fontSize: "10px",
-                        color: "#555F6E",
+                        color: "#666666",
                         fontWeight: 500,
                       }}
                     >
@@ -534,7 +534,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                   <span
                     style={{
                       fontSize: "10px",
-                      color: "#555F6E",
+                      color: "#666666",
                       marginTop: "2px",
                     }}
                   >
@@ -566,8 +566,8 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                 padding: "7px 14px",
                 borderRadius: "6px",
                 background: "none",
-                border: "1px solid #2A2F38",
-                color: "#8B95A3",
+                border: "1px solid #2D2D2D",
+                color: "#999999",
                 fontSize: "12px",
                 cursor: "pointer",
               }}
@@ -580,9 +580,9 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
               style={{
                 padding: "7px 14px",
                 borderRadius: "6px",
-                backgroundColor: isPending || !pluginId ? "#2A2F38" : "#4A9EFF",
+                backgroundColor: isPending || !pluginId ? "#2D2D2D" : "#4A9EFF",
                 border: "none",
-                color: isPending || !pluginId ? "#8B95A3" : "white",
+                color: isPending || !pluginId ? "#999999" : "white",
                 fontSize: "12px",
                 fontWeight: 500,
                 cursor: isPending || !pluginId ? "not-allowed" : "pointer",

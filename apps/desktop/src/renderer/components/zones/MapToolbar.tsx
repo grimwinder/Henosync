@@ -7,7 +7,7 @@ import {
   EyeOff,
   MapPin,
   Ruler,
-  LocateFixed,
+  Crosshair,
   BookmarkPlus,
   FolderOpen,
   Trash2,
@@ -66,7 +66,7 @@ function ToolButton({
         borderRadius: "5px",
         border: `1px solid ${active ? "#4A9EFF" : "transparent"}`,
         backgroundColor: active ? "#4A9EFF22" : "transparent",
-        color: disabled ? "#3A3F48" : active ? "#4A9EFF" : "#8B95A3",
+        color: disabled ? "#444444" : active ? "#4A9EFF" : "#999999",
         cursor: disabled ? "default" : "pointer",
         transition: "all 150ms",
         flexShrink: 0,
@@ -74,15 +74,15 @@ function ToolButton({
       onMouseEnter={(e) => {
         if (!active && !disabled) {
           (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-            "#1C1F24";
-          (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+            "#1C1C1C";
+          (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
         }
       }}
       onMouseLeave={(e) => {
         if (!active && !disabled) {
           (e.currentTarget as HTMLButtonElement).style.backgroundColor =
             "transparent";
-          (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+          (e.currentTarget as HTMLButtonElement).style.color = "#999999";
         }
       }}
     >
@@ -97,7 +97,7 @@ function Divider() {
       style={{
         width: "1px",
         height: "20px",
-        backgroundColor: "#2A2F38",
+        backgroundColor: "#2D2D2D",
         margin: "0 2px",
         flexShrink: 0,
       }}
@@ -134,8 +134,8 @@ function SavePopup({
         top: "calc(100% + 8px)",
         right: 0,
         width: "220px",
-        backgroundColor: "#141619",
-        border: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        border: "1px solid #2D2D2D",
         borderRadius: "8px",
         boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
         padding: "10px",
@@ -150,7 +150,7 @@ function SavePopup({
           fontSize: "10px",
           fontWeight: 700,
           letterSpacing: "0.8px",
-          color: "#555F6E",
+          color: "#666666",
         }}
       >
         SAVE MAP AS
@@ -166,10 +166,10 @@ function SavePopup({
         }}
         placeholder="Map name…"
         style={{
-          backgroundColor: "#0D0F12",
-          border: "1px solid #2A2F38",
+          backgroundColor: "#0D0D0D",
+          border: "1px solid #2D2D2D",
           borderRadius: "5px",
-          color: "#E8EAED",
+          color: "#EFEFEF",
           fontSize: "12px",
           padding: "6px 8px",
           outline: "none",
@@ -182,9 +182,9 @@ function SavePopup({
             flex: 1,
             padding: "6px",
             borderRadius: "5px",
-            border: "1px solid #2A2F38",
+            border: "1px solid #2D2D2D",
             backgroundColor: "transparent",
-            color: "#8B95A3",
+            color: "#999999",
             fontSize: "11px",
             cursor: "pointer",
           }}
@@ -198,9 +198,9 @@ function SavePopup({
             flex: 1,
             padding: "6px",
             borderRadius: "5px",
-            border: `1px solid ${name.trim() ? "#4A9EFF55" : "#2A2F38"}`,
+            border: `1px solid ${name.trim() ? "#4A9EFF55" : "#2D2D2D"}`,
             backgroundColor: name.trim() ? "#4A9EFF18" : "transparent",
-            color: name.trim() ? "#4A9EFF" : "#3A3F48",
+            color: name.trim() ? "#4A9EFF" : "#444444",
             fontSize: "11px",
             fontWeight: 600,
             cursor: name.trim() ? "pointer" : "default",
@@ -237,8 +237,8 @@ function OpenPopup({
         top: "calc(100% + 8px)",
         right: 0,
         width: "280px",
-        backgroundColor: "#141619",
-        border: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        border: "1px solid #2D2D2D",
         borderRadius: "8px",
         boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
         zIndex: 30,
@@ -252,7 +252,7 @@ function OpenPopup({
           alignItems: "center",
           justifyContent: "space-between",
           padding: "9px 12px",
-          borderBottom: "1px solid #2A2F38",
+          borderBottom: "1px solid #2D2D2D",
         }}
       >
         <span
@@ -260,7 +260,7 @@ function OpenPopup({
             fontSize: "10px",
             fontWeight: 700,
             letterSpacing: "0.8px",
-            color: "#555F6E",
+            color: "#666666",
           }}
         >
           SAVED MAPS
@@ -270,7 +270,7 @@ function OpenPopup({
           style={{
             background: "none",
             border: "none",
-            color: "#555F6E",
+            color: "#666666",
             cursor: "pointer",
             display: "flex",
             padding: 0,
@@ -288,7 +288,7 @@ function OpenPopup({
               padding: "24px 16px",
               textAlign: "center",
               fontSize: "12px",
-              color: "#555F6E",
+              color: "#666666",
               lineHeight: 1.5,
             }}
           >
@@ -306,11 +306,11 @@ function OpenPopup({
                 key={layout.id}
                 style={{
                   padding: "10px 12px",
-                  borderBottom: "1px solid #1C1F24",
+                  borderBottom: "1px solid #1C1C1C",
                   display: "flex",
                   alignItems: "center",
                   gap: "8px",
-                  backgroundColor: isLoading ? "#141619" : "transparent",
+                  backgroundColor: isLoading ? "#141414" : "transparent",
                 }}
               >
                 {isConfirming ? (
@@ -327,7 +327,7 @@ function OpenPopup({
                       style={{
                         flex: 1,
                         fontSize: "11px",
-                        color: "#8B95A3",
+                        color: "#999999",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
@@ -341,9 +341,9 @@ function OpenPopup({
                         fontSize: "10px",
                         padding: "2px 7px",
                         borderRadius: "4px",
-                        border: "1px solid #2A2F38",
+                        border: "1px solid #2D2D2D",
                         backgroundColor: "transparent",
-                        color: "#8B95A3",
+                        color: "#999999",
                         cursor: "pointer",
                         flexShrink: 0,
                       }}
@@ -377,7 +377,7 @@ function OpenPopup({
                         style={{
                           fontSize: "12px",
                           fontWeight: 600,
-                          color: isLoading ? "#555F6E" : "#E8EAED",
+                          color: isLoading ? "#666666" : "#EFEFEF",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
@@ -388,7 +388,7 @@ function OpenPopup({
                       <div
                         style={{
                           fontSize: "10px",
-                          color: "#555F6E",
+                          color: "#666666",
                           marginTop: "2px",
                         }}
                       >
@@ -397,7 +397,7 @@ function OpenPopup({
                       <div
                         style={{
                           fontSize: "10px",
-                          color: "#3A3F48",
+                          color: "#444444",
                           marginTop: "1px",
                         }}
                       >
@@ -413,7 +413,7 @@ function OpenPopup({
                     {isLoading ? (
                       <Loader
                         size={14}
-                        color="#555F6E"
+                        color="#666666"
                         style={{
                           animation: "spin 1s linear infinite",
                           flexShrink: 0,
@@ -436,9 +436,9 @@ function OpenPopup({
                             gap: "4px",
                             padding: "4px 8px",
                             borderRadius: "5px",
-                            border: "1px solid #2A2F38",
+                            border: "1px solid #2D2D2D",
                             backgroundColor: "transparent",
-                            color: loadingId ? "#3A3F48" : "#8B95A3",
+                            color: loadingId ? "#444444" : "#999999",
                             fontSize: "11px",
                             cursor: loadingId ? "default" : "pointer",
                             transition: "all 100ms",
@@ -447,10 +447,10 @@ function OpenPopup({
                             if (!loadingId) {
                               (
                                 e.currentTarget as HTMLButtonElement
-                              ).style.backgroundColor = "#1C1F24";
+                              ).style.backgroundColor = "#1C1C1C";
                               (
                                 e.currentTarget as HTMLButtonElement
-                              ).style.color = "#E8EAED";
+                              ).style.color = "#EFEFEF";
                             }
                           }}
                           onMouseLeave={(e) => {
@@ -460,7 +460,7 @@ function OpenPopup({
                               ).style.backgroundColor = "transparent";
                               (
                                 e.currentTarget as HTMLButtonElement
-                              ).style.color = "#8B95A3";
+                              ).style.color = "#999999";
                             }
                           }}
                         >
@@ -480,7 +480,7 @@ function OpenPopup({
                             borderRadius: "5px",
                             border: "none",
                             backgroundColor: "transparent",
-                            color: loadingId ? "#3A3F48" : "#8B95A3",
+                            color: loadingId ? "#444444" : "#999999",
                             cursor: loadingId ? "default" : "pointer",
                             transition: "all 100ms",
                           }}
@@ -498,7 +498,7 @@ function OpenPopup({
                             if (!loadingId) {
                               (
                                 e.currentTarget as HTMLButtonElement
-                              ).style.color = "#8B95A3";
+                              ).style.color = "#999999";
                               (
                                 e.currentTarget as HTMLButtonElement
                               ).style.backgroundColor = "transparent";
@@ -572,8 +572,8 @@ export default function MapToolbar({
         display: "flex",
         alignItems: "center",
         gap: "2px",
-        backgroundColor: "#141619",
-        border: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        border: "1px solid #2D2D2D",
         borderRadius: "8px",
         padding: "4px",
         boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
@@ -614,7 +614,7 @@ export default function MapToolbar({
       <Divider />
 
       <ToolButton
-        icon={<LocateFixed size={15} />}
+        icon={<Crosshair size={15} />}
         label="Fly to hub"
         onClick={onFlyToHub}
       />

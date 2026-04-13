@@ -7,12 +7,12 @@ const STATUS_COLOR: Record<string, string> = {
   online: "#3DD68C",
   connecting: "#F5A623",
   degraded: "#F5A623",
-  offline: "#8B95A3",
+  offline: "#999999",
   error: "#F05252",
 };
 
 function buildMarkerEl(node: Node, selected: boolean): HTMLDivElement {
-  const color = STATUS_COLOR[node.status] ?? "#8B95A3";
+  const color = STATUS_COLOR[node.status] ?? "#999999";
 
   // Wrapper: 14×14 centered at the coordinate; label floats below absolutely
   const wrap = document.createElement("div");
@@ -25,7 +25,7 @@ function buildMarkerEl(node: Node, selected: boolean): HTMLDivElement {
     height: 14px;
     border-radius: 50%;
     background-color: ${color};
-    border: 2px solid ${selected ? "#4A9EFF" : "#0D0F12"};
+    border: 2px solid ${selected ? "#4A9EFF" : "#0D0D0D"};
     box-shadow: 0 0 ${selected ? "10px 2px #4A9EFF80" : `6px 1px ${color}60`};
     transition: border-color 150ms, box-shadow 150ms;
   `;
@@ -40,12 +40,12 @@ function buildMarkerEl(node: Node, selected: boolean): HTMLDivElement {
     font-family: Inter, sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: #E8EAED;
+    color: #EFEFEF;
     background-color: rgba(13,15,18,0.88);
     padding: 2px 6px;
     border-radius: 3px;
     white-space: nowrap;
-    border: 1px solid #2A2F38;
+    border: 1px solid #2D2D2D;
     pointer-events: none;
     user-select: none;
   `;

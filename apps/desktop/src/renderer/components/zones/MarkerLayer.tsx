@@ -57,7 +57,7 @@ function createMarkerElement(
   const pin = document.createElement("div");
   pin.style.cssText = [
     "width:28px;height:28px",
-    `background:${color};border:2px solid #0D0F12`,
+    `background:${color};border:2px solid #0D0D0D`,
     selected ? "border-radius:50% 50% 50% 0" : "border-radius:50% 50% 50% 0",
     "transform:rotate(-45deg)",
     "display:flex;align-items:center;justify-content:center",
@@ -68,7 +68,7 @@ function createMarkerElement(
   const iconEl = document.createElement("div");
   iconEl.style.cssText = [
     "transform:rotate(45deg)",
-    "color:#0D0F12;font-size:12px;line-height:1",
+    "color:#0D0D0D;font-size:12px;line-height:1",
     "display:flex;align-items:center;justify-content:center",
     "width:100%;height:100%",
   ].join(";");
@@ -78,12 +78,12 @@ function createMarkerElement(
   // Label
   const label = document.createElement("div");
   label.style.cssText = [
-    `background:${color};color:#0D0F12`,
+    `background:${color};color:#0D0D0D`,
     "font-size:9px;font-weight:700",
     "font-family:Inter,sans-serif",
     "padding:2px 5px;border-radius:3px",
     "white-space:nowrap;margin-top:3px",
-    `border:1.5px solid #0D0F12`,
+    `border:1.5px solid #0D0D0D`,
     `box-shadow:0 1px 4px rgba(0,0,0,0.4)${selected ? `,0 0 8px ${color}66` : ""}`,
     "max-width:90px;overflow:hidden;text-overflow:ellipsis",
   ].join(";");

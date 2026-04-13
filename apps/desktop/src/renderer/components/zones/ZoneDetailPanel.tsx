@@ -37,7 +37,7 @@ const ZONE_TYPE_COLORS: Record<ZoneType, string> = {
   safe_return: "#3DD68C",
   coverage: "#A78BFA",
   alert: "#F5A623",
-  custom: "#8B95A3",
+  custom: "#999999",
 };
 
 function StatBox({
@@ -54,20 +54,20 @@ function StatBox({
       style={{
         flex: 1,
         padding: "8px 10px",
-        backgroundColor: "#1C1F24",
+        backgroundColor: "#1C1C1C",
         borderRadius: "6px",
         ...style,
       }}
     >
-      <div style={{ fontSize: "10px", color: "#8B95A3", marginBottom: "3px" }}>
+      <div style={{ fontSize: "10px", color: "#999999", marginBottom: "3px" }}>
         {label}
       </div>
       <div
         style={{
           fontSize: "13px",
           fontWeight: 600,
-          color: "#E8EAED",
-          fontFamily: "JetBrains Mono, monospace",
+          color: "#EFEFEF",
+          fontFamily: "Inter, sans-serif",
         }}
       >
         {value}
@@ -102,7 +102,7 @@ function CoordRow({
         alignItems: "center",
         gap: "10px",
         padding: "7px 0",
-        borderBottom: "1px solid #1C1F24",
+        borderBottom: "1px solid #1C1C1C",
       }}
     >
       <div
@@ -133,8 +133,8 @@ function CoordRow({
         <div
           style={{
             fontSize: "11px",
-            color: "#E8EAED",
-            fontFamily: "JetBrains Mono, monospace",
+            color: "#EFEFEF",
+            fontFamily: "Inter, sans-serif",
             lineHeight: 1.4,
           }}
         >
@@ -143,14 +143,14 @@ function CoordRow({
         <div
           style={{
             fontSize: "11px",
-            color: "#E8EAED",
-            fontFamily: "JetBrains Mono, monospace",
+            color: "#EFEFEF",
+            fontFamily: "Inter, sans-serif",
             lineHeight: 1.4,
           }}
         >
           {lon.toFixed(6)}°
         </div>
-        <div style={{ fontSize: "9px", color: "#8B95A3", marginTop: "1px" }}>
+        <div style={{ fontSize: "9px", color: "#999999", marginTop: "1px" }}>
           lat · lon
         </div>
       </div>
@@ -167,7 +167,7 @@ export default function ZoneDetailPanel() {
   if (!zone) return null;
 
   const color =
-    zone.color || ZONE_TYPE_COLORS[zone.zone_type as ZoneType] || "#8B95A3";
+    zone.color || ZONE_TYPE_COLORS[zone.zone_type as ZoneType] || "#999999";
 
   return (
     <div
@@ -177,8 +177,8 @@ export default function ZoneDetailPanel() {
         right: 0,
         height: "100%",
         width: "260px",
-        backgroundColor: "#141619",
-        borderLeft: "1px solid #2A2F38",
+        backgroundColor: "#141414",
+        borderLeft: "1px solid #2D2D2D",
         display: "flex",
         flexDirection: "column",
         zIndex: 10,
@@ -188,7 +188,8 @@ export default function ZoneDetailPanel() {
       <div
         style={{
           padding: "12px 14px",
-          borderBottom: "1px solid #2A2F38",
+          backgroundColor: "#0D0D0D",
+          borderBottom: "1px solid #2D2D2D",
           flexShrink: 0,
         }}
       >
@@ -221,7 +222,7 @@ export default function ZoneDetailPanel() {
                 style={{
                   fontSize: "12px",
                   fontWeight: 600,
-                  color: "#E8EAED",
+                  color: "#EFEFEF",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -230,7 +231,7 @@ export default function ZoneDetailPanel() {
                 {zone.name}
               </span>
             </div>
-            <div style={{ fontSize: "10px", color: "#8B95A3" }}>
+            <div style={{ fontSize: "10px", color: "#999999" }}>
               {ZONE_TYPE_LABELS[zone.zone_type as ZoneType] ?? zone.zone_type}
               {" · "}
               {zone.shape === "circle"
@@ -244,7 +245,7 @@ export default function ZoneDetailPanel() {
             style={{
               background: "none",
               border: "none",
-              color: "#8B95A3",
+              color: "#999999",
               cursor: "pointer",
               padding: "2px",
               display: "flex",
@@ -252,10 +253,10 @@ export default function ZoneDetailPanel() {
               marginLeft: "8px",
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+              (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
             }}
             onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+              (e.currentTarget as HTMLButtonElement).style.color = "#999999";
             }}
           >
             <X size={14} />
@@ -272,7 +273,7 @@ export default function ZoneDetailPanel() {
                 fontSize: "10px",
                 fontWeight: 600,
                 letterSpacing: "1px",
-                color: "#8B95A3",
+                color: "#999999",
                 marginBottom: "8px",
               }}
             >
@@ -310,7 +311,7 @@ export default function ZoneDetailPanel() {
                 fontSize: "10px",
                 fontWeight: 600,
                 letterSpacing: "1px",
-                color: "#8B95A3",
+                color: "#999999",
                 marginBottom: "8px",
               }}
             >
