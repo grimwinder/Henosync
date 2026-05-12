@@ -228,6 +228,7 @@ class OperationManager:
     ) -> None:
         """Run a control plugin operation with error handling."""
         try:
+            plugin._config = config  # make config available inside start()
             await plugin.start(context)
         except asyncio.CancelledError:
             pass

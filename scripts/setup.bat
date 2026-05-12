@@ -62,7 +62,8 @@ apps\backend\.venv\Scripts\pip install --quiet ^
     pydantic ^
     websockets ^
     aiofiles ^
-    python-multipart
+    python-multipart ^
+    roslibpy
 echo   Done
 echo.
 

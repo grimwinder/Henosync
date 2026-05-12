@@ -277,7 +277,7 @@ class MissionEngine:
                 return await self._execute_parallel(step)
 
             elif step.step_type == StepType.LOOP:
-                return await self._execute_loop(step)
+                return await self._execute_loop_step(step)
 
             elif step.step_type == StepType.WAIT_FOR:
                 return await self._execute_wait_for(step)
@@ -429,7 +429,7 @@ class MissionEngine:
             if not isinstance(r, Exception)
         )
     
-    async def _execute_loop(self, step: MissionStep) -> bool:
+    async def _execute_loop_step(self, step: MissionStep) -> bool:
         """
         Execute a LOOP step — repeat a sequence of steps.
 

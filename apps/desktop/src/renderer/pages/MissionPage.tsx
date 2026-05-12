@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowDown,
   Play,
+  Square,
   SkipForward,
   X,
   Blocks,
@@ -16,6 +17,7 @@ import {
   BookmarkPlus,
   FolderOpen,
   Check,
+  CheckCircle2,
 } from "lucide-react";
 import MissionMap, {
   type MapBase,
@@ -27,6 +29,7 @@ import NodeMarkers from "../components/map/NodeMarkers";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useControlPlugins } from "../hooks/usePlugins";
 import { useMissionPlans, type MissionPlan } from "../hooks/useMissionPlans";
+import { startOperation, stopOperation, getOperations } from "../lib/api";
 import type { ControlPluginInfo, PluginConfigField } from "../types";
 
 // ── Layout constants ───────────────────────────────────────────────────────────
@@ -612,6 +615,8 @@ function StepListPanel({
   onSavePlan,
   onLoadPlan,
   onDeletePlan,
+  isRunning,
+  activeStepIndex,
 }: {
   blocks: MissionBlock[];
   selectedId: string | null;
@@ -624,6 +629,8 @@ function StepListPanel({
   onSavePlan: (name: string) => void;
   onLoadPlan: (plan: MissionPlan) => void;
   onDeletePlan: (id: string) => void;
+  isRunning: boolean;
+  activeStepIndex: number;
 }) {
   const [activePopup, setActivePopup] = useState<"save" | "open" | null>(null);
   const popupAnchorRef = useRef<HTMLDivElement>(null);
@@ -678,16 +685,37 @@ function StepListPanel({
             fontSize: "10px",
             fontWeight: 700,
             letterSpacing: "1.2px",
-            color: "#666666",
+            color: isRunning ? "#3DD68C" : "#666666",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
         >
-          MISSION PLAN
+          {isRunning && (
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                backgroundColor: "#3DD68C",
+                flexShrink: 0,
+                animation: "pulse-dot 1.2s ease-in-out infinite",
+              }}
+            />
+          )}
+          {isRunning
+            ? `STEP ${activeStepIndex + 1} / ${blocks.length}`
+            : "MISSION PLAN"}
         </span>
 
-        {/* Save / Open buttons */}
+        {/* Save / Open buttons — hidden while running */}
         <div
           ref={popupAnchorRef}
-          style={{ position: "relative", display: "flex", gap: "1px" }}
+          style={{
+            position: "relative",
+            display: isRunning ? "none" : "flex",
+            gap: "1px",
+          }}
         >
           <button
             title="Save plan as…"
@@ -825,7 +853,47 @@ function StepListPanel({
           </div>
         ) : (
           blocks.map((block, i) => {
-            const selected = block.instanceId === selectedId;
+            const isActive = isRunning && i === activeStepIndex;
+            const isDone = isRunning && i < activeStepIndex;
+            const isPending = isRunning && i > activeStepIndex;
+            const selected = !isRunning && block.instanceId === selectedId;
+
+            const accentColor = isActive
+              ? "#3DD68C"
+              : isDone
+                ? "#3DD68C55"
+                : selected
+                  ? "#A78BFA"
+                  : "#444444";
+            const cardBg = isActive
+              ? "#3DD68C0A"
+              : isDone
+                ? "#141414"
+                : selected
+                  ? "#A78BFA0D"
+                  : "#141414";
+            const cardBorder = isActive
+              ? "#3DD68C55"
+              : isDone
+                ? "#2D2D2D"
+                : selected
+                  ? "#A78BFA55"
+                  : "#2D2D2D";
+            const labelColor = isActive
+              ? "#EFEFEF"
+              : isDone
+                ? "#666666"
+                : selected
+                  ? "#EFEFEF"
+                  : "#CCCCCC";
+            const subColor = isActive
+              ? "#3DD68C"
+              : isDone
+                ? "#444444"
+                : selected
+                  ? "#A78BFA"
+                  : "#666666";
+
             return (
               <div
                 key={block.instanceId}
@@ -834,43 +902,58 @@ function StepListPanel({
                   alignItems: "center",
                   gap: "7px",
                   flexShrink: 0,
+                  opacity: isPending ? 0.45 : 1,
+                  transition: "opacity 200ms",
                 }}
               >
-                {/* Step number — outside the card */}
+                {/* Step number / done indicator — outside the card */}
                 <div
                   style={{
                     width: "20px",
                     height: "20px",
                     borderRadius: "50%",
-                    backgroundColor: selected ? "#A78BFA22" : "#1C1C1C",
-                    border: `1px solid ${selected ? "#A78BFA" : "#444444"}`,
-                    color: selected ? "#A78BFA" : "#666666",
+                    backgroundColor: isActive
+                      ? "#3DD68C22"
+                      : isDone
+                        ? "#3DD68C18"
+                        : selected
+                          ? "#A78BFA22"
+                          : "#1C1C1C",
+                    border: `1px solid ${isActive ? "#3DD68C" : isDone ? "#3DD68C55" : selected ? "#A78BFA" : "#444444"}`,
+                    color: isActive
+                      ? "#3DD68C"
+                      : isDone
+                        ? "#3DD68C"
+                        : selected
+                          ? "#A78BFA"
+                          : "#666666",
                     fontSize: "9px",
                     fontWeight: 700,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     flexShrink: 0,
-                    transition: "all 120ms",
+                    transition: "all 200ms",
                   }}
                 >
-                  {i + 1}
+                  {isDone ? <CheckCircle2 size={11} /> : i + 1}
                 </div>
 
                 {/* Card */}
                 <div
-                  onClick={() => onSelect(block.instanceId)}
+                  onClick={() => !isRunning && onSelect(block.instanceId)}
                   style={{
                     flex: 1,
                     display: "flex",
                     alignItems: "center",
-                    backgroundColor: selected ? "#A78BFA0D" : "#141414",
-                    border: `1px solid ${selected ? "#A78BFA55" : "#2D2D2D"}`,
+                    backgroundColor: cardBg,
+                    border: `1px solid ${cardBorder}`,
                     borderRadius: "7px",
                     overflow: "hidden",
-                    cursor: "pointer",
-                    transition: "all 120ms",
+                    cursor: isRunning ? "default" : "pointer",
+                    transition: "all 200ms",
                     minWidth: 0,
+                    boxShadow: isActive ? "0 0 0 1px #3DD68C33" : "none",
                   }}
                 >
                   {/* Left accent */}
@@ -878,9 +961,9 @@ function StepListPanel({
                     style={{
                       width: "3px",
                       alignSelf: "stretch",
-                      backgroundColor: selected ? "#A78BFA" : "#444444",
+                      backgroundColor: accentColor,
                       flexShrink: 0,
-                      transition: "background-color 120ms",
+                      transition: "background-color 200ms",
                     }}
                   />
                   {/* Text content */}
@@ -895,10 +978,11 @@ function StepListPanel({
                       style={{
                         fontSize: "12px",
                         fontWeight: 600,
-                        color: selected ? "#EFEFEF" : "#CCCCCC",
+                        color: labelColor,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
+                        transition: "color 200ms",
                       }}
                     >
                       {block.label}
@@ -906,59 +990,66 @@ function StepListPanel({
                     <div
                       style={{
                         fontSize: "10px",
-                        color: selected ? "#A78BFA" : "#666666",
+                        color: subColor,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                         marginTop: "1px",
+                        transition: "color 200ms",
                       }}
                     >
-                      {block.displayName}
+                      {isActive
+                        ? "● Running…"
+                        : isDone
+                          ? "✓ Complete"
+                          : block.displayName}
                     </div>
                   </div>
-                  {/* Reorder + delete */}
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "1px",
-                      flexShrink: 0,
-                      paddingRight: "2px",
-                    }}
-                  >
-                    <IconBtn
-                      title="Move up"
-                      disabled={i === 0}
-                      size={20}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMoveUp(block.instanceId);
+                  {/* Reorder + delete — hidden while running */}
+                  {!isRunning && (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "1px",
+                        flexShrink: 0,
+                        paddingRight: "2px",
                       }}
                     >
-                      <ArrowUp size={10} />
-                    </IconBtn>
-                    <IconBtn
-                      title="Move down"
-                      disabled={i === blocks.length - 1}
-                      size={20}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMoveDown(block.instanceId);
-                      }}
-                    >
-                      <ArrowDown size={10} />
-                    </IconBtn>
-                    <IconBtn
-                      title="Delete step"
-                      danger
-                      size={20}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(block.instanceId);
-                      }}
-                    >
-                      <Trash2 size={10} />
-                    </IconBtn>
-                  </div>
+                      <IconBtn
+                        title="Move up"
+                        disabled={i === 0}
+                        size={20}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMoveUp(block.instanceId);
+                        }}
+                      >
+                        <ArrowUp size={10} />
+                      </IconBtn>
+                      <IconBtn
+                        title="Move down"
+                        disabled={i === blocks.length - 1}
+                        size={20}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMoveDown(block.instanceId);
+                        }}
+                      >
+                        <ArrowDown size={10} />
+                      </IconBtn>
+                      <IconBtn
+                        title="Delete step"
+                        danger
+                        size={20}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(block.instanceId);
+                        }}
+                      >
+                        <Trash2 size={10} />
+                      </IconBtn>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -1482,9 +1573,15 @@ function BottomPanel({
 function ControlsPanel({
   blocks,
   onClear,
+  isRunning,
+  onRun,
+  onStop,
 }: {
   blocks: MissionBlock[];
   onClear: () => void;
+  isRunning: boolean;
+  onRun: () => void;
+  onStop: () => void;
 }) {
   const hasBlocks = blocks.length > 0;
   return (
@@ -1495,110 +1592,189 @@ function ControlsPanel({
         left: "10px",
         zIndex: 20,
         backgroundColor: "#141414",
-        border: "1px solid #2D2D2D",
+        border: `1px solid ${isRunning ? "#3DD68C33" : "#2D2D2D"}`,
         borderRadius: "8px",
         display: "flex",
         flexDirection: "column",
         gap: "6px",
         padding: "8px",
         minWidth: "130px",
+        transition: "border-color 200ms",
       }}
     >
-      {/* Run Mission */}
-      <button
-        disabled={!hasBlocks}
-        title="Run mission"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "6px",
-          padding: "8px",
-          borderRadius: "6px",
-          border: `1px solid ${hasBlocks ? "#3DD68C55" : "#2D2D2D"}`,
-          backgroundColor: hasBlocks ? "#3DD68C18" : "#141414",
-          color: hasBlocks ? "#3DD68C" : "#444444",
-          cursor: hasBlocks ? "pointer" : "default",
-          fontSize: "11px",
-          fontWeight: 600,
-          transition: "all 120ms",
-        }}
-      >
-        <Play size={12} />
-        Run Mission
-      </button>
+      {isRunning ? (
+        /* ── Running state ── */
+        <>
+          {/* Running indicator */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "4px 8px",
+              fontSize: "10px",
+              fontWeight: 700,
+              color: "#3DD68C",
+              letterSpacing: "0.8px",
+            }}
+          >
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                backgroundColor: "#3DD68C",
+                animation: "pulse-dot 1.2s ease-in-out infinite",
+                flexShrink: 0,
+              }}
+            />
+            RUNNING
+          </div>
 
-      {/* Step forward */}
-      <button
-        disabled={!hasBlocks}
-        title="Step forward"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "6px",
-          padding: "7px",
-          borderRadius: "6px",
-          border: "1px solid #2D2D2D",
-          backgroundColor: "#141414",
-          color: hasBlocks ? "#999999" : "#444444",
-          cursor: hasBlocks ? "pointer" : "default",
-          fontSize: "11px",
-          fontWeight: 500,
-          transition: "all 120ms",
-        }}
-        onMouseEnter={(e) => {
-          if (hasBlocks) {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#1C1C1C";
-            (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
-          }
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-            "#141414";
-          (e.currentTarget as HTMLButtonElement).style.color = hasBlocks
-            ? "#999999"
-            : "#444444";
-        }}
-      >
-        <SkipForward size={12} />
-        Step
-      </button>
+          {/* Stop button */}
+          <button
+            onClick={onStop}
+            title="Stop mission"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #F0525255",
+              backgroundColor: "#F0525218",
+              color: "#F05252",
+              cursor: "pointer",
+              fontSize: "11px",
+              fontWeight: 600,
+              transition: "all 120ms",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                "#F0525230";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                "#F0525218";
+            }}
+          >
+            <Square size={11} />
+            Stop Mission
+          </button>
+        </>
+      ) : (
+        /* ── Edit state ── */
+        <>
+          {/* Run Mission */}
+          <button
+            disabled={!hasBlocks}
+            title="Run mission"
+            onClick={hasBlocks ? onRun : undefined}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "8px",
+              borderRadius: "6px",
+              border: `1px solid ${hasBlocks ? "#3DD68C55" : "#2D2D2D"}`,
+              backgroundColor: hasBlocks ? "#3DD68C18" : "#141414",
+              color: hasBlocks ? "#3DD68C" : "#444444",
+              cursor: hasBlocks ? "pointer" : "default",
+              fontSize: "11px",
+              fontWeight: 600,
+              transition: "all 120ms",
+            }}
+            onMouseEnter={(e) => {
+              if (hasBlocks)
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#3DD68C28";
+            }}
+            onMouseLeave={(e) => {
+              if (hasBlocks)
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#3DD68C18";
+            }}
+          >
+            <Play size={12} />
+            Run Mission
+          </button>
 
-      {/* Clear all */}
-      <button
-        disabled={!hasBlocks}
-        title="Clear all steps"
-        onClick={onClear}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "6px",
-          padding: "7px",
-          borderRadius: "6px",
-          border: "1px solid #2D2D2D",
-          backgroundColor: "transparent",
-          color: hasBlocks ? "#F05252" : "#444444",
-          cursor: hasBlocks ? "pointer" : "default",
-          fontSize: "11px",
-          fontWeight: 500,
-          transition: "all 120ms",
-        }}
-        onMouseEnter={(e) => {
-          if (hasBlocks)
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-              "#F0525210";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-            "transparent";
-        }}
-      >
-        <X size={12} />
-        Clear All
-      </button>
+          {/* Step forward */}
+          <button
+            disabled={!hasBlocks}
+            title="Step forward"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "7px",
+              borderRadius: "6px",
+              border: "1px solid #2D2D2D",
+              backgroundColor: "#141414",
+              color: hasBlocks ? "#999999" : "#444444",
+              cursor: hasBlocks ? "pointer" : "default",
+              fontSize: "11px",
+              fontWeight: 500,
+              transition: "all 120ms",
+            }}
+            onMouseEnter={(e) => {
+              if (hasBlocks) {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#1C1C1C";
+                (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                "#141414";
+              (e.currentTarget as HTMLButtonElement).style.color = hasBlocks
+                ? "#999999"
+                : "#444444";
+            }}
+          >
+            <SkipForward size={12} />
+            Step
+          </button>
+
+          {/* Clear all */}
+          <button
+            disabled={!hasBlocks}
+            title="Clear all steps"
+            onClick={onClear}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "7px",
+              borderRadius: "6px",
+              border: "1px solid #2D2D2D",
+              backgroundColor: "transparent",
+              color: hasBlocks ? "#F05252" : "#444444",
+              cursor: hasBlocks ? "pointer" : "default",
+              fontSize: "11px",
+              fontWeight: 500,
+              transition: "all 120ms",
+            }}
+            onMouseEnter={(e) => {
+              if (hasBlocks)
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#F0525210";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                "transparent";
+            }}
+          >
+            <X size={12} />
+            Clear All
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -1622,6 +1798,74 @@ export default function MissionPage() {
   // Mission state
   const [blocks, setBlocks] = useState<MissionBlock[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Execution state
+  const [isRunning, setIsRunning] = useState(false);
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const stopRequestedRef = useRef(false);
+  const activeBlockRef = useRef<MissionBlock | null>(null);
+
+  async function startMission() {
+    if (blocks.length === 0) return;
+    stopRequestedRef.current = false;
+    setActiveStepIndex(0);
+    setIsRunning(true);
+    setSelectedId(null);
+
+    for (let i = 0; i < blocks.length; i++) {
+      if (stopRequestedRef.current) break;
+
+      const block = blocks[i];
+      setActiveStepIndex(i);
+      activeBlockRef.current = block;
+
+      try {
+        await startOperation(
+          block.pluginId,
+          block.params as Record<string, unknown>,
+        );
+      } catch (err) {
+        console.error(`[Mission] Failed to start step ${i + 1}:`, err);
+        break;
+      }
+
+      // Poll until operation reaches a terminal state
+      let done = false;
+      while (!done && !stopRequestedRef.current) {
+        await new Promise<void>((r) => setTimeout(r, 500));
+        try {
+          const ops = await getOperations();
+          const op = ops.find((o) => o.plugin_id === block.pluginId);
+          if (!op) {
+            done = true;
+          } else {
+            const s = op.status.state as string;
+            if (s === "completed" || s === "failed" || s === "idle") {
+              done = true;
+            }
+          }
+        } catch {
+          done = true;
+        }
+      }
+
+      if (stopRequestedRef.current) break;
+    }
+
+    activeBlockRef.current = null;
+    setIsRunning(false);
+    setActiveStepIndex(0);
+  }
+
+  function stopMission() {
+    stopRequestedRef.current = true;
+    const block = activeBlockRef.current;
+    if (block) {
+      stopOperation(block.pluginId).catch(() => {});
+    }
+    setIsRunning(false);
+    setActiveStepIndex(0);
+  }
 
   // Saved plans
   const { plans, save: savePlan, remove: deletePlan } = useMissionPlans();
@@ -1757,7 +2001,13 @@ export default function MissionPage() {
       />
 
       {/* Controls — floating top-left */}
-      <ControlsPanel blocks={blocks} onClear={clearAll} />
+      <ControlsPanel
+        blocks={blocks}
+        onClear={clearAll}
+        isRunning={isRunning}
+        onRun={startMission}
+        onStop={stopMission}
+      />
 
       {/* Right panel — ordered step list, full height */}
       <StepListPanel
@@ -1772,17 +2022,21 @@ export default function MissionPage() {
         onSavePlan={handleSavePlan}
         onLoadPlan={handleLoadPlan}
         onDeletePlan={deletePlan}
+        isRunning={isRunning}
+        activeStepIndex={activeStepIndex}
       />
 
-      {/* Bottom panel — step types | configure */}
-      <BottomPanel
-        plugins={controlPlugins}
-        blocks={blocks}
-        selectedId={selectedId}
-        onAddBlock={addBlock}
-        onUpdateBlock={updateBlock}
-        onRenameBlock={renameBlock}
-      />
+      {/* Bottom panel — hidden while mission is running */}
+      {!isRunning && (
+        <BottomPanel
+          plugins={controlPlugins}
+          blocks={blocks}
+          selectedId={selectedId}
+          onAddBlock={addBlock}
+          onUpdateBlock={updateBlock}
+          onRenameBlock={renameBlock}
+        />
+      )}
     </div>
   );
 }

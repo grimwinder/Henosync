@@ -78,11 +78,7 @@ class PluginLoader:
             )
             return False
 
-        result = self._find_plugin_class(module, plugin_dir.name)
-        if result is None:
-            return False
-
-        plugin_class, plugin_type = result
+        plugin_class, plugin_type = self._find_plugin_class(module, plugin_dir.name)
         if plugin_class is None:
             return False
 

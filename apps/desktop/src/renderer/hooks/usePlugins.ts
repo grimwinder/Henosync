@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import * as api from "../lib/api";
+import { getDevicePlugins, getControlPlugins, getTransports } from "../lib/api";
 
 export const PLUGIN_KEYS = {
   device: ["plugins", "device"] as const,
@@ -10,7 +10,7 @@ export const PLUGIN_KEYS = {
 export function useDevicePlugins() {
   return useQuery({
     queryKey: PLUGIN_KEYS.device,
-    queryFn: api.getDevicePlugins,
+    queryFn: getDevicePlugins,
     staleTime: 30_000,
   });
 }
@@ -18,7 +18,7 @@ export function useDevicePlugins() {
 export function useControlPlugins() {
   return useQuery({
     queryKey: PLUGIN_KEYS.control,
-    queryFn: api.getControlPlugins,
+    queryFn: getControlPlugins,
     staleTime: 30_000,
   });
 }
@@ -26,7 +26,7 @@ export function useControlPlugins() {
 export function useTransports() {
   return useQuery({
     queryKey: PLUGIN_KEYS.transports,
-    queryFn: api.getTransports,
+    queryFn: getTransports,
     staleTime: Infinity,
   });
 }

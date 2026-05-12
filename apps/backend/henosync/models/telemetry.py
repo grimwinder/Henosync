@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class TelemetryFrame(BaseModel):
     node_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     values: dict[str, Any] = {}
     sequence_number: int = 0
 
@@ -22,7 +22,7 @@ class SystemEvent(BaseModel):
     severity: EventSeverity
     title: str
     message: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     node_id: Optional[str] = None
     acknowledged: bool = False
 

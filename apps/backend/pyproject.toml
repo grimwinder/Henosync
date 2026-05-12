@@ -16,6 +16,7 @@ aiosqlite = "^0.22.1"
 alembic = "^1.18.4"
 python-multipart = "^0.0.22"
 aiofiles = "^25.1.0"
+roslibpy = "^2.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"

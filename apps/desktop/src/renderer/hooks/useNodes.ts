@@ -1,5 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import * as api from "../lib/api";
+import {
+  getNodes,
+  getNode,
+  getStreamUrl,
+  addNode,
+  removeNode,
+  reconnectNode,
+  sendCommand,
+} from "../lib/api";
 import { useNodeStore } from "../stores/nodeStore";
 import type { NodeCreate } from "../types";
 
@@ -14,7 +22,7 @@ export function useNodes() {
   return useQuery({
     queryKey: NODE_KEYS.all,
     queryFn: async () => {
-      const nodes = await api.getNodes();
+      const nodes = await getNodes();
       setNodes(nodes);
       return nodes;
     },
@@ -25,14 +33,14 @@ export function useNodes() {
 export function useNode(id: string) {
   return useQuery({
     queryKey: NODE_KEYS.detail(id),
-    queryFn: () => api.getNode(id),
+    queryFn: () => getNode(id),
   });
 }
 
 export function useStreamUrl(id: string) {
   return useQuery({
     queryKey: NODE_KEYS.streamUrl(id),
-    queryFn: () => api.getStreamUrl(id),
+    queryFn: () => getStreamUrl(id),
     staleTime: Infinity,
   });
 }
@@ -41,7 +49,7 @@ export function useAddNode() {
   const qc = useQueryClient();
   const upsertNode = useNodeStore((s) => s.upsertNode);
   return useMutation({
-    mutationFn: (body: NodeCreate) => api.addNode(body),
+    mutationFn: (body: NodeCreate) => addNode(body),
     onSuccess: (node) => {
       upsertNode(node);
       qc.invalidateQueries({ queryKey: NODE_KEYS.all });
@@ -52,7 +60,7 @@ export function useAddNode() {
 export function useRemoveNode() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.removeNode(id),
+    mutationFn: (id: string) => removeNode(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: NODE_KEYS.all }),
   });
 }
@@ -60,7 +68,7 @@ export function useRemoveNode() {
 export function useReconnectNode() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.reconnectNode(id),
+    mutationFn: (id: string) => reconnectNode(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: NODE_KEYS.all }),
   });
 }
@@ -75,6 +83,6 @@ export function useSendCommand() {
       nodeId: string;
       capability: string;
       params?: Record<string, unknown>;
-    }) => api.sendCommand(nodeId, capability, params),
+    }) => sendCommand(nodeId, capability, params),
   });
 }

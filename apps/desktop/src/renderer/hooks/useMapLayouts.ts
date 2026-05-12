@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import * as api from "../lib/api";
+import { deleteZone, deleteMarker, createZone, createMarker } from "../lib/api";
 import { useZoneStore } from "../stores/zoneStore";
 import { useMarkerStore } from "../stores/markerStore";
 import { ZONE_KEYS } from "./useZones";
@@ -93,8 +93,8 @@ export function useMapLayouts() {
       try {
         // Delete all current zones and markers in parallel
         await Promise.all([
-          ...zones.map((z) => api.deleteZone(z.id)),
-          ...markers.map((m) => api.deleteMarker(m.id)),
+          ...zones.map((z) => deleteZone(z.id)),
+          ...markers.map((m) => deleteMarker(m.id)),
         ]);
 
         // Recreate zones from snapshot
@@ -108,7 +108,7 @@ export function useMapLayouts() {
                 ? { center: z.center, radius_m: z.radius_m ?? undefined }
                 : { points: z.points }),
             };
-            return api.createZone(body);
+            return createZone(body);
           }),
         );
 
@@ -122,7 +122,7 @@ export function useMapLayouts() {
               lon: m.lon,
               color: m.color,
             };
-            return api.createMarker(body);
+            return createMarker(body);
           }),
         );
 

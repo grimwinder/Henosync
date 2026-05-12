@@ -1,0 +1,28 @@
+{
+  "id": "ue-sim",
+  "name": "UE Sim (ROS2)",
+  "version": "0.2.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Plugin for Unreal Engine AirSim SUV via rosbridge. Streams GPS position and speed.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "capabilities": [],
+  "config_schema": {
+    "host": {
+      "type": "string",
+      "label": "Rosbridge IP Address",
+      "required": true,
+      "default": "192.168.1.100",
+      "placeholder": "e.g. 192.168.1.100",
+      "description": "IP of the Linux machine running rosbridge_server"
+    },
+    "port": {
+      "type": "number",
+      "label": "Rosbridge Port",
+      "required": false,
+      "default": 9090,
+      "min": 1,
+      "max": 65535
+    }
+  }
+}

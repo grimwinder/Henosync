@@ -21,8 +21,8 @@ import MapStylePicker from "../components/map/MapStylePicker";
 import NodeMarkers from "../components/map/NodeMarkers";
 import HubMarker from "../components/map/HubMarker";
 import { useHubLocation } from "../hooks/useHubLocation";
-import { useMissionEngineStatus } from "../hooks/useSystem";
-import * as api from "../lib/api";
+import { useMissionEngineStatus } from "../hooks/useMissions";
+import { getStreamUrl } from "../lib/api";
 import type { Node } from "../types";
 
 // ── Mission status panel ───────────────────────────────────────────────────────
@@ -244,8 +244,7 @@ function CameraPanel({ nodes }: { nodes: Node[] }) {
       return;
     }
     setLoadingStream(true);
-    api
-      .getStreamUrl(selectedId)
+    getStreamUrl(selectedId)
       .then((r) => setStreamUrl(r.stream_url))
       .catch(() => setStreamUrl(null))
       .finally(() => setLoadingStream(false));

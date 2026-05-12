@@ -1,5 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import * as api from "../lib/api";
+import {
+  getMissions,
+  getMission,
+  getMissionEngineStatus,
+  createMission,
+  updateMission,
+  deleteMission,
+  executeMission,
+  pauseMission,
+  resumeMission,
+  abortMission,
+} from "../lib/api";
 import { useMissionStore } from "../stores";
 import type { MissionCreate, MissionUpdate } from "../types";
 
@@ -10,13 +21,13 @@ export const MISSION_KEYS = {
 };
 
 export function useMissions() {
-  return useQuery({ queryKey: MISSION_KEYS.all, queryFn: api.getMissions });
+  return useQuery({ queryKey: MISSION_KEYS.all, queryFn: getMissions });
 }
 
 export function useMission(id: string) {
   return useQuery({
     queryKey: MISSION_KEYS.detail(id),
-    queryFn: () => api.getMission(id),
+    queryFn: () => getMission(id),
     enabled: !!id,
   });
 }
@@ -26,7 +37,7 @@ export function useMissionEngineStatus() {
   return useQuery({
     queryKey: MISSION_KEYS.engineStatus,
     queryFn: async () => {
-      const status = await api.getMissionEngineStatus();
+      const status = await getMissionEngineStatus();
       setEngineStatus(status);
       return status;
     },
@@ -37,7 +48,7 @@ export function useMissionEngineStatus() {
 export function useCreateMission() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: MissionCreate) => api.createMission(body),
+    mutationFn: (body: MissionCreate) => createMission(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: MISSION_KEYS.all }),
   });
 }
@@ -46,7 +57,7 @@ export function useUpdateMission() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: MissionUpdate }) =>
-      api.updateMission(id, body),
+      updateMission(id, body),
     onSuccess: (_, { id }) => {
       qc.invalidateQueries({ queryKey: MISSION_KEYS.all });
       qc.invalidateQueries({ queryKey: MISSION_KEYS.detail(id) });
@@ -57,7 +68,7 @@ export function useUpdateMission() {
 export function useDeleteMission() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.deleteMission(id),
+    mutationFn: (id: string) => deleteMission(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: MISSION_KEYS.all }),
   });
 }
@@ -66,7 +77,7 @@ export function useExecuteMission() {
   const qc = useQueryClient();
   const setEngineStatus = useMissionStore((s) => s.setEngineStatus);
   return useMutation({
-    mutationFn: (id: string) => api.executeMission(id),
+    mutationFn: (id: string) => executeMission(id),
     onSuccess: (data) => {
       setEngineStatus(data.status);
       qc.invalidateQueries({ queryKey: MISSION_KEYS.engineStatus });
@@ -77,7 +88,7 @@ export function useExecuteMission() {
 export function usePauseMission() {
   const setEngineStatus = useMissionStore((s) => s.setEngineStatus);
   return useMutation({
-    mutationFn: (id: string) => api.pauseMission(id),
+    mutationFn: (id: string) => pauseMission(id),
     onSuccess: (data) => setEngineStatus(data.status),
   });
 }
@@ -85,7 +96,7 @@ export function usePauseMission() {
 export function useResumeMission() {
   const setEngineStatus = useMissionStore((s) => s.setEngineStatus);
   return useMutation({
-    mutationFn: (id: string) => api.resumeMission(id),
+    mutationFn: (id: string) => resumeMission(id),
     onSuccess: (data) => setEngineStatus(data.status),
   });
 }
@@ -93,7 +104,7 @@ export function useResumeMission() {
 export function useAbortMission() {
   const setEngineStatus = useMissionStore((s) => s.setEngineStatus);
   return useMutation({
-    mutationFn: (id: string) => api.abortMission(id),
+    mutationFn: (id: string) => abortMission(id),
     onSuccess: (data) => setEngineStatus(data.status),
   });
 }

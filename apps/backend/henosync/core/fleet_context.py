@@ -124,8 +124,8 @@ class FleetContext:
 
     async def get_available_devices(
         self,
-        capabilities: list[DeviceCapability] = [],
-        categories: list[DeviceCategory] = []
+        capabilities: list[DeviceCapability] | None = None,
+        categories: list[DeviceCategory] | None = None
     ) -> list[DeviceProxy]:
         """
         Query all available (unassigned) devices matching filters.

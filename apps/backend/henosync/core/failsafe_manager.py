@@ -258,27 +258,6 @@ class FailsafeManager:
             f"{len(tasks)} nodes stopped"
         )
 
-        # Abort active mission first
-        await self._abort_active_mission()
-
-        # Invoke safe state on all nodes concurrently
-        nodes = node_registry.get_online_nodes()
-        tasks = []
-        for node in nodes:
-            plugin_instance = plugin_registry.get_instance(node.id)
-            if plugin_instance:
-                tasks.append(
-                    self._safe_invoke_safe_state(node, plugin_instance)
-                )
-
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        logger.critical(
-            f"Emergency stop complete — "
-            f"safe state invoked on {len(tasks)} nodes"
-        )
-
     async def _safe_invoke_safe_state(self, node, plugin_instance) -> None:
         """Invoke get_safe_state with error protection."""
         try:

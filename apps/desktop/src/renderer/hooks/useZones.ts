@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import * as api from "../lib/api";
+import { getZones, createZone, deleteZone } from "../lib/api";
 import { useZoneStore } from "../stores/zoneStore";
 import type { ZoneCreate } from "../types";
 
@@ -12,7 +12,7 @@ export function useZones() {
   return useQuery({
     queryKey: ZONE_KEYS.all,
     queryFn: async () => {
-      const zones = await api.getZones();
+      const zones = await getZones();
       setZones(zones);
       return zones;
     },
@@ -24,7 +24,7 @@ export function useCreateZone() {
   const qc = useQueryClient();
   const upsertZone = useZoneStore((s) => s.upsertZone);
   return useMutation({
-    mutationFn: (body: ZoneCreate) => api.createZone(body),
+    mutationFn: (body: ZoneCreate) => createZone(body),
     onSuccess: (zone) => {
       upsertZone(zone);
       qc.invalidateQueries({ queryKey: ZONE_KEYS.all });
@@ -36,7 +36,7 @@ export function useDeleteZone() {
   const qc = useQueryClient();
   const removeZone = useZoneStore((s) => s.removeZone);
   return useMutation({
-    mutationFn: (id: string) => api.deleteZone(id),
+    mutationFn: (id: string) => deleteZone(id),
     onSuccess: (_, id) => {
       removeZone(id);
       qc.invalidateQueries({ queryKey: ZONE_KEYS.all });

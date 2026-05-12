@@ -90,7 +90,8 @@ echo "  Installing backend packages..."
     pydantic \
     websockets \
     aiofiles \
-    python-multipart
+    python-multipart \
+    roslibpy
 echo "  Done"
 echo ""
 

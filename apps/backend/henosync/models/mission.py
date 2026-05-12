@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -11,8 +11,8 @@ class StepType(str, Enum):
     WAIT = "wait"
     CONDITION = "condition"
     PARALLEL = "parallel"
-    LOOP = "loop"           # NEW
-    WAIT_FOR = "wait_for"   # NEW
+    LOOP = "loop"
+    WAIT_FOR = "wait_for"
 
 
 class StepStatus(str, Enum):
@@ -83,8 +83,8 @@ class MissionStatus(str, Enum):
 class Mission(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: MissionStatus = MissionStatus.DRAFT
     steps: list[MissionStep] = []
     failsafe: FailsafeConfig = Field(default_factory=FailsafeConfig)

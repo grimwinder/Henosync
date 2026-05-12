@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -156,7 +156,7 @@ class GPSData(BaseModel):
     accuracy: float = 0.0
     fix_type: str = "none"      # "none", "2d", "3d", "rtk"
     satellites: int = 0
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class LidarPoint(BaseModel):
@@ -169,7 +169,7 @@ class LidarPoint(BaseModel):
 class LidarScan(BaseModel):
     """Standard LiDAR scan data format."""
     points: list[LidarPoint] = []
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     frame_id: str = "lidar"
     range_min: float = 0.0
     range_max: float = 0.0

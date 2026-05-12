@@ -132,25 +132,29 @@ class NodeRegistry:
 
             success = await plugin_instance.connect(node, node.config)
 
-            if success:
-                await self._update_status(node, NodeStatus.ONLINE)
-                node.last_seen = datetime.now(timezone.utc)
-                logger.info(f"Connected node: {node.name}")
+            if not success:
+                logger.error(f"Plugin connect() returned False for: {node.name}")
+                await self._update_status(node, NodeStatus.ERROR)
+                return
 
-                # Create telemetry queue for this node
-                telemetry_bus.create_node_queue(node.id)
+            await self._update_status(node, NodeStatus.ONLINE)
+            node.last_seen = datetime.now(timezone.utc)
+            logger.info(f"Connected node: {node.name}")
 
-                # Publish connection event
-                await telemetry_bus.publish_event(
-                    title="Node Connected",
-                    message=f"{node.name} is now online",
-                    severity=EventSeverity.INFO,
-                    node_id=node.id
-                )
+            # Create telemetry queue for this node
+            telemetry_bus.create_node_queue(node.id)
 
-                asyncio.create_task(
-                    self._run_telemetry_stream(node, plugin_instance)
-                )
+            # Publish connection event
+            await telemetry_bus.publish_event(
+                title="Node Connected",
+                message=f"{node.name} is now online",
+                severity=EventSeverity.INFO,
+                node_id=node.id
+            )
+
+            asyncio.create_task(
+                self._run_telemetry_stream(node, plugin_instance)
+            )
 
         except Exception as e:
             logger.error(f"Error connecting node {node.name}: {e}")

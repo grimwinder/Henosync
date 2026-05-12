@@ -1,6 +1,5 @@
 import logging
 from .base import BaseTransport
-from .simulation import SimulationTransport
 from .ros2 import ROS2Transport
 
 logger = logging.getLogger(__name__)
@@ -18,9 +17,8 @@ class TransportRegistry:
 
     def _register_builtin_transports(self) -> None:
         """Register the transports that ship with Henosync core."""
-        self.register("sim", SimulationTransport)
         self.register("ros2", ROS2Transport)
-        logger.info("Built-in transports registered: sim, ros2")
+        logger.info("Built-in transports registered: ros2")
 
     def register(
         self,

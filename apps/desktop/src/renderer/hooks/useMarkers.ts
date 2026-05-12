@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import * as api from "../lib/api";
+import { getMarkers, createMarker, deleteMarker } from "../lib/api";
 import { useMarkerStore } from "../stores/markerStore";
 import type { MapMarkerCreate } from "../types";
 
@@ -12,7 +12,7 @@ export function useMarkers() {
   return useQuery({
     queryKey: MARKER_KEYS.all,
     queryFn: async () => {
-      const markers = await api.getMarkers();
+      const markers = await getMarkers();
       setMarkers(markers);
       return markers;
     },
@@ -24,7 +24,7 @@ export function useCreateMarker() {
   const qc = useQueryClient();
   const upsertMarker = useMarkerStore((s) => s.upsertMarker);
   return useMutation({
-    mutationFn: (body: MapMarkerCreate) => api.createMarker(body),
+    mutationFn: (body: MapMarkerCreate) => createMarker(body),
     onSuccess: (marker) => {
       upsertMarker(marker);
       qc.invalidateQueries({ queryKey: MARKER_KEYS.all });
@@ -36,7 +36,7 @@ export function useDeleteMarker() {
   const qc = useQueryClient();
   const removeMarker = useMarkerStore((s) => s.removeMarker);
   return useMutation({
-    mutationFn: (id: string) => api.deleteMarker(id),
+    mutationFn: (id: string) => deleteMarker(id),
     onSuccess: (_, id) => {
       removeMarker(id);
       qc.invalidateQueries({ queryKey: MARKER_KEYS.all });
