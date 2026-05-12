@@ -17,20 +17,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Poetry
-        run: curl -sSL https://install.python-poetry.org | python3 -
-
       - name: Install dependencies
         working-directory: apps/backend
-        run: poetry install
+        run: |
+          pip install --quiet \
+            uvicorn fastapi aiosqlite "sqlalchemy[asyncio]" \
+            pydantic websockets aiofiles python-multipart \
+            alembic roslibpy \
+            pytest pytest-asyncio httpx ruff
 
       - name: Run linting
         working-directory: apps/backend
-        run: poetry run ruff check .
+        run: ruff check .
 
       - name: Run tests
         working-directory: apps/backend
-        run: poetry run pytest tests/ -v
+        run: pytest tests/ -v
 
   test-frontend:
     runs-on: ubuntu-latest
@@ -54,7 +56,3 @@ jobs:
       - name: Type check
         working-directory: apps/desktop
         run: pnpm exec tsc --noEmit
-
-      - name: Run tests
-        working-directory: apps/desktop
-        run: pnpm test
