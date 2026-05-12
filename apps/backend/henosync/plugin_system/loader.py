@@ -1,9 +1,10 @@
-import json
 import importlib.util
+import json
 import logging
 from pathlib import Path
-from .registry import plugin_registry
+
 from .interfaces import NodePlugin
+from .registry import plugin_registry
 
 logger = logging.getLogger(__name__)
 

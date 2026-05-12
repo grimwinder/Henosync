@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from ...core.marker_manager import marker_manager, MarkerType
+
+from ...core.marker_manager import MarkerType, marker_manager
 
 router = APIRouter(prefix="/api/markers", tags=["markers"])
 

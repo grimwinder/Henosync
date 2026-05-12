@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from ...models import NodeCreate, NodeUpdate
+
 from ...core.node_registry import node_registry
+from ...models import NodeCreate
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 

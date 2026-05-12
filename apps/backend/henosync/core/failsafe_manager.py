@@ -1,7 +1,8 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from ..models import NodeStatus, EventSeverity
+
+from ..models import EventSeverity, NodeStatus
 from ..plugin_system.registry import plugin_registry
 from .telemetry_bus import telemetry_bus
 
@@ -143,7 +144,6 @@ class FailsafeManager:
             except Exception as e:
                 logger.error(f"Safe state failed for {node.name}: {e}")
 
-        from .node_registry import node_registry
         node.status = NodeStatus.ERROR
 
         await telemetry_bus.publish_event(
@@ -274,8 +274,8 @@ class FailsafeManager:
 
     async def _pause_active_mission(self, node_name: str) -> None:
         """Pause the active mission if one is running."""
-        from .mission_engine import mission_engine
         from ..models import MissionStatus
+        from .mission_engine import mission_engine
         if mission_engine._status == MissionStatus.EXECUTING:
             await mission_engine.pause()
             logger.info(
@@ -284,8 +284,8 @@ class FailsafeManager:
 
     async def _abort_active_mission(self) -> None:
         """Abort the active mission if one is running."""
-        from .mission_engine import mission_engine
         from ..models import MissionStatus
+        from .mission_engine import mission_engine
         if mission_engine._status in (
             MissionStatus.EXECUTING,
             MissionStatus.PAUSED
@@ -314,8 +314,8 @@ class FailsafeManager:
 
     async def _get_active_failsafe(self):
         """Get the failsafe config from the active mission if any."""
-        from .mission_engine import mission_engine
         from ..models import MissionStatus
+        from .mission_engine import mission_engine
         if (
             mission_engine._active_mission
             and mission_engine._status == MissionStatus.EXECUTING

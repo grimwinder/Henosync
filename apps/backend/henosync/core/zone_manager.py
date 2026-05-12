@@ -1,12 +1,13 @@
-import math
 import json
 import logging
+import math
 import uuid
-import aiosqlite
-from typing import Optional
-from pydantic import BaseModel, Field
 from enum import Enum
-from ..models import Position
+from typing import Optional
+
+import aiosqlite
+from pydantic import BaseModel, Field
+
 from ..storage.database import DB_PATH, init_db
 
 logger = logging.getLogger(__name__)
@@ -281,7 +282,7 @@ class ZoneManager:
         lat2: float, lon2: float
     ) -> float:
         """Calculate distance between two GPS points in metres."""
-        R = 6371000
+        earth_radius = 6371000
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
@@ -292,7 +293,7 @@ class ZoneManager:
             math.cos(phi1) * math.cos(phi2) *
             math.sin(dlam / 2) ** 2
         )
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return earth_radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 # Global singleton

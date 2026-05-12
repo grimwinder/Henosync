@@ -1,10 +1,12 @@
 import json
 import logging
-import aiosqlite
 from datetime import datetime, timezone
 from typing import Optional
-from ..models import Mission, MissionCreate, MissionUpdate, MissionStatus
-from .database import DB_PATH, init_db
+
+import aiosqlite
+
+from ..models import Mission, MissionCreate, MissionStatus, MissionUpdate
+from .database import DB_PATH
 
 logger = logging.getLogger(__name__)
 

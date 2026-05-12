@@ -1,7 +1,7 @@
 from .base import BaseTransport
-from .simulation import SimulationTransport
+from .registry import TransportRegistry, transport_registry
 from .ros2 import ROS2Transport
-from .registry import transport_registry, TransportRegistry
+from .simulation import SimulationTransport
 
 __all__ = [
     "BaseTransport",

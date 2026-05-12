@@ -1,13 +1,18 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Optional
+
 from ..models import (
-    Mission, MissionStep, MissionStatus, StepStatus,
-    StepType, EventSeverity, ConditionOperator
+    ConditionOperator,
+    EventSeverity,
+    Mission,
+    MissionStatus,
+    MissionStep,
+    StepStatus,
+    StepType,
 )
-from ..storage.mission_store import mission_store
 from ..plugin_system.registry import plugin_registry
+from ..storage.mission_store import mission_store
 from .node_registry import node_registry
 from .telemetry_bus import telemetry_bus
 
@@ -428,7 +433,7 @@ class MissionEngine:
             for r in results
             if not isinstance(r, Exception)
         )
-    
+
     async def _execute_loop_step(self, step: MissionStep) -> bool:
         """
         Execute a LOOP step — repeat a sequence of steps.
@@ -462,7 +467,7 @@ class MissionEngine:
 
         # Safety limit — prevent infinite loops with no condition
         # v2: make this configurable
-        MAX_ITERATIONS = 1000
+        max_iterations = 1000
 
         while True:
             if self._abort_flag:
@@ -476,9 +481,9 @@ class MissionEngine:
                 break
 
             # Safety cap
-            if iteration >= MAX_ITERATIONS:
+            if iteration >= max_iterations:
                 logger.warning(
-                    f"Loop hit safety limit of {MAX_ITERATIONS} iterations"
+                    f"Loop hit safety limit of {max_iterations} iterations"
                 )
                 break
 

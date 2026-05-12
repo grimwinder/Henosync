@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Any, Optional
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
 
 
 class TelemetryFrame(BaseModel):

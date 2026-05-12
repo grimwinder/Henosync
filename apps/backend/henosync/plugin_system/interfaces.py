@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Any
-from ..models import Node, TelemetryFrame, CommandResult
+from typing import Any, AsyncGenerator
+
+from ..models import CommandResult, Node, TelemetryFrame
 
 
 class NodePlugin(ABC):

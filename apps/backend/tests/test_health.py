@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+
 from henosync.api.app import create_app
 
 client = TestClient(create_app())

@@ -1,9 +1,10 @@
 import logging
 import uuid
+from enum import Enum
+
 import aiosqlite
 from pydantic import BaseModel, Field
-from enum import Enum
-from typing import Optional
+
 from ..storage.database import DB_PATH, init_db
 
 logger = logging.getLogger(__name__)

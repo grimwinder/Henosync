@@ -1,25 +1,24 @@
+import logging
+from pathlib import Path
+
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-from ..plugin_system.loader import PluginLoader
+
+from ..core.failsafe_manager import failsafe_manager
+from ..core.marker_manager import marker_manager
 from ..core.node_registry import node_registry
 from ..core.zone_manager import zone_manager
-from ..core.marker_manager import marker_manager
+from ..plugin_system.loader import PluginLoader
 from ..storage.mission_store import mission_store
-from ..core.failsafe_manager import failsafe_manager
-from .routes.safety import router as safety_router
-from .routes.nodes import router as nodes_router
 from .routes.commands import router as commands_router
-from .routes.missions import router as missions_router
 from .routes.execution import router as execution_router
-from .routes.operations import router as operations_router
-from .routes.zones import router as zones_router
 from .routes.markers import router as markers_router
-from .websocket_server import (
-    telemetry_websocket_handler,
-    events_websocket_handler
-)
-import logging
+from .routes.missions import router as missions_router
+from .routes.nodes import router as nodes_router
+from .routes.operations import router as operations_router
+from .routes.safety import router as safety_router
+from .routes.zones import router as zones_router
+from .websocket_server import events_websocket_handler, telemetry_websocket_handler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

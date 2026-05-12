@@ -1,15 +1,12 @@
-import asyncio
 import logging
-from typing import Optional, Any, TYPE_CHECKING
-from ..models import (
-    DeviceCategory, DeviceCapability,
-    CapabilityRequirement, EventSeverity
-)
+from typing import TYPE_CHECKING, Any, Optional
+
+from ..models import DeviceCapability, DeviceCategory, EventSeverity
 from .device_proxy import DeviceProxy
 
 if TYPE_CHECKING:
-    from .zone_manager import ZoneManager
     from .event_bus import EventBus
+    from .zone_manager import ZoneManager
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +134,8 @@ class FleetContext:
             capabilities: Filter by required capabilities
             categories:   Filter by device category
         """
-        from .operation_manager import operation_manager
         from .node_registry import node_registry
+        from .operation_manager import operation_manager
 
         available = []
         for node in node_registry.get_online_nodes():

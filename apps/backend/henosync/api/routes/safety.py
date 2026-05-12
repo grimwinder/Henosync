@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from ...core.failsafe_manager import failsafe_manager
 
 router = APIRouter(prefix="/api/safety", tags=["safety"])

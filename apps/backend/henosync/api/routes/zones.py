@@ -1,7 +1,9 @@
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from ...core.zone_manager import zone_manager, ZoneType, GeoPoint
+
+from ...core.zone_manager import GeoPoint, ZoneType, zone_manager
 
 router = APIRouter(prefix="/api/zones", tags=["zones"])
 

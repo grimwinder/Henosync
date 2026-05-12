@@ -1,9 +1,11 @@
 import asyncio
 import json
 import logging
+
 from fastapi import WebSocket, WebSocketDisconnect
+
 from ..core.telemetry_bus import telemetry_bus
-from ..models import TelemetryFrame, SystemEvent
+from ..models import SystemEvent, TelemetryFrame
 
 logger = logging.getLogger(__name__)
 

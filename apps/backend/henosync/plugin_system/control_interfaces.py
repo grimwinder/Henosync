@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING
 from enum import Enum
+from typing import TYPE_CHECKING, Any, Optional
+
 from pydantic import BaseModel
-from ..models import DeviceCategory, DeviceCapability, CapabilityRequirement
+
+from ..models import CapabilityRequirement, DeviceCategory
 
 if TYPE_CHECKING:
     from ..core.fleet_context import FleetContext

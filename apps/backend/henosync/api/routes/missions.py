@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from ...models import MissionCreate, MissionUpdate, Mission
+
+from ...models import MissionCreate, MissionUpdate
 from ...storage.mission_store import mission_store
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])

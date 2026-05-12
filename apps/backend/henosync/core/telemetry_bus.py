@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Callable
-from ..models import TelemetryFrame, SystemEvent, EventSeverity
-import uuid
+
+from ..models import EventSeverity, SystemEvent, TelemetryFrame
 
 logger = logging.getLogger(__name__)
 

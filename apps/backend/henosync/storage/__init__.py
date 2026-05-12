@@ -1,5 +1,5 @@
-from .database import init_db, DB_PATH
-from .mission_store import mission_store, MissionStore
+from .database import DB_PATH, init_db
+from .mission_store import MissionStore, mission_store
 
 __all__ = [
     "init_db",

@@ -1,19 +1,19 @@
 import asyncio
 import logging
-from typing import Optional, Any
 from datetime import datetime, timezone
+from typing import Any, Optional
+
 from ..models import (
-    DeviceCategory, DeviceCapability,
-    CapabilityRequirement, EventSeverity
+    EventSeverity,
 )
 from ..plugin_system.control_interfaces import (
-    ControlPlugin, OperationState, OperationStatus
+    ControlPlugin,
 )
 from .device_proxy import DeviceProxy
-from .fleet_context import FleetContext
-from .zone_manager import zone_manager
 from .event_bus import event_bus
+from .fleet_context import FleetContext
 from .telemetry_bus import telemetry_bus
+from .zone_manager import zone_manager
 
 logger = logging.getLogger(__name__)
 

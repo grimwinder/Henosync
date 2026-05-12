@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field
-from typing import Any, Optional
-from enum import Enum
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
 
 
 class StepType(str, Enum):
@@ -51,10 +52,10 @@ class MissionStep(BaseModel):
     else_step_id: Optional[str] = None
     parallel_step_ids: list[str] = []
     loop_step_ids: list[str] = []
-    loop_count: Optional[int] = None        
-    loop_condition: Optional[Condition] = None 
+    loop_count: Optional[int] = None
+    loop_condition: Optional[Condition] = None
     wait_for_condition: Optional[Condition] = None
-    wait_for_timeout_seconds: float = 30.0 
+    wait_for_timeout_seconds: float = 30.0
 
 
 class FailsafeAction(str, Enum):

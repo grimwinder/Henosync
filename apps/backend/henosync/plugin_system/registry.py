@@ -1,6 +1,7 @@
-from typing import Optional
-from .interfaces import NodePlugin
 import logging
+from typing import Optional
+
+from .interfaces import NodePlugin
 
 logger = logging.getLogger(__name__)
 
