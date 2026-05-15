@@ -5,7 +5,7 @@
   "author": "Your Name",
   "description": "Plugin for My Robot",
   "sdk_version": ">=0.1.0",
-  "node_types": ["my-robot.default"],
+  "node_types": ["agv"],
   "capabilities": [
     {
       "id": "move_to",
@@ -26,7 +26,6 @@
       "destructive": false
     }
   ],
-  "transport": "ros2",
   "config_schema": {
     "host": {
       "type": "string",
@@ -36,7 +35,7 @@
     },
     "port": {
       "type": "number",
-      "label": "rosbridge Port",
+      "label": "Rosbridge Port",
       "required": false,
       "default": 9090
     },

@@ -1,0 +1,10 @@
+{
+  "id": "my-operation",
+  "name": "My Operation",
+  "version": "0.1.0",
+  "author": "Your Name",
+  "description": "TODO: describe what this operation does",
+  "sdk_version": ">=0.1.0",
+  "node_types": [],
+  "capabilities": []
+}

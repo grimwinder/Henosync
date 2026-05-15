@@ -498,7 +498,11 @@ Connect uses `asyncio.get_running_loop().run_in_executor(None, ros.run)` + `asyn
 
 ### Template plugin (`plugins/template/`)
 
-Starter template. Shows manifest `capabilities` array format with `{id, label, params, destructive}` objects.
+Starter device plugin template. Uses per-node `_NodeState` dict, sets `node.specs` in `connect()`, guards against emitting `lat=0,lon=0` before first GPS message, and does not kill the telemetry stream in `get_safe_state()`.
+
+### Control template plugin (`plugins/control-template/`)
+
+Starter control plugin template. Shows `_stop_requested` loop pattern, `self._config` access, `context.devices` iteration, and optional `on_device_joined`/`on_device_left` handlers.
 
 ---
 
@@ -556,3 +560,7 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-05-12 | ue-sim Milestone 2b: implemented get_video_stream_url() for web_video_server camera feed                                                                                                                                               |
 | 2026-05-12 | Removed plugins/jackal/ entirely                                                                                                                                                                                                       |
 | 2026-05-12 | Fixed all ruff linting violations in backend (I001 import order, W292 missing newlines, W291 trailing whitespace, F401 unused import, N806 uppercase locals in mission_engine and zone_manager)                                        |
+| 2026-05-15 | Rewrote plugins/template/plugin.py — per-node \_NodeState, node.specs in connect(), gps_received guard, get_safe_state() no longer kills telemetry, params validated in send_command()                                                 |
+| 2026-05-15 | Fixed plugins/template/manifest.json — valid node_types category, removed unused transport field                                                                                                                                       |
+| 2026-05-15 | Added **init** to ControlPlugin base class declaring \_stop_requested, \_config, \_context as typed attributes                                                                                                                         |
+| 2026-05-15 | Added plugins/control-template/ — starter control plugin template with stop loop pattern, config access, device iteration, and event handlers                                                                                          |

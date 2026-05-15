@@ -89,6 +89,16 @@ class ControlPlugin(ABC):
     # Safety operations should have highest priority.
     PRIORITY: int = 0
 
+    # ── Instance State ────────────────────────────────────────
+
+    def __init__(self) -> None:
+        # Set to True by stop() to signal start() to exit its loop.
+        self._stop_requested: bool = False
+        # Operator config — injected by operation_manager before start().
+        self._config: dict[str, Any] = {}
+        # FleetContext — injected by operation_manager before start().
+        self._context: Optional["FleetContext"] = None
+
     # ── Required Methods ──────────────────────────────────────
 
     @abstractmethod
