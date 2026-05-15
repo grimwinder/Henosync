@@ -203,11 +203,13 @@ Tables:
 **Device plugins** (`NodePlugin` ABC in `plugin_system/interfaces.py`)
 
 - 5 abstract methods: `connect`, `disconnect`, `send_command`, `telemetry_stream`, `get_safe_state`
-- 4 optional methods: `get_video_stream_url`, `validate_config`, `on_mission_start`, `on_mission_end`
+- 5 optional methods: `on_reconnect`, `get_video_stream_url`, `validate_config`, `on_mission_start`, `on_mission_end`
 - One class per hardware type; one instance per connected node (node_id → instance in `plugin_registry`)
-- `connect()` must return False (not raise) on failure
+- `connect()` returns `tuple[bool, str]` — `(True, "")` on success, `(False, "reason")` on failure; never raises
+- `on_reconnect()` called instead of `connect()` on manual reconnect; default delegates to `connect()`
 - `send_command()` should return success as soon as robot ACCEPTS command (not when complete)
-- `telemetry_stream()` is an AsyncGenerator — yield TelemetryFrame at 1Hz
+- `telemetry_stream()` is an AsyncGenerator — yield TelemetryFrame at `TELEMETRY_RATE_HZ` (default 1Hz)
+- `TELEMETRY_RATE_HZ: float = 1.0` class attribute — plugins sleep `1.0 / self.TELEMETRY_RATE_HZ`
 - Loaded from `plugins/<name>/plugin.py` — PluginLoader finds any `NodePlugin` subclass
 
 **Control plugins** (`ControlPlugin` ABC in `plugin_system/control_interfaces.py`)
@@ -219,7 +221,8 @@ Tables:
 - `stop()` must complete within 3 seconds
 - `get_status()` must be non-blocking (no awaits) — returns `OperationStatus`
 - `get_ui_contribution()` returns `UIContribution` with `config_schema` (drives Mission Planner step config form)
-- Config passed via `plugin._config = config` (set by operation_manager before `start()`)
+- `_stop_requested`, `_config`, `_context` declared on base class `__init__` — visible to IDEs, no manual declaration needed in subclasses
+- Config read via `self._config` (injected by operation_manager before `start()`)
 
 **Plugin loading** (`plugin_system/loader.py`)
 Required manifest fields: `id`, `name`, `version`, `author`, `description`, `sdk_version`, `node_types`, `capabilities`.
@@ -448,8 +451,8 @@ Saves zone+marker snapshots to `localStorage` under key `"henosync_map_layouts"`
 - Implement all 5 abstract methods
 - Set `node.specs = DeviceSpecs(category=..., capabilities=[...])` in `connect()` for capability matching
 - Populate standard telemetry keys: `battery_percent`, `lat`, `lon`, `alt`, `speed`, `heading`, `status_text`, `signal_strength`
-- `connect()` returns `False` (never raise) on failure
-- `telemetry_stream()` is AsyncGenerator — yield TelemetryFrame at ~1Hz
+- `connect()` returns `(True, "")` on success, `(False, "reason")` on failure — never raise
+- `telemetry_stream()` is AsyncGenerator — sleep `1.0 / self.TELEMETRY_RATE_HZ` between yields
 - Plugin class must define `PLUGIN_ID` (must match manifest `id`)
 
 ### Control plugin checklist
