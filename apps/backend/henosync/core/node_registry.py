@@ -115,7 +115,7 @@ class NodeRegistry:
 
     # ── Connection Management ─────────────────────────────────────
 
-    async def _connect_node(self, node: Node) -> None:
+    async def _connect_node(self, node: Node, reconnect: bool = False) -> None:
         """Attempt to connect a node via its plugin."""
         plugin_class = plugin_registry.get_plugin_class(node.plugin_id)
         if not plugin_class:
@@ -123,7 +123,6 @@ class NodeRegistry:
             await self._update_status(node, NodeStatus.ERROR)
             return
 
-        # Create plugin instance for this node
         plugin_instance = plugin_class()
         plugin_registry.register_instance(node.id, plugin_instance)
 
@@ -131,21 +130,30 @@ class NodeRegistry:
             node.status = NodeStatus.CONNECTING
             self._notify_listeners(node)
 
-            success = await plugin_instance.connect(node, node.config)
+            if reconnect:
+                success, reason = await plugin_instance.on_reconnect(node, node.config)
+            else:
+                success, reason = await plugin_instance.connect(node, node.config)
 
             if not success:
-                logger.error(f"Plugin connect() returned False for: {node.name}")
+                logger.error(
+                    f"Plugin connect() failed for {node.name}: {reason}"
+                )
                 await self._update_status(node, NodeStatus.ERROR)
+                await telemetry_bus.publish_event(
+                    title="Connection Failed",
+                    message=f"{node.name} could not connect: {reason}",
+                    severity=EventSeverity.WARNING,
+                    node_id=node.id
+                )
                 return
 
             await self._update_status(node, NodeStatus.ONLINE)
             node.last_seen = datetime.now(timezone.utc)
             logger.info(f"Connected node: {node.name}")
 
-            # Create telemetry queue for this node
             telemetry_bus.create_node_queue(node.id)
 
-            # Publish connection event
             await telemetry_bus.publish_event(
                 title="Node Connected",
                 message=f"{node.name} is now online",
@@ -183,7 +191,7 @@ class NodeRegistry:
             return False
 
         await self._disconnect_node(node)
-        asyncio.create_task(self._connect_node(node))
+        asyncio.create_task(self._connect_node(node, reconnect=True))
         return True
 
     # ── Telemetry ─────────────────────────────────────────────────

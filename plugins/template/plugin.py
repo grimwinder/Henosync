@@ -64,10 +64,11 @@ class MyRobotPlugin(NodePlugin):
         # all nodes of this type simultaneously.
         self._nodes: dict[str, _NodeState] = {}
 
-    async def connect(self, node: Node, config: dict[str, Any]) -> bool:
+    async def connect(self, node: Node, config: dict[str, Any]) -> tuple[bool, str]:
         """
         Establish connection to the robot.
-        Return False (never raise) on failure.
+        Return (False, "reason") on failure — never raise exceptions here.
+        The reason is logged and shown to the operator.
         """
         host = config.get("host", "localhost")
         port = int(config.get("port", 9090))
@@ -84,7 +85,7 @@ class MyRobotPlugin(NodePlugin):
             #   ... connect and wait for ready event ...
             #   state.ros = ros
             #
-            # Return False immediately if the connection cannot be established.
+            # Return (False, "reason") if the connection cannot be established.
 
             state.connected = True
 
@@ -107,12 +108,12 @@ class MyRobotPlugin(NodePlugin):
             #   gps_topic.subscribe(lambda msg: self._on_gps(node.id, msg))
 
             logger.info("MyRobot [%s]: connected to %s:%d", node.name, host, port)
-            return True
+            return True, ""
 
         except Exception as e:
             logger.error("MyRobot [%s]: connect failed: %s", node.name, e)
             self._nodes.pop(node.id, None)
-            return False
+            return False, str(e)
 
     # TODO: Add topic callback methods here, e.g.:
     #
@@ -191,7 +192,7 @@ class MyRobotPlugin(NodePlugin):
                 values=values,
             )
             seq += 1
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
 
     async def get_safe_state(self, node: Node) -> CommandResult:
         """

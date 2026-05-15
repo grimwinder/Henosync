@@ -28,16 +28,20 @@ class NodePlugin(ABC):
     PLUGIN_AUTHOR: str = ""
     PLUGIN_DESCRIPTION: str = ""
 
+    # Telemetry rate in Hz. Controls how frequently telemetry_stream
+    # should yield frames. Use in your sleep: asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
+    TELEMETRY_RATE_HZ: float = 1.0
+
     # ── Required Methods ──────────────────────────────────────────
 
     @abstractmethod
-    async def connect(self, node: Node, config: dict[str, Any]) -> bool:
+    async def connect(self, node: Node, config: dict[str, Any]) -> tuple[bool, str]:
         """
         Establish a connection to the physical node.
 
         Called when:
         - User adds a new node
-        - Henosync attempts to reconnect after a dropout
+        - Henosync attempts to connect on startup
 
         Args:
             node:   The node object representing this device
@@ -45,8 +49,9 @@ class NodePlugin(ABC):
                     schema (e.g. IP address, port, ROS topics)
 
         Returns:
-            True if connection succeeded, False otherwise.
-            Do NOT raise exceptions here — return False instead.
+            (True, "") on success.
+            (False, "reason") on failure — never raise exceptions here.
+            The reason string is logged and surfaced to the operator.
 
         Example config for a ROS2 robot:
             {
@@ -170,6 +175,19 @@ class NodePlugin(ABC):
     # Override these in your plugin for additional functionality.
     # Default implementations are provided so they don't need to
     # be implemented if not needed.
+
+    async def on_reconnect(
+        self, node: Node, config: dict[str, Any]
+    ) -> tuple[bool, str]:
+        """
+        Called instead of connect() when Henosync is re-establishing
+        a connection after a dropout or manual reconnect.
+
+        Override to implement a faster reconnect path (e.g. re-open
+        a socket without reinitialising all state). Default behaviour
+        is a full connect() call.
+        """
+        return await self.connect(node, config)
 
     async def get_video_stream_url(self, node: Node) -> str | None:
         """

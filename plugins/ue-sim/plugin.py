@@ -71,10 +71,9 @@ class UESimPlugin(NodePlugin):
 
     # ── Connect ───────────────────────────────────────────────────────────────
 
-    async def connect(self, node: Node, config: dict[str, Any]) -> bool:
+    async def connect(self, node: Node, config: dict[str, Any]) -> tuple[bool, str]:
         if not ROSLIBPY_AVAILABLE:
-            logger.error("UE Sim [%s]: roslibpy not installed", node.name)
-            return False
+            return False, "roslibpy not installed — run: pip install roslibpy"
 
         host = config.get("host", "localhost")
         port = int(config.get("port", 9090))
@@ -111,12 +110,11 @@ class UESimPlugin(NodePlugin):
             )
 
             if not connected_event.is_set():
-                logger.error(
-                    "UE Sim [%s]: timed out connecting to %s:%d", node.name, host, port
-                )
+                reason = f"timed out connecting to {host}:{port}"
+                logger.error("UE Sim [%s]: %s", node.name, reason)
                 ros.terminate()
                 self._nodes.pop(node.id, None)
-                return False
+                return False, reason
 
             state.ros = ros
             state.connected = True
@@ -131,12 +129,12 @@ class UESimPlugin(NodePlugin):
 
             self._subscribe_topics(node, state)
 
-            return True
+            return True, ""
 
         except Exception as e:
             logger.error("UE Sim [%s]: connect failed: %s", node.name, e)
             self._nodes.pop(node.id, None)
-            return False
+            return False, str(e)
 
     def _on_close(self, node_id: str) -> None:
         state = self._nodes.get(node_id)
@@ -224,7 +222,7 @@ class UESimPlugin(NodePlugin):
                 values=values,
             )
             seq += 1
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
 
     # ── Camera feed ───────────────────────────────────────────────────────────
 

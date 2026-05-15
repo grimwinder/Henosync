@@ -137,10 +137,21 @@ class FailsafeManager:
         if plugin_instance:
             try:
                 result = await plugin_instance.get_safe_state(node)
-                logger.info(
-                    f"Safe state invoked for {node.name}: "
-                    f"{result.message}"
-                )
+                if result.success:
+                    logger.info(
+                        f"Safe state invoked for {node.name}: {result.message}"
+                    )
+                else:
+                    logger.error(
+                        f"Safe state FAILED for {node.name}: {result.message}"
+                    )
+                    await telemetry_bus.publish_event(
+                        title="Safe State Failed",
+                        message=f"{node.name} failed to reach safe state: "
+                                f"{result.message}. Manual intervention required.",
+                        severity=EventSeverity.CRITICAL,
+                        node_id=node.id
+                    )
             except Exception as e:
                 logger.error(f"Safe state failed for {node.name}: {e}")
 
@@ -262,9 +273,21 @@ class FailsafeManager:
         """Invoke get_safe_state with error protection."""
         try:
             result = await plugin_instance.get_safe_state(node)
-            logger.info(
-                f"Emergency safe state: {node.name} — {result.message}"
-            )
+            if result.success:
+                logger.info(
+                    f"Emergency safe state: {node.name} — {result.message}"
+                )
+            else:
+                logger.error(
+                    f"Emergency safe state FAILED for {node.name}: {result.message}"
+                )
+                await telemetry_bus.publish_event(
+                    title="Safe State Failed",
+                    message=f"{node.name} failed to reach safe state: "
+                            f"{result.message}. Manual intervention required.",
+                    severity=EventSeverity.CRITICAL,
+                    node_id=node.id
+                )
         except Exception as e:
             logger.error(
                 f"Emergency safe state failed for {node.name}: {e}"
