@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ...core.node_registry import node_registry
+from ...models import CommandEnvelope
 from ...plugin_system.registry import plugin_registry
 
 router = APIRouter(prefix="/api/nodes", tags=["commands"])
@@ -28,11 +29,11 @@ async def send_command(node_id: str, command: CommandRequest):
             detail="Node has no active plugin instance"
         )
 
-    result = await plugin_instance.send_command(
-        node,
-        command.capability,
-        command.params
+    envelope = CommandEnvelope(
+        command_type=command.capability,
+        params=command.params,
     )
+    result = await plugin_instance.send_command(node, envelope)
     return result.model_dump()
 
 

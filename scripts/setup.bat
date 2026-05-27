@@ -64,6 +64,7 @@ apps\backend\.venv\Scripts\pip install --quiet ^
     aiofiles ^
     python-multipart ^
     roslibpy
+apps\backend\.venv\Scripts\pip install --quiet -e packages\plugin-sdk
 echo   Done
 echo.
 

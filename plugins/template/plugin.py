@@ -1,31 +1,42 @@
 """
 Henosync Device Plugin Template
 ================================
-Copy this folder, rename it, and implement the five methods below.
+Copy this folder, rename it, and implement the methods below.
 
 Steps:
 1. Update manifest.json with your robot's details
 2. Rename MyRobotPlugin and set PLUGIN_ID to match manifest id
 3. Implement connect() — establish connection and set node.specs
 4. Implement disconnect() — clean up all resources
-5. Implement send_command() — handle each capability from your manifest
-6. Implement telemetry_stream() — yield live sensor data
+5. Override cmd_move_to / cmd_stop / cmd_return_home for the capabilities you declare
+6. Implement telemetry_stream() — yield live sensor data using typed TelemetryFrame fields
 7. Implement get_safe_state() — stop the robot safely
+8. Override is_connected() if your transport can detect a dead connection
+   (e.g. check ros.is_connected for rosbridge, serial port open, etc.)
+
+Standard commands flow through the base class send_command dispatcher automatically:
+    DeviceProxy.move_to()    → cmd_move_to()
+    DeviceProxy.stop()       → cmd_stop()
+    DeviceProxy.return_home()→ cmd_return_home()
+    Custom manifest commands → handle_custom_command() [optional override]
 """
 
 import asyncio
-import sys
-import os
 import logging
-from datetime import datetime, timezone
-from typing import AsyncGenerator, Any
+from typing import Any, AsyncGenerator
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../apps/backend"))
-
-from henosync.plugin_system.interfaces import NodePlugin
-from henosync.models import (
-    Node, TelemetryFrame, CommandResult,
-    DeviceSpecs, DeviceCategory, DeviceCapability, CapabilitySpec,
+from henosync_sdk import (
+    BatteryData,
+    CapabilitySpec,
+    CommandResult,
+    DeviceCapability,
+    DeviceCategory,
+    DeviceSpecs,
+    Node,
+    NodePlugin,
+    NodePluginContext,
+    Position,
+    TelemetryFrame,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +48,7 @@ class _NodeState:
     def __init__(self):
         self.connected: bool = False
 
-        # Live sensor data — updated by topic callbacks
+        # Live sensor data — updated by topic callbacks or polling
         self.lat: float = 0.0
         self.lon: float = 0.0
         self.alt: float = 0.0
@@ -59,17 +70,18 @@ class MyRobotPlugin(NodePlugin):
     PLUGIN_DESCRIPTION = "Plugin for My Robot"
 
     def __init__(self):
-        # One _NodeState entry per connected node.
-        # Never use a single shared connection — this plugin class handles
-        # all nodes of this type simultaneously.
+        super().__init__()
         self._nodes: dict[str, _NodeState] = {}
 
-    async def connect(self, node: Node, config: dict[str, Any]) -> tuple[bool, str]:
+    async def connect(
+        self, node: Node, config: dict[str, Any], context: NodePluginContext
+    ) -> tuple[bool, str]:
         """
         Establish connection to the robot.
         Return (False, "reason") on failure — never raise exceptions here.
-        The reason is logged and shown to the operator.
         """
+        self._context = context  # store for emit_event / command_completed
+
         host = config.get("host", "localhost")
         port = int(config.get("port", 9090))
 
@@ -84,8 +96,6 @@ class MyRobotPlugin(NodePlugin):
             #   ros = roslibpy.Ros(host=host, port=port)
             #   ... connect and wait for ready event ...
             #   state.ros = ros
-            #
-            # Return (False, "reason") if the connection cannot be established.
 
             state.connected = True
 
@@ -96,9 +106,10 @@ class MyRobotPlugin(NodePlugin):
                 category=DeviceCategory.AGV,  # TODO: change to your category
                 capabilities=[
                     CapabilitySpec(capability=DeviceCapability.GPS),
+                    CapabilitySpec(capability=DeviceCapability.BATTERY),
                     # TODO: add capabilities your robot supports, e.g.:
                     # CapabilitySpec(capability=DeviceCapability.CAMERA),
-                    # CapabilitySpec(capability=DeviceCapability.BATTERY),
+                    # CapabilitySpec(capability=DeviceCapability.LIDAR),
                 ],
             )
 
@@ -134,65 +145,67 @@ class MyRobotPlugin(NodePlugin):
         # TODO: Unsubscribe topics and close connection here
         logger.info("MyRobot [%s]: disconnected", node.name)
 
-    async def send_command(
-        self,
-        node: Node,
-        capability: str,
-        params: dict[str, Any],
+    # ── Standard command handlers ─────────────────────────────────────────────
+    # Override the methods below instead of send_command.
+    # The base class routes move_to/stop/return_home here automatically.
+
+    async def cmd_move_to(
+        self, node: Node, lat: float, lon: float, alt: float = 0.0
     ) -> CommandResult:
-        """
-        Handle a capability command.
-        Return success once the robot ACCEPTS the command, not when it finishes.
-        """
-        if capability == "stop":
-            # TODO: Send stop command to robot
-            return CommandResult(success=True, message="Stopped")
+        state = self._nodes.get(node.id)
+        if not state or not state.connected:
+            return CommandResult(success=False, message="Not connected")
+        # TODO: Send move command to robot
+        logger.info("MyRobot [%s]: moving to %.5f, %.5f", node.name, lat, lon)
+        return CommandResult(success=True, message=f"Moving to {lat:.5f}, {lon:.5f}")
 
-        elif capability == "move_to":
-            lat = params.get("lat")
-            lon = params.get("lon")
-            if lat is None or lon is None:
-                return CommandResult(success=False, message="Missing lat/lon params")
-            # TODO: Send move command to robot (alt available via params.get("alt", 0.0))
-            return CommandResult(success=True, message=f"Moving to {lat}, {lon}")
+    async def cmd_stop(self, node: Node) -> CommandResult:
+        state = self._nodes.get(node.id)
+        if not state or not state.connected:
+            return CommandResult(success=False, message="Not connected")
+        # TODO: Send stop command to robot
+        logger.info("MyRobot [%s]: stop", node.name)
+        return CommandResult(success=True, message="Stopped")
 
-        elif capability == "return_home":
-            # TODO: Send return home command to robot
-            return CommandResult(success=True, message="Returning home")
+    async def cmd_return_home(self, node: Node) -> CommandResult:
+        state = self._nodes.get(node.id)
+        if not state or not state.connected:
+            return CommandResult(success=False, message="Not connected")
+        # TODO: Send return-home command to robot
+        logger.info("MyRobot [%s]: return home", node.name)
+        return CommandResult(success=True, message="Returning home")
 
-        return CommandResult(success=False, message=f"Unknown capability: {capability}")
+    # ── Telemetry stream ──────────────────────────────────────────────────────
 
     async def telemetry_stream(
         self, node: Node
     ) -> AsyncGenerator[TelemetryFrame, None]:
-        """Yield telemetry frames at ~1Hz while connected."""
+        """
+        Yield typed TelemetryFrame at TELEMETRY_RATE_HZ until the node is removed.
+        Connection checking is handled globally by node_registry — no connection
+        logic belongs here. Override is_connected() if your transport can detect
+        a dead connection faster than the 5 s failsafe heartbeat timeout.
+        """
         seq = 0
-        while node.id in self._nodes and self._nodes[node.id].connected:
+        while node.id in self._nodes:
             state = self._nodes[node.id]
-
-            values: dict[str, Any] = {
-                "battery_percent": state.battery_percent,
-                "speed": state.speed,
-            }
-
-            if state.gps_received:
-                # Only emit position once real GPS data has arrived.
-                # Without this guard the robot appears at (0, 0) on the map.
-                values["lat"] = state.lat
-                values["lon"] = state.lon
-                values["alt"] = state.alt
-                values["status_text"] = "Online"
-            else:
-                values["status_text"] = "Connected — waiting for GPS"
 
             yield TelemetryFrame(
                 node_id=node.id,
-                timestamp=datetime.now(timezone.utc),
                 sequence_number=seq,
-                values=values,
+                speed=state.speed,
+                battery=BatteryData(percentage=state.battery_percent),
+                # Only emit position once real GPS data has arrived.
+                # Without this guard the robot appears at (0, 0) on the map.
+                position=Position(
+                    lat=state.lat, lon=state.lon, alt=state.alt
+                ) if state.gps_received else None,
+                status_text="Online" if state.gps_received else "Connected — waiting for GPS",
             )
             seq += 1
             await asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
+
+    # ── Safe state ────────────────────────────────────────────────────────────
 
     async def get_safe_state(self, node: Node) -> CommandResult:
         """
@@ -201,8 +214,7 @@ class MyRobotPlugin(NodePlugin):
 
         Do NOT kill the telemetry stream here — the platform needs
         to keep receiving data after a failsafe triggers.
-        Keep this simple and reliable above all else.
         """
-        # TODO: Send your robot's stop/safe command here
         logger.warning("MyRobot [%s]: safe state engaged", node.name)
+        # TODO: Send your robot's stop/safe command here
         return CommandResult(success=True, message="Safe state engaged")

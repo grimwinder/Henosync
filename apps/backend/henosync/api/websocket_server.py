@@ -63,7 +63,7 @@ class ConnectionManager:
             "node_id": frame.node_id,
             "timestamp": frame.timestamp.isoformat(),
             "sequence": frame.sequence_number,
-            "values": frame.values
+            "values": frame.to_values_dict()
         })
 
         disconnected = []

@@ -16,16 +16,20 @@ from .node import (
     CameraFeed,
     CapabilityRequirement,
     CapabilitySpec,
+    CommandEnvelope,
+    CommandType,
     DeviceCapability,
     DeviceCategory,
     DeviceSpecs,
     GPSData,
+    IMUData,
     LidarPoint,
     LidarScan,
     LocalOrigin,
     Node,
     NodeCapability,
     NodeCreate,
+    NodePluginContext,
     NodeStatus,
     NodeUpdate,
     Position,
@@ -40,11 +44,15 @@ __all__ = [
     "DeviceCategory", "DeviceCapability",
     "DeviceSpecs", "CapabilitySpec", "CapabilityRequirement",
     # Capability data schemas
-    "GPSData", "LidarScan", "LidarPoint", "CameraFeed", "BatteryData",
+    "GPSData", "IMUData", "LidarScan", "LidarPoint", "CameraFeed", "BatteryData",
+    # Commands
+    "CommandType", "CommandEnvelope",
+    # Plugin context
+    "NodePluginContext",
     # Mission
     "Mission", "MissionStep", "MissionStatus", "StepType", "StepStatus",
     "MissionCreate", "MissionUpdate", "FailsafeConfig",
     "Condition", "ConditionOperator", "FailsafeAction",
     # Telemetry
-    "TelemetryFrame", "SystemEvent", "CommandResult", "EventSeverity"
+    "TelemetryFrame", "SystemEvent", "CommandResult", "EventSeverity",
 ]

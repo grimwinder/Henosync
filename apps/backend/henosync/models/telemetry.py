@@ -1,34 +1,24 @@
+import uuid
 from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
+from henosync_sdk.models import CommandResult, EventSeverity, TelemetryFrame
 from pydantic import BaseModel, Field
 
+# Re-export so existing imports from henosync.models still work.
+__all__ = [
+    "TelemetryFrame", "CommandResult", "EventSeverity",
+    "SystemEvent",
+]
 
-class TelemetryFrame(BaseModel):
-    node_id: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    values: dict[str, Any] = {}
-    sequence_number: int = 0
 
-
-class EventSeverity(str, Enum):
-    INFO = "info"
-    WARNING = "warning"
-    CRITICAL = "critical"
-
+# ── Backend-only types ────────────────────────────────────────────────────────
 
 class SystemEvent(BaseModel):
-    id: str
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     severity: EventSeverity
     title: str
     message: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     node_id: Optional[str] = None
     acknowledged: bool = False
-
-
-class CommandResult(BaseModel):
-    success: bool
-    message: str = ""
-    data: dict[str, Any] = {}

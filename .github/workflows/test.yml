@@ -18,13 +18,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        working-directory: apps/backend
         run: |
           pip install --quiet \
             uvicorn fastapi aiosqlite "sqlalchemy[asyncio]" \
             pydantic websockets aiofiles python-multipart \
             alembic roslibpy \
             pytest pytest-asyncio httpx ruff
+          pip install --quiet -e packages/plugin-sdk
 
       - name: Run linting
         working-directory: apps/backend

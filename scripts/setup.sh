@@ -92,6 +92,7 @@ echo "  Installing backend packages..."
     aiofiles \
     python-multipart \
     roslibpy
+"$VENV_DIR/bin/pip" install --quiet -e packages/plugin-sdk
 echo "  Done"
 echo ""
 

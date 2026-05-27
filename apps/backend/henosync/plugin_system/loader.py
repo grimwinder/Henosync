@@ -13,13 +13,23 @@ REQUIRED_MANIFEST_FIELDS = [
     "description", "sdk_version", "node_types", "capabilities"
 ]
 
+# Standard command IDs declared in manifests → the NodePlugin method that must handle them.
+# If a plugin declares one of these capability IDs but doesn't override the method,
+# a warning is logged at load time so the problem surfaces before runtime.
+STANDARD_COMMAND_MAP = {
+    "move_to": "cmd_move_to",
+    "stop": "cmd_stop",
+    "return_home": "cmd_return_home",
+    "take_photo": "cmd_take_photo",
+}
+
 
 class PluginLoader:
     """
     Discovers and loads plugins from the plugins directory.
     Each plugin is a folder containing:
     - manifest.json
-    - plugin.py (must contain a class inheriting NodePlugin)
+    - plugin.py (must contain a class inheriting NodePlugin or ControlPlugin)
     """
 
     def __init__(self, plugins_dir: Path):
@@ -74,9 +84,7 @@ class PluginLoader:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         except Exception as e:
-            logger.error(
-                f"Failed to load plugin.py in {plugin_dir.name}: {e}"
-            )
+            logger.error(f"Failed to load plugin.py in {plugin_dir.name}: {e}")
             return False
 
         plugin_class, plugin_type = self._find_plugin_class(module, plugin_dir.name)
@@ -84,6 +92,7 @@ class PluginLoader:
             return False
 
         if plugin_type == "device":
+            self._validate_plugin_commands(plugin_class, manifest, plugin_dir.name)
             plugin_registry.register(manifest["id"], plugin_class, manifest)
             logger.info(f"Device plugin loaded: {manifest['id']}")
         elif plugin_type == "control":
@@ -103,6 +112,22 @@ class PluginLoader:
                 return False
         return True
 
+    def _validate_plugin_commands(
+        self, plugin_class: type, manifest: dict, name: str
+    ) -> None:
+        """
+        Warn if the manifest declares a standard capability that the plugin
+        doesn't implement. Catches the mismatch at load time, not at runtime.
+        """
+        declared_ids = {cap["id"] for cap in manifest.get("capabilities", [])}
+        for cap_id, method_name in STANDARD_COMMAND_MAP.items():
+            if cap_id in declared_ids and method_name not in plugin_class.__dict__:
+                logger.warning(
+                    f"Plugin '{name}' declares capability '{cap_id}' in manifest "
+                    f"but does not override '{method_name}()' — "
+                    f"this command will return 'not implemented' at runtime"
+                )
+
     def _find_plugin_class(self, module, plugin_name: str):
         """Find NodePlugin or ControlPlugin subclass in module."""
         from .control_interfaces import ControlPlugin
@@ -111,15 +136,12 @@ class PluginLoader:
             attr = getattr(module, attr_name)
             if not isinstance(attr, type):
                 continue
-
             if issubclass(attr, NodePlugin) and attr is not NodePlugin:
                 return attr, "device"
-
             if issubclass(attr, ControlPlugin) and attr is not ControlPlugin:
                 return attr, "control"
 
         logger.error(
-            f"No NodePlugin or ControlPlugin subclass found "
-            f"in {plugin_name}/plugin.py"
+            f"No NodePlugin or ControlPlugin subclass found in {plugin_name}/plugin.py"
         )
         return None, None

@@ -321,19 +321,13 @@ class FailsafeManager:
         plugin_instance = plugin_registry.get_instance(node.id)
         if not plugin_instance:
             return
+        from ..models import CommandEnvelope, CommandType
         try:
-            result = await plugin_instance.send_command(
-                node,
-                "return_home",
-                {}
-            )
-            logger.info(
-                f"Return home sent to {node.name}: {result.message}"
-            )
+            envelope = CommandEnvelope(command_type=CommandType.RETURN_HOME)
+            result = await plugin_instance.send_command(node, envelope)
+            logger.info(f"Return home sent to {node.name}: {result.message}")
         except Exception as e:
-            logger.error(
-                f"Return home failed for {node.name}: {e}"
-            )
+            logger.error(f"Return home failed for {node.name}: {e}")
 
     async def _get_active_failsafe(self):
         """Get the failsafe config from the active mission if any."""

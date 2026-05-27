@@ -18,17 +18,18 @@ Steps:
 """
 
 import asyncio
-import sys
-import os
 import logging
 from typing import Any
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../apps/backend"))
-
-from henosync.plugin_system.control_interfaces import (
-    ControlPlugin, OperationStatus, OperationState, UIContribution,
+from henosync_sdk import (
+    ControlPlugin,
+    OperationStatus,
+    OperationState,
+    UIContribution,
+    CapabilityRequirement,
+    DeviceCategory,
+    DeviceCapability,
 )
-from henosync.models import CapabilityRequirement, DeviceCategory, DeviceCapability
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,8 @@ class MyOperationPlugin(ControlPlugin):
     OPERATION_DESCRIPTION = "TODO: describe what this operation does"
 
     # Devices this operation requires. Empty = accepts any device.
-    # Set required=True for mandatory capabilities, False for optional.
     REQUIRED_CAPABILITIES: list[CapabilityRequirement] = [
-        # TODO: declare what your operation needs, e.g.:
-        # CapabilityRequirement(capability=DeviceCapability.GPS, required=True),
+        # TODO: e.g. CapabilityRequirement(capability=DeviceCapability.GPS, required=True),
     ]
 
     # Limit to specific robot categories. Empty = accepts any category.
@@ -58,12 +57,10 @@ class MyOperationPlugin(ControlPlugin):
         # TODO: e.g. DeviceCategory.AGV, DeviceCategory.DRONE
     ]
 
-    # Higher = wins device conflicts against lower priority operations.
     PRIORITY: int = 0
 
     def __init__(self) -> None:
         super().__init__()
-        # Internal status — updated by start(), read by get_status().
         self._state: OperationState = OperationState.IDLE
         self._status_text: str = ""
 
@@ -76,9 +73,6 @@ class MyOperationPlugin(ControlPlugin):
         """
         self._state = OperationState.RUNNING
         self._stop_requested = False
-
-        # Read operator config set in get_ui_contribution()
-        # example_param = self._config.get("example_param", "default")
 
         logger.info(
             "%s: started with %d device(s)",
@@ -103,55 +97,36 @@ class MyOperationPlugin(ControlPlugin):
             logger.info("%s: stopped", self.PLUGIN_ID)
 
     async def stop(self) -> None:
-        """
-        Signal the operation to stop. Must complete within 3 seconds.
-        Put devices in a safe state here if needed.
-        """
+        """Signal the operation to stop. Must complete within 3 seconds."""
         self._stop_requested = True
         self._state = OperationState.STOPPING
 
     def get_status(self) -> OperationStatus:
-        """
-        Return current status. Called frequently — must be non-blocking.
-        Read from internal state updated by start(), never await here.
-        """
+        """Return current status. Must be non-blocking — no awaits."""
         return OperationStatus(
             state=self._state,
             status_text=self._status_text,
         )
 
     def get_ui_contribution(self) -> UIContribution:
-        """
-        Describe what config fields the operator sets before starting.
-        These appear in the Mission Planner step configuration panel.
-        """
+        """Describe operator config fields shown in the Mission Planner."""
         return UIContribution(
             display_name=self.OPERATION_NAME,
             description=self.OPERATION_DESCRIPTION,
             icon="cpu",
             config_schema={
                 # TODO: add operator config fields, e.g.:
-                # "example_param": {
-                #     "type": "string",
-                #     "label": "Example Parameter",
+                # "speed": {
+                #     "type": "number",
+                #     "label": "Speed (m/s)",
                 #     "required": False,
-                #     "default": "value",
+                #     "default": 1.0,
                 # }
             },
         )
 
-    # ── Optional event handlers ───────────────────────────────────
-
     async def on_device_joined(self, device) -> None:
-        """Called when a new matching device comes online mid-operation."""
         logger.info("%s: device joined — %s", self.PLUGIN_ID, device.name)
 
     async def on_device_left(self, device) -> None:
-        """
-        Called when a device goes offline mid-operation.
-        Adapt your algorithm here, or stop cleanly if you can't continue.
-        """
         logger.warning("%s: device lost — %s", self.PLUGIN_ID, device.name)
-        # Example: stop if no devices remain
-        # if not context.devices:
-        #     await self.stop()
