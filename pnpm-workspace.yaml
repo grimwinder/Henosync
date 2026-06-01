@@ -2,3 +2,6 @@ packages:
   - "apps/desktop"
   - "packages/*"
   - "plugins/*"
+allowBuilds:
+  electron: false
+  esbuild: false
