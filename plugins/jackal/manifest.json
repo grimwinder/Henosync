@@ -1,0 +1,44 @@
+{
+  "id": "jackal",
+  "name": "Clearpath Jackal UGV",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Plugin for Clearpath Jackal UGV via ROS2 rosbridge. GPS, IMU, battery, move-to, camera.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "capabilities": [
+    {"id": "move_to", "label": "Move To", "params": ["lat", "lon", "alt"], "destructive": false},
+    {"id": "stop",    "label": "Stop",    "params": [],                    "destructive": false}
+  ],
+  "config_schema": {
+    "host": {
+      "type": "string",
+      "label": "Jackal IP Address",
+      "required": true,
+      "placeholder": "e.g. 192.168.1.50",
+      "description": "WiFi IP address of the Jackal on the local network"
+    },
+    "port": {
+      "type": "number",
+      "label": "Rosbridge Port",
+      "required": false,
+      "default": 9090,
+      "min": 1,
+      "max": 65535
+    },
+    "camera_port": {
+      "type": "number",
+      "label": "Camera Stream Port",
+      "required": false,
+      "default": 8080,
+      "description": "Port that web_video_server is running on"
+    },
+    "camera_topic": {
+      "type": "string",
+      "label": "Camera ROS Topic",
+      "required": false,
+      "default": "/front_camera/image_raw",
+      "description": "ROS2 topic for the front camera image"
+    }
+  }
+}
