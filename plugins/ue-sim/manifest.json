@@ -7,6 +7,8 @@
   "sdk_version": ">=0.1.0",
   "node_types": ["agv"],
   "capabilities": [],
+  "fixed_capabilities": ["gps", "camera"],
+  "optional_capabilities": [],
   "config_schema": {
     "host": {
       "type": "string",

@@ -41,7 +41,7 @@ except ImportError:
     ROSLIBPY_AVAILABLE = False
     logger.warning("roslibpy not installed — run: pip install roslibpy")
 
-# ── Topic names — update if your AirSim namespace differs from SUV1 ──────────
+# ── Topic names ──────────
 GPS_TOPIC = "/airsim_node/SUV1/global_gps"   # sensor_msgs/NavSatFix
 STATE_TOPIC = "/airsim_node/SUV1/car_state"  # airsim_ros_pkgs/CarState
 
@@ -61,6 +61,10 @@ class _NodeState:
         # but no data is flowing.
         self.last_message_time: float = 0.0
 
+        # One-shot debug flags — each flips to True after the first log.
+        self._gps_logged: bool = False
+        self._car_state_logged: bool = False
+
         self._topics: list[Any] = []
 
 
@@ -75,6 +79,12 @@ class UESimPlugin(NodePlugin):
     PLUGIN_VERSION = "0.2.0"
     PLUGIN_AUTHOR = "Henosync Team — Monash University"
     PLUGIN_DESCRIPTION = "Plugin for Unreal Engine AirSim SUV via rosbridge"
+
+    TELEMETRY_RATE_HZ: float = 2.0
+
+    # Set True during testing to log the first raw message from each topic.
+    # Confirms field names and data before relying on them. Set False when done.
+    DEBUG_TOPICS: bool = False
 
     # If no ROS topic message arrives within this window, is_connected() returns
     # False even if the WebSocket appears alive (silent TCP half-open detection).
@@ -120,7 +130,8 @@ class UESimPlugin(NodePlugin):
 
             if not _reactor_started.is_set():
                 _reactor_started.set()
-                asyncio.get_running_loop().run_in_executor(None, ros.run)
+                t = threading.Thread(target=ros.run, daemon=True)
+                t.start()
             else:
                 from twisted.internet import reactor as _reactor
                 _reactor.callFromThread(ros.connect)
@@ -137,7 +148,10 @@ class UESimPlugin(NodePlugin):
             if not connected_event.is_set():
                 reason = f"timed out connecting to {host}:{port}"
                 logger.error("UE Sim [%s]: %s", node.name, reason)
-                ros.terminate()
+                try:
+                    ros.close()
+                except Exception:
+                    pass
                 self._nodes.pop(node.id, None)
                 return False, reason
 
@@ -182,6 +196,9 @@ class UESimPlugin(NodePlugin):
     def _on_gps(self, node_id: str, msg: dict) -> None:
         state = self._nodes.get(node_id)
         if state:
+            if self.DEBUG_TOPICS and not state._gps_logged:
+                logger.info("UE Sim [%s]: first GPS message: %s", node_id, msg)
+                state._gps_logged = True
             state.lat = msg.get("latitude", 0.0)
             state.lon = msg.get("longitude", 0.0)
             state.alt = msg.get("altitude", 0.0)
@@ -191,6 +208,9 @@ class UESimPlugin(NodePlugin):
     def _on_car_state(self, node_id: str, msg: dict) -> None:
         state = self._nodes.get(node_id)
         if state:
+            if self.DEBUG_TOPICS and not state._car_state_logged:
+                logger.info("UE Sim [%s]: first CarState message: %s", node_id, msg)
+                state._car_state_logged = True
             state.speed = msg.get("speed", 0.0)
             state.last_message_time = time.monotonic()
 
