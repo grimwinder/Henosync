@@ -16,9 +16,25 @@ from typing import Any, AsyncGenerator, Optional
 logger = logging.getLogger(__name__)
 
 # Twisted's reactor is a process-wide singleton — once started it cannot be
-# restarted. Track whether it's running so reconnects use callFromThread
-# instead of ros.run() (which would raise ReactorNotRestartable).
+# restarted. We start it once on a dedicated thread and use callFromThread
+# for every connection. Separating reactor lifecycle from connection lifecycle
+# means a failed connect attempt never kills the reactor.
 _reactor_started = threading.Event()
+_reactor_ready = threading.Event()
+
+
+def _ensure_reactor() -> None:
+    """Start Twisted reactor on a dedicated background thread. Idempotent."""
+    if _reactor_started.is_set():
+        return
+    _reactor_started.set()
+
+    def _run() -> None:
+        from twisted.internet import reactor
+        reactor.callWhenRunning(_reactor_ready.set)
+        reactor.run(installSignalHandlers=False)
+
+    threading.Thread(target=_run, name="twisted-reactor", daemon=True).start()
 
 from henosync_sdk import (
     BatteryData,
@@ -128,13 +144,18 @@ class UESimPlugin(NodePlugin):
             ros.on("close", lambda: self._on_close(node.id))
             ros.on("error", _on_error)
 
-            if not _reactor_started.is_set():
-                _reactor_started.set()
-                t = threading.Thread(target=ros.run, daemon=True)
-                t.start()
-            else:
-                from twisted.internet import reactor as _reactor
-                _reactor.callFromThread(ros.connect)
+            _ensure_reactor()
+            # Wait up to 5 s for the reactor loop to be running before connecting.
+            # On subsequent calls _reactor_ready is already set so this returns immediately.
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: _reactor_ready.wait(5.0)
+            )
+            if not _reactor_ready.is_set():
+                self._nodes.pop(node.id, None)
+                return False, "Twisted reactor failed to start"
+
+            from twisted.internet import reactor as _reactor
+            _reactor.callFromThread(ros.connect)
 
             done, _ = await asyncio.wait(
                 [

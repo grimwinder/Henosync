@@ -23,7 +23,9 @@ from .websocket_server import events_websocket_handler, telemetry_websocket_hand
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PLUGINS_DIR = Path(__file__).parent.parent.parent.parent.parent / "plugins"
+_PLUGINS_ROOT = Path(__file__).parent.parent.parent.parent.parent / "plugins"
+DEVICE_PLUGINS_DIR = _PLUGINS_ROOT / "device"
+CONTROL_PLUGINS_DIR = _PLUGINS_ROOT / "control"
 
 
 def create_app() -> FastAPI:
@@ -65,8 +67,10 @@ def create_app() -> FastAPI:
         logger.info("Henosync backend starting...")
 
         try:
-            loader = PluginLoader(PLUGINS_DIR)
-            count = loader.load_all()
+            count = (
+                PluginLoader(DEVICE_PLUGINS_DIR).load_all()
+                + PluginLoader(CONTROL_PLUGINS_DIR).load_all()
+            )
             logger.info(f"Plugin loading complete — {count} plugins loaded")
 
             await mission_store.initialize()
