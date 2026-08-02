@@ -11,8 +11,7 @@ Steps:
 5. Override cmd_move_to / cmd_stop / cmd_return_home for the capabilities you declare
 6. Implement telemetry_stream() — yield live sensor data using typed TelemetryFrame fields
 7. Implement get_safe_state() — stop the robot safely
-8. Override is_connected() if your transport can detect a dead connection
-   (e.g. check ros.is_connected for rosbridge, serial port open, etc.)
+8. Override is_connected() so node_registry can detect a dead connection quickly
 
 Standard commands flow through the base class send_command dispatcher automatically:
     DeviceProxy.move_to()    → cmd_move_to()
@@ -23,7 +22,7 @@ Standard commands flow through the base class send_command dispatcher automatica
 
 import asyncio
 import logging
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 
 from henosync_sdk import (
     BatteryData,
@@ -47,6 +46,7 @@ class _NodeState:
 
     def __init__(self):
         self.connected: bool = False
+        self.transport: Optional[Any] = None  # TODO: replace with your connection type
 
         # Live sensor data — updated by topic callbacks or polling
         self.lat: float = 0.0
@@ -55,6 +55,9 @@ class _NodeState:
         self.speed: float = 0.0
         self.battery_percent: float = 100.0
         self.gps_received: bool = False  # guards against emitting lat=0,lon=0
+
+        # Track active subscriptions so disconnect() can clean them up
+        self._subscriptions: list = []
 
 
 class MyRobotPlugin(NodePlugin):
@@ -72,6 +75,8 @@ class MyRobotPlugin(NodePlugin):
     def __init__(self):
         super().__init__()
         self._nodes: dict[str, _NodeState] = {}
+
+    # ── Connect ───────────────────────────────────────────────────────────────
 
     async def connect(
         self, node: Node, config: dict[str, Any], context: NodePluginContext
@@ -92,10 +97,9 @@ class MyRobotPlugin(NodePlugin):
             # TODO: Open your connection here (rosbridge, serial, HTTP, etc.)
             # Example for rosbridge via roslibpy:
             #
-            #   import roslibpy
             #   ros = roslibpy.Ros(host=host, port=port)
             #   ... connect and wait for ready event ...
-            #   state.ros = ros
+            #   state.transport = ros
 
             state.connected = True
 
@@ -113,10 +117,12 @@ class MyRobotPlugin(NodePlugin):
                 ],
             )
 
-            # TODO: Subscribe to your robot's topics here
-            # Example:
-            #   gps_topic = roslibpy.Topic(state.ros, "/gps", "sensor_msgs/NavSatFix")
+            # TODO: Subscribe to your robot's topics here and store them
+            # so disconnect() can unsubscribe cleanly. Example:
+            #
+            #   gps_topic = roslibpy.Topic(ros, "/gps", "sensor_msgs/NavSatFix")
             #   gps_topic.subscribe(lambda msg: self._on_gps(node.id, msg))
+            #   state._subscriptions.append(gps_topic)
 
             logger.info("MyRobot [%s]: connected to %s:%d", node.name, host, port)
             return True, ""
@@ -136,14 +142,44 @@ class MyRobotPlugin(NodePlugin):
     #         state.alt = msg.get("altitude", 0.0)
     #         state.gps_received = True
 
+    # ── Disconnect ────────────────────────────────────────────────────────────
+
     async def disconnect(self, node: Node) -> None:
         """Clean up all resources for this node."""
         state = self._nodes.pop(node.id, None)
         if not state:
             return
         state.connected = False
-        # TODO: Unsubscribe topics and close connection here
+        for sub in state._subscriptions:
+            try:
+                sub.unsubscribe()
+            except Exception:
+                pass
+        if state.transport:
+            try:
+                state.transport.close()  # TODO: use your transport's close method
+            except Exception:
+                pass
         logger.info("MyRobot [%s]: disconnected", node.name)
+
+    # ── Liveness check ────────────────────────────────────────────────────────
+
+    async def is_connected(self, node: Node) -> bool:
+        """
+        Return False if you know the underlying connection is dead.
+        node_registry polls this every 2 s and sets the node DEGRADED if False,
+        which is faster than the 5 s failsafe heartbeat fallback.
+
+        TODO: check your transport's live state here, e.g.:
+            return (
+                state is not None
+                and state.connected
+                and state.transport is not None
+                and state.transport.is_connected
+            )
+        """
+        state = self._nodes.get(node.id)
+        return state is not None and state.connected
 
     # ── Standard command handlers ─────────────────────────────────────────────
     # Override the methods below instead of send_command.
@@ -182,9 +218,8 @@ class MyRobotPlugin(NodePlugin):
     ) -> AsyncGenerator[TelemetryFrame, None]:
         """
         Yield typed TelemetryFrame at TELEMETRY_RATE_HZ until the node is removed.
-        Connection checking is handled globally by node_registry — no connection
-        logic belongs here. Override is_connected() if your transport can detect
-        a dead connection faster than the 5 s failsafe heartbeat timeout.
+        Connection checking is handled globally by node_registry via is_connected()
+        — no connection logic belongs in this loop.
         """
         seq = 0
         while node.id in self._nodes:
@@ -211,9 +246,7 @@ class MyRobotPlugin(NodePlugin):
         """
         Put the robot in its safest possible state immediately.
         Called automatically on heartbeat loss or emergency stop.
-
-        Do NOT kill the telemetry stream here — the platform needs
-        to keep receiving data after a failsafe triggers.
+        Do NOT kill the telemetry stream here.
         """
         logger.warning("MyRobot [%s]: safe state engaged", node.name)
         # TODO: Send your robot's stop/safe command here

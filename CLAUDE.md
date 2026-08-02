@@ -146,8 +146,13 @@ henosync/
 │               │   └── queryClient.ts  React Query client configuration
 │               └── types/      Shared TypeScript types
 ├── plugins/
-│   ├── ue-sim/           Device plugin for UE AirSim SUV via rosbridge
-│   └── control-template/ Starter control plugin template
+│   ├── device/           Installed device plugins (one subfolder per plugin)
+│   │   └── ue-sim/       Device plugin for UE AirSim SUV via rosbridge
+│   ├── control/          Installed control plugins (one subfolder per plugin)
+│   │   └── auto-navigate/ Autonomous navigation — move to marker/zone, area coverage, perimeter patrol
+│   └── templates/        Plugin templates — not loaded by the backend
+│       ├── device-template/  Starter device plugin template
+│       └── control-template/ Starter control plugin template
 └── packages/
     └── plugin-sdk/
         └── henosync_sdk/  Canonical SDK — NodePlugin, ControlPlugin, all shared models
@@ -165,9 +170,9 @@ henosync/
 
 ### Startup sequence (`henosync/api/app.py`)
 
-`PLUGINS_DIR` is resolved as `Path(__file__).parent.parent.parent.parent.parent / "plugins"` (5 levels up from app.py → repo root/plugins).
+`DEVICE_PLUGINS_DIR` = `plugins/device/`, `CONTROL_PLUGINS_DIR` = `plugins/control/` (both resolved from repo root). Templates in `plugins/templates/` are never scanned.
 
-1. `PluginLoader(PLUGINS_DIR).load_all()` — scans plugins/, loads device plugins into `plugin_registry`, control plugins into `operation_manager`
+1. `PluginLoader(DEVICE_PLUGINS_DIR).load_all()` + `PluginLoader(CONTROL_PLUGINS_DIR).load_all()` — scans device and control dirs separately; device plugins → `plugin_registry`, control plugins → `operation_manager`
 2. `mission_store.initialize()` — creates `missions` table if not exists
 3. `node_registry.initialize()` — calls `init_db()`, loads all saved nodes from SQLite, triggers async `_connect_node()` for each
 4. `zone_manager.initialize()` — loads active zones from SQLite
@@ -463,6 +468,22 @@ Saves zone+marker snapshots to `localStorage` under key `"henosync_map_layouts"`
 
 ---
 
+## Plugin maintenance rule
+
+**When editing any device plugin, check whether `plugins/template/plugin.py` needs to be updated to stay consistent.**
+
+Specifically check:
+
+- Does `_NodeState` in the template reflect the same fields and patterns used in the edited plugin?
+- Does `disconnect()` show the same cleanup pattern (unsubscribe, close transport)?
+- Does `is_connected()` stub reflect the current interface contract?
+- Does `telemetry_stream()` use the correct loop condition and typed `TelemetryFrame` fields?
+
+If any of these have drifted, update the template in the same response — do not leave it stale.
+Also check other device plugins in `plugins/device/` for the same drift and flag any to the user.
+
+---
+
 ## Plugin development rules
 
 ### Device plugin checklist
@@ -497,6 +518,10 @@ Saves zone+marker snapshots to `localStorage` under key `"henosync_map_layouts"`
 
 Required fields: `id`, `name`, `version`, `author`, `description`, `sdk_version`, `node_types` (array), `capabilities` (array of `{id, label, params, destructive}` objects).
 
+`fixed_capabilities` (optional array of `DeviceCapability` strings) — capabilities always present on the device; shown as locked chips in the Add Device modal.
+`optional_capabilities` (optional array of `DeviceCapability` strings) — capabilities the user can toggle in the Add Device modal (e.g. attachments). Selected set is stored in `config.selected_capabilities`.
+Both are passed through to the frontend as-is from the manifest. Backend `list_plugins()` returns the full manifest dict.
+
 `config_schema` field types: `"string"`, `"number"`, `"boolean"`, `"select"`.
 For `"select"`: include `"options": [{"label": "...", "value": "..."}]`.
 Optional per field: `required`, `default`, `min`, `max`, `placeholder`, `description`.
@@ -505,7 +530,7 @@ Optional per field: `required`, `default`, `min`, `max`, `placeholder`, `descrip
 
 ## Plugins in detail
 
-### UE Sim plugin (`plugins/ue-sim/`)
+### UE Sim plugin (`plugins/device/ue-sim/`)
 
 Incremental test plugin for Unreal Engine ROS2 simulation via rosbridge. Uses roslibpy directly. Connection to rosbridge on host:port (default 9090). No ROS2 install required on the Henosync machine — only roslibpy.
 
@@ -642,4 +667,8 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-05-27 | Centralised device status detection: node_registry tracks telemetry/liveness tasks per node and cancels both on disconnect; per-frame timeout (15 s) catches frozen generators; liveness monitor polls plugin.is_connected() every 2 s and sets DEGRADED if False; added is_connected() optional hook to NodePlugin (default True); telemetry loops in all plugins simplified to `while node.id in self._nodes:` only; ue-sim overrides is_connected() with ros.is_connected + last_message_time check (MESSAGE_TIMEOUT=10 s) |
 | 2026-05-27 | node_registry liveness monitor wraps is_connected() in asyncio.wait_for(timeout=5.0) — hanging plugin implementations can no longer block the monitor; ue-sim MESSAGE_TIMEOUT moved from module constant to class attribute so subclasses can override it                                                                                                                                                                                                                                                                     |
 | 2026-05-27 | Removed plugins/template/ — superseded by ue-sim as the reference implementation                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 2026-05-27 | Added fixed_capabilities and optional_capabilities arrays to manifest format; Add Device modal chips are now driven entirely by these fields — no frontend code needed per plugin; ue-sim declares gps+camera fixed; template declares gps+battery fixed, camera+lidar optional                                                                                                                                                                                                                                               |
 | 2026-06-01 | Added plugins/jackal/ — Clearpath Jackal UGV plugin (all 5 milestones: connect, GPS/IMU/battery/speed, stop, move-to via Nav2, camera feed)                                                                                                                                                                                                                                                                                                                                                                                  |
+| 2026-07-27 | Reorganised plugins/ into device/, control/, templates/; app.py now runs PluginLoader separately for each; templates/ is never scanned; updated CLAUDE.md plugin maintenance rule to reference new paths                                                                                                                                                                                                                                                                                                                      |
+| 2026-07-27 | Added plugins/control/auto-navigate/ — placeholder control plugin with StepType enum (MOVE*TO_MARKER, MOVE_TO_ZONE, AREA_COVERAGE, PERIMETER_PATROL), NavigationStep dataclass, step dispatch, and stubbed \_execute*\* methods                                                                                                                                                                                                                                                                                               |
+| 2026-08-02 | Merged upstream/develop into develop — moved plugins/jackal/ to plugins/device/jackal/ to match the new device/control/templates layout                                                                                                                                                                                                                                                                                                                                                                                     |

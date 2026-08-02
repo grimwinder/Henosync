@@ -1,0 +1,10 @@
+{
+  "id": "auto-navigate",
+  "name": "Auto Navigate",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Autonomous navigation operations: move to marker, area coverage, perimeter patrol",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv", "drone"],
+  "capabilities": []
+}

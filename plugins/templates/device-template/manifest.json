@@ -6,6 +6,8 @@
   "description": "Plugin for My Robot",
   "sdk_version": ">=0.1.0",
   "node_types": ["agv"],
+  "fixed_capabilities": ["gps", "battery"],
+  "optional_capabilities": ["camera", "lidar"],
   "capabilities": [
     {
       "id": "move_to",
