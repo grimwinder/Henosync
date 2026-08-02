@@ -551,6 +551,42 @@ Milestone 3 (next): IMU heading.
 
 Connect uses `asyncio.get_running_loop().run_in_executor(None, ros.run)` + `asyncio.wait` with 10s timeout on `connected_event` / `failed_event`. `_NodeState` holds `ros` (roslibpy.Ros instance), `connected` flag, topic data fields, and `_topics` list.
 
+### Jackal UGV plugin (`plugins/jackal/`)
+
+Plugin for Clearpath Jackal UGV via ROS2 rosbridge (roslibpy). Connects over WiFi — no ROS2 install required on the Henosync machine. AGV category. All 5 milestones implemented.
+
+Current milestone: **Milestone 5** — all features complete.
+
+Topics subscribed (standard Clearpath Jackal ROS2 Jazzy defaults — update module-level constants in plugin.py if your Jackal namespace differs):
+
+| Constant | Topic | Type | Data |
+|---|---|---|---|
+| `GPS_TOPIC` | `/navsat/fix` | `sensor_msgs/NavSatFix` | lat, lon, alt |
+| `IMU_TOPIC` | `/imu/data` | `sensor_msgs/Imu` | orientation quaternion → yaw heading |
+| `BATTERY_TOPIC` | `/battery_state` | `sensor_msgs/BatteryState` | percentage (×100 → battery_percent) |
+| `ODOM_TOPIC` | `/odometry/filtered` | `nav_msgs/Odometry` | twist.linear.x/y → speed (magnitude) |
+
+Topics published:
+
+| Constant | Topic | Type | Used by |
+|---|---|---|---|
+| `CMDVEL_TOPIC` | `/cmd_vel` | `geometry_msgs/Twist` | `cmd_stop`, `get_safe_state` |
+| `GOAL_TOPIC` | `/goal_pose` | `geometry_msgs/PoseStamped` | `cmd_move_to` (requires Nav2) |
+
+Key notes:
+- `gps_received` guard prevents null-island placement before first GPS fix
+- `origin_lat`/`origin_lon` captured on first GPS fix; used by `cmd_move_to` for equirectangular GPS→local projection (accurate <1 km)
+- `cmd_move_to` requires Nav2 running on the Jackal with GPS-fused EKF (`/odom`→`/map` transform)
+- `get_safe_state` and `cmd_stop` both publish zero-velocity Twist to `/cmd_vel`
+- Camera: `get_video_stream_url()` returns `http://<host>:<camera_port>/stream?topic=<camera_topic>` — requires `web_video_server` running on the Jackal (`ros2 run web_video_server web_video_server`)
+- Config fields: `host` (required), `port` (default 9090), `camera_port` (default 8080), `camera_topic` (default `/front_camera/image_raw`)
+
+Milestone 1 ✓: connect to rosbridge, heartbeat telemetry, device goes Online.
+Milestone 2 ✓: GPS on map, IMU heading, battery, speed.
+Milestone 3 ✓: stop and emergency stop via `/cmd_vel` zero-velocity Twist.
+Milestone 4 ✓: move-to GPS waypoint via Nav2 `/goal_pose` (requires Nav2 running on Jackal).
+Milestone 5 ✓: camera feed via `web_video_server` with configurable port and topic.
+
 ### Control template plugin (`plugins/control-template/`)
 
 Starter control plugin template. Shows `_stop_requested` loop pattern, `self._config` access, `context.devices` iteration, and optional `on_device_joined`/`on_device_left` handlers.
@@ -630,6 +666,9 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-05-15 | DeviceProxy get_gps_data/get_battery_data/get_lidar_scan now read from typed TelemetryFrame via node_registry.get_last_frame(); node_registry.\_last_frames stores latest frame per node                                                                                                                                                                                                                                                                                                                                      |
 | 2026-05-27 | Centralised device status detection: node_registry tracks telemetry/liveness tasks per node and cancels both on disconnect; per-frame timeout (15 s) catches frozen generators; liveness monitor polls plugin.is_connected() every 2 s and sets DEGRADED if False; added is_connected() optional hook to NodePlugin (default True); telemetry loops in all plugins simplified to `while node.id in self._nodes:` only; ue-sim overrides is_connected() with ros.is_connected + last_message_time check (MESSAGE_TIMEOUT=10 s) |
 | 2026-05-27 | node_registry liveness monitor wraps is_connected() in asyncio.wait_for(timeout=5.0) — hanging plugin implementations can no longer block the monitor; ue-sim MESSAGE_TIMEOUT moved from module constant to class attribute so subclasses can override it                                                                                                                                                                                                                                                                     |
+| 2026-05-27 | Removed plugins/template/ — superseded by ue-sim as the reference implementation                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 2026-05-27 | Added fixed_capabilities and optional_capabilities arrays to manifest format; Add Device modal chips are now driven entirely by these fields — no frontend code needed per plugin; ue-sim declares gps+camera fixed; template declares gps+battery fixed, camera+lidar optional                                                                                                                                                                                                                                               |
+| 2026-06-01 | Added plugins/jackal/ — Clearpath Jackal UGV plugin (all 5 milestones: connect, GPS/IMU/battery/speed, stop, move-to via Nav2, camera feed)                                                                                                                                                                                                                                                                                                                                                                                  |
 | 2026-07-27 | Reorganised plugins/ into device/, control/, templates/; app.py now runs PluginLoader separately for each; templates/ is never scanned; updated CLAUDE.md plugin maintenance rule to reference new paths                                                                                                                                                                                                                                                                                                                      |
 | 2026-07-27 | Added plugins/control/auto-navigate/ — placeholder control plugin with StepType enum (MOVE*TO_MARKER, MOVE_TO_ZONE, AREA_COVERAGE, PERIMETER_PATROL), NavigationStep dataclass, step dispatch, and stubbed \_execute*\* methods                                                                                                                                                                                                                                                                                               |
+| 2026-08-02 | Merged upstream/develop into develop — moved plugins/jackal/ to plugins/device/jackal/ to match the new device/control/templates layout                                                                                                                                                                                                                                                                                                                                                                                     |
