@@ -1,0 +1,57 @@
+{
+  "id": "turtlebot",
+  "name": "Turtlebot",
+  "version": "0.1.0",
+  "author": "Your Name",
+  "description": "Plugin for Turtlebot, Vicon tracked",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "fixed_capabilities": ["battery"],
+  "optional_capabilities": ["camera", "lidar", "position_tracking"],
+  "capabilities": [
+    {
+      "id": "move_to",
+      "label": "Move To",
+      "params": ["x", "y", "z"],
+      "destructive": false
+    },
+    {
+      "id": "stop",
+      "label": "Stop",
+      "params": [],
+      "destructive": false
+    },
+    {
+      "id": "return_home",
+      "label": "Return Home",
+      "params": [],
+      "destructive": false
+    }
+  ],
+  "config_schema": {
+    "host": {
+      "type": "string",
+      "label": "Robot IP Address",
+      "required": true,
+      "placeholder": "192.168.1.100"
+    },
+    "port": {
+      "type": "number",
+      "label": "Rosbridge Port",
+      "required": false,
+      "default": 9090
+    },
+    "namespace": {
+      "type": "string",
+      "label": "ROS2 Namespace",
+      "required": false,
+      "default": ""
+    },
+    "vicon_object_name": { 
+        "type": "string", 
+        "label": "Vicon Object Name", 
+        "required": true, 
+        "placeholder": "turtlebot1" }
+
+  }
+}
