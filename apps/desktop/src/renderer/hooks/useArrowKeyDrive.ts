@@ -6,6 +6,10 @@ const KEY_MAP: Record<string, string> = {
   ArrowDown: "down",
   ArrowLeft: "left",
   ArrowRight: "right",
+  w: "up",
+  s: "down",
+  a: "left",
+  d: "right",
 };
 
 // Sends arrow-key press/release state to a running control plugin operation

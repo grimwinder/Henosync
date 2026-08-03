@@ -411,9 +411,6 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
   const stopOperation = useStopOperation();
 
   const running = operations.find((op) => op.plugin_id === plugin.id);
-  const isTeleop = plugin.id === "teleop";
-
-  useArrowKeyDrive(isTeleop && !!running, plugin.id);
 
   return (
     <div
@@ -549,8 +546,13 @@ export default function PluginsPage() {
     useDevicePlugins();
   const { data: controlPlugins = [], isLoading: loadingControl } =
     useControlPlugins();
+  const { data: operations = [] } = useOperations();
 
   const isLoading = loadingDevice || loadingControl;
+
+  // Always mounted (PluginsPage is always in the tree) so this fires on any page
+  const teleopRunning = operations.some((op) => op.plugin_id === "teleop");
+  useArrowKeyDrive(teleopRunning, "teleop");
 
   const selectedDevicePlugin =
     selected?.kind === "device"

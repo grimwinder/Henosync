@@ -206,6 +206,7 @@ class UESimPlugin(NodePlugin):
         state.car_cmd_topic = roslibpy.Topic(
             state.ros, CAR_CMD_TOPIC, "airsim_ros_pkgs/CarControls"
         )
+        state.car_cmd_topic.advertise()
 
         logger.info("UE Sim [%s]: subscribed to %s, %s", node.name, GPS_TOPIC, STATE_TOPIC)
 
@@ -359,7 +360,8 @@ class UESimPlugin(NodePlugin):
             "manual_gear": -1 if linear < 0.0 else 0,
             "gear_immediate": True,
         }
-        state.car_cmd_topic.publish(roslibpy.Message(msg))
+        from twisted.internet import reactor as _reactor
+        _reactor.callFromThread(state.car_cmd_topic.publish, roslibpy.Message(msg))
         return CommandResult(success=True, message="cmd_vel sent")
 
     # ── Safe state ────────────────────────────────────────────────────────────
@@ -367,17 +369,15 @@ class UESimPlugin(NodePlugin):
     async def get_safe_state(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)
         if state and state.car_cmd_topic:
-            state.car_cmd_topic.publish(
-                roslibpy.Message(
-                    {
-                        "throttle": 0.0,
-                        "steering": 0.0,
-                        "brake": 1.0,
-                        "handbrake": True,
-                        "is_manual_gear": False,
-                        "manual_gear": 0,
-                        "gear_immediate": True,
-                    }
-                )
-            )
+            from twisted.internet import reactor as _reactor
+            msg = roslibpy.Message({
+                "throttle": 0.0,
+                "steering": 0.0,
+                "brake": 1.0,
+                "handbrake": True,
+                "is_manual_gear": False,
+                "manual_gear": 0,
+                "gear_immediate": True,
+            })
+            _reactor.callFromThread(state.car_cmd_topic.publish, msg)
         return CommandResult(success=True, message="UE Sim — brake applied")

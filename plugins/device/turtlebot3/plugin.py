@@ -24,6 +24,7 @@ from typing import Any, AsyncGenerator, Optional
 from henosync_sdk import (
     BatteryData,
     CapabilitySpec,
+    CommandEnvelope,
     CommandResult,
     DeviceCapability,
     DeviceCategory,
@@ -183,7 +184,7 @@ class TurtleBot3Plugin(NodePlugin, PositioningMixin):
 
             # Advertise /cmd_vel before sending any commands
             cmd_vel_topic = f"{ns}/cmd_vel" if ns else "/cmd_vel"
-            state.cmd_vel_pub = roslibpy.Topic(ros, cmd_vel_topic, "geometry_msgs/Twist")
+            state.cmd_vel_pub = roslibpy.Topic(ros, cmd_vel_topic, "geometry_msgs/TwistStamped")
             state.cmd_vel_pub.advertise()
 
             node.specs = DeviceSpecs(
@@ -323,12 +324,26 @@ class TurtleBot3Plugin(NodePlugin, PositioningMixin):
 
     def _publish_twist(self, state: _NodeState, linear: float, angular: float) -> None:
         if not state.cmd_vel_pub:
+            logger.warning("TurtleBot3: _publish_twist — cmd_vel_pub is None, cannot publish")
             return
         try:
-            state.cmd_vel_pub.publish(roslibpy.Message({
-                "linear": {"x": float(linear), "y": 0.0, "z": 0.0},
-                "angular": {"x": 0.0, "y": 0.0, "z": float(angular)},
-            }))
+            from twisted.internet import reactor as _reactor
+            msg = roslibpy.Message({
+                "header": {"stamp": {"sec": 0, "nanosec": 0}, "frame_id": ""},
+                "twist": {
+                    "linear": {"x": float(linear), "y": 0.0, "z": 0.0},
+                    "angular": {"x": 0.0, "y": 0.0, "z": float(angular)},
+                },
+            })
+
+            def _do_publish():
+                try:
+                    state.cmd_vel_pub.publish(msg)
+                except Exception as e:
+                    logger.warning("TurtleBot3: /cmd_vel publish raised: %s", e)
+
+            logger.debug("TurtleBot3: publish twist linear=%.3f angular=%.3f", linear, angular)
+            _reactor.callFromThread(_do_publish)
         except Exception as e:
             logger.warning("TurtleBot3: /cmd_vel publish failed: %s", e)
 
@@ -443,6 +458,31 @@ class TurtleBot3Plugin(NodePlugin, PositioningMixin):
         return CommandResult(success=False, message="No home position set")
 
     # ── Safe state ─────────────────────────────────────────────────────────────
+
+    async def handle_custom_command(
+        self, node: Node, envelope: CommandEnvelope
+    ) -> CommandResult:
+        if envelope.command_type != "cmd_vel":
+            return CommandResult(
+                success=False, message=f"Unknown command: {envelope.command_type}"
+            )
+        state = self._nodes.get(node.id)
+        if not state or not state.connected:
+            return CommandResult(success=False, message="Not connected")
+        # Teleop sends normalised [-1, 1]. Scale to hardware limits.
+        # Negate angular: teleop right=+1, but ROS angular.z positive=CCW (left).
+        linear = max(
+            -self.MAX_LINEAR_VEL,
+            min(self.MAX_LINEAR_VEL, float(envelope.params.get("linear", 0.0)) * self.MAX_LINEAR_VEL),
+        )
+        angular = max(
+            -self.MAX_ANGULAR_VEL,
+            min(self.MAX_ANGULAR_VEL, -float(envelope.params.get("angular", 0.0)) * self.MAX_ANGULAR_VEL),
+        )
+        # Interrupt any running goto loop
+        state.stop_requested = True
+        self._publish_twist(state, linear, angular)
+        return CommandResult(success=True, message="cmd_vel sent")
 
     async def get_safe_state(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)
