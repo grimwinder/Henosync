@@ -9,32 +9,10 @@ Milestone 3 (next): IMU heading.
 
 import asyncio
 import logging
-import threading
 import time
 from typing import Any, AsyncGenerator, Optional
 
 logger = logging.getLogger(__name__)
-
-# Twisted's reactor is a process-wide singleton — once started it cannot be
-# restarted. We start it once on a dedicated thread and use callFromThread
-# for every connection. Separating reactor lifecycle from connection lifecycle
-# means a failed connect attempt never kills the reactor.
-_reactor_started = threading.Event()
-_reactor_ready = threading.Event()
-
-
-def _ensure_reactor() -> None:
-    """Start Twisted reactor on a dedicated background thread. Idempotent."""
-    if _reactor_started.is_set():
-        return
-    _reactor_started.set()
-
-    def _run() -> None:
-        from twisted.internet import reactor
-        reactor.callWhenRunning(_reactor_ready.set)
-        reactor.run(installSignalHandlers=False)
-
-    threading.Thread(target=_run, name="twisted-reactor", daemon=True).start()
 
 from henosync_sdk import (
     BatteryData,
@@ -44,6 +22,7 @@ from henosync_sdk import (
     DeviceCapability,
     DeviceCategory,
     DeviceSpecs,
+    EventSeverity,
     Node,
     NodePlugin,
     NodePluginContext,
@@ -57,6 +36,8 @@ try:
 except ImportError:
     ROSLIBPY_AVAILABLE = False
     logger.warning("roslibpy not installed — run: pip install roslibpy")
+
+from henosync_sdk.rosbridge import ensure_reactor
 
 # ── Topic names ──────────
 GPS_TOPIC = "/airsim_node/SUV1/global_gps"   # sensor_msgs/NavSatFix
@@ -79,6 +60,10 @@ class _NodeState:
         # Used to detect silent TCP drops where ros.is_connected stays True
         # but no data is flowing.
         self.last_message_time: float = 0.0
+
+        # Timing for no-fix warning
+        self.connect_time: float = time.monotonic()
+        self._no_fix_warned: bool = False
 
         # One-shot debug flags — each flips to True after the first log.
         self._gps_logged: bool = False
@@ -109,6 +94,10 @@ class UESimPlugin(NodePlugin):
     # False even if the WebSocket appears alive (silent TCP half-open detection).
     # Increase if your topics publish slower than 1 Hz.
     MESSAGE_TIMEOUT: float = 10.0
+
+    # Warn if no GPS fix arrives within this many seconds of connecting.
+    # Catches: GPS topic not publishing, wrong topic name.
+    POSITION_FIX_TIMEOUT: float = 10.0
 
     def __init__(self):
         super().__init__()
@@ -147,13 +136,11 @@ class UESimPlugin(NodePlugin):
             ros.on("close", lambda: self._on_close(node.id))
             ros.on("error", _on_error)
 
-            _ensure_reactor()
-            # Wait up to 5 s for the reactor loop to be running before connecting.
-            # On subsequent calls _reactor_ready is already set so this returns immediately.
+            reactor_ready = ensure_reactor()
             await asyncio.get_event_loop().run_in_executor(
-                None, lambda: _reactor_ready.wait(5.0)
+                None, lambda: reactor_ready.wait(5.0)
             )
-            if not _reactor_ready.is_set():
+            if not reactor_ready.is_set():
                 self._nodes.pop(node.id, None)
                 return False, "Twisted reactor failed to start"
 
@@ -299,6 +286,22 @@ class UESimPlugin(NodePlugin):
         seq = 0
         while node.id in self._nodes:
             state = self._nodes[node.id]
+            now = time.monotonic()
+
+            if (
+                not state.gps_received
+                and not state._no_fix_warned
+                and now - state.connect_time > self.POSITION_FIX_TIMEOUT
+            ):
+                state._no_fix_warned = True
+                logger.warning("UE Sim [%s]: no GPS received after %.0fs", node.name, self.POSITION_FIX_TIMEOUT)
+                if self._context:
+                    await self._context.emit_event(
+                        "No GPS data",
+                        f"Connected but no GPS received after {self.POSITION_FIX_TIMEOUT:.0f}s. "
+                        f"Check that {GPS_TOPIC} is publishing.",
+                        EventSeverity.WARNING,
+                    )
 
             yield TelemetryFrame(
                 node_id=node.id,
