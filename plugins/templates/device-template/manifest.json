@@ -45,7 +45,40 @@
       "type": "string",
       "label": "ROS2 Namespace",
       "required": false,
-      "default": ""
+      "default": "",
+      "placeholder": "/my_robot"
+    },
+    "position_source": {
+      "type": "select",
+      "label": "Positioning Source",
+      "required": true,
+      "default": "gps",
+      "description": "GPS: robot has onboard GPS. VICON: position from motion capture system.",
+      "options": [
+        { "label": "GPS (onboard)", "value": "gps" },
+        { "label": "VICON (motion capture)", "value": "vicon" }
+      ]
+    },
+    "vicon_object_name": {
+      "type": "string",
+      "label": "VICON Object Name",
+      "required": false,
+      "placeholder": "robot",
+      "description": "VICON mode only — the object name as configured in the VICON system."
+    },
+    "home_lat": {
+      "type": "number",
+      "label": "Home Latitude",
+      "required": false,
+      "placeholder": "-37.9105",
+      "description": "VICON mode only — WGS84 latitude of the VICON arena origin."
+    },
+    "home_lon": {
+      "type": "number",
+      "label": "Home Longitude",
+      "required": false,
+      "placeholder": "145.1362",
+      "description": "VICON mode only — WGS84 longitude of the VICON arena origin."
     }
   }
 }

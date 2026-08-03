@@ -43,6 +43,7 @@ from henosync_sdk import (
     DeviceCapability,
     DeviceCategory,
     DeviceSpecs,
+    EventSeverity,
     Node,
     NodePlugin,
     NodePluginContext,
@@ -77,6 +78,10 @@ class _NodeState:
         # but no data is flowing.
         self.last_message_time: float = 0.0
 
+        # Timing for no-fix warning
+        self.connect_time: float = time.monotonic()
+        self._no_fix_warned: bool = False
+
         # One-shot debug flags — each flips to True after the first log.
         self._gps_logged: bool = False
         self._car_state_logged: bool = False
@@ -106,6 +111,10 @@ class UESimPlugin(NodePlugin):
     # False even if the WebSocket appears alive (silent TCP half-open detection).
     # Increase if your topics publish slower than 1 Hz.
     MESSAGE_TIMEOUT: float = 10.0
+
+    # Warn if no GPS fix arrives within this many seconds of connecting.
+    # Catches: GPS topic not publishing, wrong topic name.
+    POSITION_FIX_TIMEOUT: float = 10.0
 
     def __init__(self):
         super().__init__()
@@ -291,6 +300,22 @@ class UESimPlugin(NodePlugin):
         seq = 0
         while node.id in self._nodes:
             state = self._nodes[node.id]
+            now = time.monotonic()
+
+            if (
+                not state.gps_received
+                and not state._no_fix_warned
+                and now - state.connect_time > self.POSITION_FIX_TIMEOUT
+            ):
+                state._no_fix_warned = True
+                logger.warning("UE Sim [%s]: no GPS received after %.0fs", node.name, self.POSITION_FIX_TIMEOUT)
+                if self._context:
+                    await self._context.emit_event(
+                        "No GPS data",
+                        f"Connected but no GPS received after {self.POSITION_FIX_TIMEOUT:.0f}s. "
+                        f"Check that {GPS_TOPIC} is publishing.",
+                        EventSeverity.WARNING,
+                    )
 
             yield TelemetryFrame(
                 node_id=node.id,

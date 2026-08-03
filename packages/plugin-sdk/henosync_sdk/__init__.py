@@ -1,4 +1,5 @@
 from .interfaces import NodePlugin
+from .positioning import PositioningMixin
 from .control_interfaces import (
     ControlPlugin,
     OperationStatus,
@@ -35,6 +36,7 @@ __version__ = "0.1.0"
 __all__ = [
     # Plugin base classes
     "NodePlugin",
+    "PositioningMixin",
     "ControlPlugin",
     "OperationStatus",
     "OperationState",
