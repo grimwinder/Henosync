@@ -39,6 +39,7 @@ def _ensure_reactor() -> None:
 from henosync_sdk import (
     BatteryData,
     CapabilitySpec,
+    CommandEnvelope,
     CommandResult,
     DeviceCapability,
     DeviceCategory,
@@ -60,11 +61,13 @@ except ImportError:
 # ── Topic names ──────────
 GPS_TOPIC = "/airsim_node/SUV1/global_gps"   # sensor_msgs/NavSatFix
 STATE_TOPIC = "/airsim_node/SUV1/car_state"  # airsim_ros_pkgs/CarState
+CAR_CMD_TOPIC = "/airsim_node/SUV1/car_cmd"  # airsim_ros_pkgs/CarControls
 
 class _NodeState:
     def __init__(self):
         self.connected: bool = False
         self.ros: Optional[Any] = None  # roslibpy.Ros instance
+        self.car_cmd_topic: Optional[Any] = None  # roslibpy.Topic publisher
 
         self.lat: float = 0.0
         self.lon: float = 0.0
@@ -183,6 +186,7 @@ class UESimPlugin(NodePlugin):
                 capabilities=[
                     CapabilitySpec(capability=DeviceCapability.GPS),
                     CapabilitySpec(capability=DeviceCapability.CAMERA),
+                    CapabilitySpec(capability=DeviceCapability.MOVE_2D),
                 ],
             )
             logger.info("UE Sim [%s]: connected to %s:%d", node.name, host, port)
@@ -211,6 +215,10 @@ class UESimPlugin(NodePlugin):
         car_topic = roslibpy.Topic(state.ros, STATE_TOPIC, "airsim_ros_pkgs/CarState")
         car_topic.subscribe(lambda msg: self._on_car_state(node.id, msg))
         state._topics.append(car_topic)
+
+        state.car_cmd_topic = roslibpy.Topic(
+            state.ros, CAR_CMD_TOPIC, "airsim_ros_pkgs/CarControls"
+        )
 
         logger.info("UE Sim [%s]: subscribed to %s, %s", node.name, GPS_TOPIC, STATE_TOPIC)
 
@@ -317,7 +325,56 @@ class UESimPlugin(NodePlugin):
             f"?topic=/airsim_node/SUV1/StereoCamera0_Scene/image"
         )
 
+    # ── Custom commands ────────────────────────────────────────────────────────
+
+    async def handle_custom_command(
+        self, node: Node, envelope: CommandEnvelope
+    ) -> CommandResult:
+        """
+        cmd_vel — drive the car with continuous throttle/steering.
+        params: linear (-1..1, forward/back), angular (-1..1, left/right).
+        Used by teleop-style control plugins (e.g. arrow-key driving).
+        """
+        if envelope.command_type != "cmd_vel":
+            return CommandResult(
+                success=False, message=f"Unknown command: {envelope.command_type}"
+            )
+
+        state = self._nodes.get(node.id)
+        if not state or not state.car_cmd_topic:
+            return CommandResult(success=False, message="Not connected")
+
+        linear = max(-1.0, min(1.0, envelope.params.get("linear", 0.0)))
+        angular = max(-1.0, min(1.0, envelope.params.get("angular", 0.0)))
+
+        msg = {
+            "throttle": abs(linear),
+            "steering": angular,
+            "brake": 1.0 if linear == 0.0 and angular == 0.0 else 0.0,
+            "handbrake": False,
+            "is_manual_gear": linear < 0.0,
+            "manual_gear": -1 if linear < 0.0 else 0,
+            "gear_immediate": True,
+        }
+        state.car_cmd_topic.publish(roslibpy.Message(msg))
+        return CommandResult(success=True, message="cmd_vel sent")
+
     # ── Safe state ────────────────────────────────────────────────────────────
 
     async def get_safe_state(self, node: Node) -> CommandResult:
-        return CommandResult(success=True, message="UE Sim — no safe state required")
+        state = self._nodes.get(node.id)
+        if state and state.car_cmd_topic:
+            state.car_cmd_topic.publish(
+                roslibpy.Message(
+                    {
+                        "throttle": 0.0,
+                        "steering": 0.0,
+                        "brake": 1.0,
+                        "handbrake": True,
+                        "is_manual_gear": False,
+                        "manual_gear": 0,
+                        "gear_immediate": True,
+                    }
+                )
+            )
+        return CommandResult(success=True, message="UE Sim — brake applied")

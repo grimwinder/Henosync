@@ -1,6 +1,12 @@
 import { useState } from "react";
-import { Plug, Cpu, Zap } from "lucide-react";
+import { Plug, Cpu, Zap, Gamepad2 } from "lucide-react";
 import { useDevicePlugins, useControlPlugins } from "../hooks/usePlugins";
+import {
+  useOperations,
+  useStartOperation,
+  useStopOperation,
+} from "../hooks/useOperations";
+import { useArrowKeyDrive } from "../hooks/useArrowKeyDrive";
 import type { PluginManifest, ControlPluginInfo } from "../types";
 
 const CAPABILITY_LABEL: Record<string, string> = {
@@ -400,6 +406,15 @@ function DevicePluginPanel({ plugin }: { plugin: PluginManifest }) {
 // ── Control Plugin Panel ───────────────────────────────────────────────────────
 
 function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
+  const { data: operations = [] } = useOperations();
+  const startOperation = useStartOperation();
+  const stopOperation = useStopOperation();
+
+  const running = operations.find((op) => op.plugin_id === plugin.id);
+  const isTeleop = plugin.id === "teleop";
+
+  useArrowKeyDrive(isTeleop && !!running, plugin.id);
+
   return (
     <div
       style={{
@@ -416,6 +431,56 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
       />
 
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px 48px" }}>
+        {/* Operation Control */}
+        <Section title="Operation">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <button
+              onClick={() =>
+                running
+                  ? stopOperation.mutate(plugin.id)
+                  : startOperation.mutate({ plugin_id: plugin.id })
+              }
+              style={{
+                padding: "7px 14px",
+                borderRadius: "6px",
+                border: `1px solid ${running ? "#F0525255" : "#3DD68C55"}`,
+                backgroundColor: running ? "#F0525218" : "#3DD68C18",
+                color: running ? "#F05252" : "#3DD68C",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: 600,
+              }}
+            >
+              {running ? "Stop Operation" : "Start Operation"}
+            </button>
+            <span style={{ fontSize: "11px", color: "#999999" }}>
+              {running ? running.status.status_text : "Not running"}
+            </span>
+          </div>
+
+          {isTeleop && (
+            <div
+              style={{
+                marginTop: "14px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "10px 12px",
+                borderRadius: "6px",
+                border: `1px solid ${running ? "#A78BFA30" : "#2D2D2D"}`,
+                backgroundColor: running ? "#A78BFA14" : "#141414",
+                fontSize: "11px",
+                color: running ? "#A78BFA" : "#999999",
+              }}
+            >
+              <Gamepad2 size={14} />
+              {running
+                ? "Arrow keys are live — Up/Down drive, Left/Right steer."
+                : "Start the operation to drive with the arrow keys."}
+            </div>
+          )}
+        </Section>
+
         {/* Plugin Details */}
         <Section title="Plugin Details">
           <InfoRow label="Plugin ID" value={plugin.id} />

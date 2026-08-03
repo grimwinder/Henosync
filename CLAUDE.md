@@ -149,7 +149,8 @@ henosync/
 │   ├── device/           Installed device plugins (one subfolder per plugin)
 │   │   └── ue-sim/       Device plugin for UE AirSim SUV via rosbridge
 │   ├── control/          Installed control plugins (one subfolder per plugin)
-│   │   └── auto-navigate/ Autonomous navigation — move to marker/zone, area coverage, perimeter patrol
+│   │   ├── auto-navigate/ Autonomous navigation — move to marker/zone, area coverage, perimeter patrol
+│   │   └── teleop/        Manual arrow-key driving for a single ground vehicle
 │   └── templates/        Plugin templates — not loaded by the backend
 │       ├── device-template/  Starter device plugin template
 │       └── control-template/ Starter control plugin template
@@ -243,6 +244,7 @@ Tables:
 - `get_ui_contribution()` returns `UIContribution` with `config_schema` (drives Mission Planner step config form)
 - `_stop_requested`, `_config`, `_context` declared on base class `__init__` — visible to IDEs, no manual declaration needed in subclasses
 - Config read via `self._config` (injected by operation_manager before `start()`)
+- `on_operator_input(input_key, value)` is now wired end-to-end: `POST /api/operations/{plugin_id}/input` → `operation_manager.send_operator_input()` → the running plugin instance's `on_operator_input()`. 400s if the operation isn't running. Frontend has no generic UI for this — each control plugin's panel opts in explicitly (see `PluginsPage.tsx` teleop handling below).
 
 **Plugin loading** (`plugin_system/loader.py`)
 Required manifest fields: `id`, `name`, `version`, `author`, `description`, `sdk_version`, `node_types`, `capabilities`.
@@ -312,7 +314,7 @@ All route files are in `henosync/api/routes/`. All prefixed `/api/` except `/hea
 | commands.py   | `POST /api/nodes/{id}/command`, `GET /api/nodes/{id}/stream_url`                                                                                                         |
 | missions.py   | `GET /api/missions`, `POST /api/missions`, `GET /api/missions/{id}`, `PUT /api/missions/{id}`, `DELETE /api/missions/{id}`                                               |
 | execution.py  | `POST /api/missions/{id}/execute`, `POST /api/missions/{id}/pause`, `POST /api/missions/{id}/resume`, `POST /api/missions/{id}/abort`, `GET /api/missions/engine/status` |
-| operations.py | `GET /api/operations`, `POST /api/operations/start`, `POST /api/operations/{plugin_id}/stop`, `GET /api/control-plugins`                                                 |
+| operations.py | `GET /api/operations`, `POST /api/operations/start`, `POST /api/operations/{plugin_id}/stop`, `POST /api/operations/{plugin_id}/input`, `GET /api/control-plugins`      |
 | zones.py      | `GET /api/zones`, `POST /api/zones`, `DELETE /api/zones/{id}`                                                                                                            |
 | markers.py    | `GET /api/markers`, `POST /api/markers`, `DELETE /api/markers/{id}`                                                                                                      |
 | safety.py     | `POST /api/safety/emergency-stop`                                                                                                                                        |
@@ -551,6 +553,18 @@ Milestone 3 (next): IMU heading.
 
 Connect uses `asyncio.get_running_loop().run_in_executor(None, ros.run)` + `asyncio.wait` with 10s timeout on `connected_event` / `failed_event`. `_NodeState` holds `ros` (roslibpy.Ros instance), `connected` flag, topic data fields, and `_topics` list.
 
+**Movement (added for teleop):** declares `MOVE_2D` (fixed capability) and a custom `cmd_vel` capability — no `move_to`/`cmd_move_to`, since AirSim's car has no autopilot and must be driven by continuous throttle/steering, not GPS waypoints. `handle_custom_command()` handles `cmd_vel` (`params: linear, angular`, both -1..1), maps it to `airsim_ros_pkgs/CarControls` and publishes on `CAR_CMD_TOPIC = /airsim_node/SUV1/car_cmd` via a `roslibpy.Topic` publisher created in `connect()` (`state.car_cmd_topic`). `linear < 0` sets `is_manual_gear=True, manual_gear=-1` for reverse; `linear`/`angular` both zero sets `brake=1.0`. `get_safe_state()` now publishes a full-brake `CarControls` message (previously a no-op, since there was no movement to make safe).
+
+### Teleop plugin (`plugins/control/teleop/`)
+
+Manual arrow-key driving for a single ground vehicle. `REQUIRED_CAPABILITIES=[MOVE_2D]`, `SUPPORTED_CATEGORIES=[AGV]`, binds the first matched device in `context.devices`. `PRIORITY=10` so manual control preempts autonomous operations (e.g. `auto-navigate`) on device conflicts.
+
+- `on_operator_input(input_key, value)` — `input_key` is `"up"|"down"|"left"|"right"`, `value` is `True`/`False` (keydown/keyup). Updates an internal pressed-key set only; no device I/O here.
+- `start()` loop resends `device.send_command("cmd_vel", {"linear", "angular"})` at `SEND_RATE_HZ=5.0` computed fresh each tick from the pressed-key set — up/down drive linear, left/right drive angular, both in [-1, 1].
+- `stop()` clears all pressed keys and sends one final `cmd_vel(0, 0)` — the operation can never be stopped mid-drive.
+- Frontend: `PluginsPage.tsx`'s `ControlPluginPanel` special-cases `plugin.id === "teleop"` to show a live drive-status chip and mount `useArrowKeyDrive()` (`renderer/hooks/useArrowKeyDrive.ts`), which binds `window` keydown/keyup listeners only while the operation is running, dedupes OS key-repeat, and — critically — releases all held keys via `sendOperatorInput()` on cleanup (stop/unmount) so the vehicle never keeps driving after the panel closes.
+- Only wired against `ue-sim` today — any other `AGV` device plugin that implements a `cmd_vel` custom command works automatically, since the control plugin has no device-specific code.
+
 ### Control template plugin (`plugins/control-template/`)
 
 Starter control plugin template. Shows `_stop_requested` loop pattern, `self._config` access, `context.devices` iteration, and optional `on_device_joined`/`on_device_left` handlers.
@@ -633,3 +647,7 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-05-27 | Added fixed_capabilities and optional_capabilities arrays to manifest format; Add Device modal chips are now driven entirely by these fields — no frontend code needed per plugin; ue-sim declares gps+camera fixed; template declares gps+battery fixed, camera+lidar optional                                                                                                                                                                                                                                               |
 | 2026-07-27 | Reorganised plugins/ into device/, control/, templates/; app.py now runs PluginLoader separately for each; templates/ is never scanned; updated CLAUDE.md plugin maintenance rule to reference new paths                                                                                                                                                                                                                                                                                                                      |
 | 2026-07-27 | Added plugins/control/auto-navigate/ — placeholder control plugin with StepType enum (MOVE*TO_MARKER, MOVE_TO_ZONE, AREA_COVERAGE, PERIMETER_PATROL), NavigationStep dataclass, step dispatch, and stubbed \_execute*\* methods                                                                                                                                                                                                                                                                                               |
+| 2026-08-03 | Wired on_operator_input end-to-end: added operation_manager.send_operator_input(); added POST /api/operations/{plugin_id}/input route; added frontend sendOperatorInput() in api.ts                                                                                                                                                                                                                                                                                                                                          |
+| 2026-08-03 | Added plugins/control/teleop/ — manual arrow-key driving control plugin; MOVE_2D required, AGV-only, PRIORITY=10 to preempt autonomous ops; resends cmd_vel at 5 Hz from pressed-key state; stop() always sends a final zero-velocity command                                                                                                                                                                                                                                                                               |
+| 2026-08-03 | ue-sim: added movement support — MOVE_2D fixed capability, custom cmd_vel command (handle_custom_command) mapped to airsim_ros_pkgs/CarControls, published via new car_cmd_topic publisher created in connect(); get_safe_state() now publishes full brake instead of no-op                                                                                                                                                                                                                                                |
+| 2026-08-03 | Added apps/desktop renderer/hooks/useArrowKeyDrive.ts; PluginsPage.tsx ControlPluginPanel gained a Start/Stop Operation control and, for plugin.id==="teleop", a live drive-status indicator                                                                                                                                                                                                                                                                                                                                 |

@@ -176,6 +176,19 @@ export const stopOperation = (plugin_id: string) =>
     },
   );
 
+export const sendOperatorInput = (
+  plugin_id: string,
+  input_key: string,
+  value: unknown,
+) =>
+  apiFetch<{ success: boolean; message: string }>(
+    `/api/operations/${plugin_id}/input`,
+    {
+      method: "POST",
+      body: JSON.stringify({ input_key, value }),
+    },
+  );
+
 // ── Zones ──────────────────────────────────────────────────────────────────────
 
 export const getZones = () =>
