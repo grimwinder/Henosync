@@ -1,0 +1,85 @@
+{
+  "id": "turtlebot3",
+  "name": "TurtleBot3 Burger",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "TurtleBot3 Burger via rosbridge. VICON or GPS positioning. Simple goto controller for movement.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "fixed_capabilities": ["gps", "move_2d", "battery"],
+  "optional_capabilities": ["lidar"],
+  "capabilities": [
+    {
+      "id": "move_to",
+      "label": "Move To",
+      "params": ["lat", "lon", "alt"],
+      "destructive": false
+    },
+    {
+      "id": "stop",
+      "label": "Stop",
+      "params": [],
+      "destructive": false
+    },
+    {
+      "id": "return_home",
+      "label": "Return Home",
+      "params": [],
+      "destructive": false
+    }
+  ],
+  "config_schema": {
+    "host": {
+      "type": "string",
+      "label": "Robot IP / Rosbridge Host",
+      "required": true,
+      "placeholder": "192.168.1.100"
+    },
+    "port": {
+      "type": "number",
+      "label": "Rosbridge Port",
+      "required": false,
+      "default": 9090
+    },
+    "namespace": {
+      "type": "string",
+      "label": "ROS2 Namespace",
+      "required": false,
+      "default": "",
+      "placeholder": "/tb3_0",
+      "description": "Leave blank if using a single robot with no namespace."
+    },
+    "position_source": {
+      "type": "select",
+      "label": "Positioning Source",
+      "required": true,
+      "default": "vicon",
+      "description": "VICON: position from motion capture. GPS: onboard GPS receiver.",
+      "options": [
+        { "label": "VICON (motion capture)", "value": "vicon" },
+        { "label": "GPS (onboard)", "value": "gps" }
+      ]
+    },
+    "vicon_object_name": {
+      "type": "string",
+      "label": "VICON Object Name",
+      "required": false,
+      "placeholder": "TurtleBot3",
+      "description": "VICON mode only — must exactly match the object name in VICON software."
+    },
+    "home_lat": {
+      "type": "number",
+      "label": "Home Latitude",
+      "required": false,
+      "placeholder": "-37.9105",
+      "description": "VICON mode only — WGS84 latitude of the VICON arena origin (X=0, Y=0)."
+    },
+    "home_lon": {
+      "type": "number",
+      "label": "Home Longitude",
+      "required": false,
+      "placeholder": "145.1362",
+      "description": "VICON mode only — WGS84 longitude of the VICON arena origin (X=0, Y=0)."
+    }
+  }
+}
