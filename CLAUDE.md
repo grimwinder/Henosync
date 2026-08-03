@@ -147,7 +147,8 @@ henosync/
 │               └── types/      Shared TypeScript types
 ├── plugins/
 │   ├── device/           Installed device plugins (one subfolder per plugin)
-│   │   └── ue-sim/       Device plugin for UE AirSim SUV via rosbridge
+│   │   ├── ue-sim/       Device plugin for UE AirSim SUV via rosbridge
+│   │   └── ros2-diffdrive/ Generic ROS2 diff-drive robot via rosbridge — topics configurable per-device
 │   ├── control/          Installed control plugins (one subfolder per plugin)
 │   │   ├── auto-navigate/ Autonomous navigation — move to marker/zone, area coverage, perimeter patrol
 │   │   └── teleop/        Manual arrow-key driving for a single ground vehicle
@@ -555,6 +556,16 @@ Connect uses `asyncio.get_running_loop().run_in_executor(None, ros.run)` + `asyn
 
 **Movement (added for teleop):** declares `MOVE_2D` (fixed capability) and a custom `cmd_vel` capability — no `move_to`/`cmd_move_to`, since AirSim's car has no autopilot and must be driven by continuous throttle/steering, not GPS waypoints. `handle_custom_command()` handles `cmd_vel` (`params: linear, angular`, both -1..1), maps it to `airsim_ros_pkgs/CarControls` and publishes on `CAR_CMD_TOPIC = /airsim_node/SUV1/car_cmd` via a `roslibpy.Topic` publisher created in `connect()` (`state.car_cmd_topic`). `linear < 0` sets `is_manual_gear=True, manual_gear=-1` for reverse; `linear`/`angular` both zero sets `brake=1.0`. `get_safe_state()` now publishes a full-brake `CarControls` message (previously a no-op, since there was no movement to make safe).
 
+### ROS2 Diff-Drive plugin (`plugins/device/ros2-diffdrive/`)
+
+Generic device plugin for any real ROS2 differential-drive robot with `rosbridge_server` running — unlike `ue-sim`, nothing robot-specific is hardcoded. All topic names and speed limits are per-device config fields (filled in via the Add Device form): `host`, `port`, `cmd_vel_topic` (default `/cmd_vel`), `odom_topic` (default `/odom`, blank disables it), `max_linear_speed` (m/s), `max_angular_speed` (rad/s).
+
+- Declares `MOVE_2D` fixed capability and a custom `cmd_vel` capability, same pattern as `ue-sim`.
+- `handle_custom_command("cmd_vel", {linear, angular})` — both -1..1, scaled by `node.config`'s `max_linear_speed`/`max_angular_speed`, published as `geometry_msgs/Twist` (`linear.x`, `angular.z`) to `cmd_vel_topic`. Works with `teleop` unmodified, since teleop only depends on the generic `MOVE_2D` capability + `cmd_vel` params contract.
+- `telemetry_stream()` reports `speed` (from `odom_topic`'s `twist.twist.linear`) and `status_text` only — **no GPS/position support yet**, so these devices won't appear on the map. Add GPS telemetry in a later pass once it's known whether the target robot publishes GPS (most indoor diff-drive robots only have wheel odometry).
+- `get_safe_state()` publishes a zero-velocity `Twist`.
+- To connect a real robot: run `rosbridge_server` on it (`ros2 launch rosbridge_server rosbridge_websocket_launch.xml`), find its actual topic names/types with `ros2 topic list` / `ros2 topic info -t <topic>`, then fill those into the Add Device form. No code changes needed unless the robot doesn't use `geometry_msgs/Twist` on a velocity topic.
+
 ### Teleop plugin (`plugins/control/teleop/`)
 
 Manual arrow-key driving for a single ground vehicle. `REQUIRED_CAPABILITIES=[MOVE_2D]`, `SUPPORTED_CATEGORIES=[AGV]`, binds the first matched device in `context.devices`. `PRIORITY=10` so manual control preempts autonomous operations (e.g. `auto-navigate`) on device conflicts.
@@ -651,3 +662,4 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-08-03 | Added plugins/control/teleop/ — manual arrow-key driving control plugin; MOVE_2D required, AGV-only, PRIORITY=10 to preempt autonomous ops; resends cmd_vel at 5 Hz from pressed-key state; stop() always sends a final zero-velocity command                                                                                                                                                                                                                                                                               |
 | 2026-08-03 | ue-sim: added movement support — MOVE_2D fixed capability, custom cmd_vel command (handle_custom_command) mapped to airsim_ros_pkgs/CarControls, published via new car_cmd_topic publisher created in connect(); get_safe_state() now publishes full brake instead of no-op                                                                                                                                                                                                                                                |
 | 2026-08-03 | Added apps/desktop renderer/hooks/useArrowKeyDrive.ts; PluginsPage.tsx ControlPluginPanel gained a Start/Stop Operation control and, for plugin.id==="teleop", a live drive-status indicator                                                                                                                                                                                                                                                                                                                                 |
+| 2026-08-03 | Added plugins/device/ros2-diffdrive/ — generic ROS2 diff-drive device plugin for real robots via rosbridge; topic names (cmd_vel_topic, odom_topic) and speed limits are per-device config, nothing hardcoded; implements cmd_vel via geometry_msgs/Twist so it works with teleop unmodified; no GPS/position support yet                                                                                                                                                                                                  |
