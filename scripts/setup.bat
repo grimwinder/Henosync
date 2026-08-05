@@ -63,7 +63,8 @@ apps\backend\.venv\Scripts\pip install --quiet ^
     websockets ^
     aiofiles ^
     python-multipart ^
-    roslibpy
+    roslibpy ^
+    vicon-dssdk
 apps\backend\.venv\Scripts\pip install --quiet -e packages\plugin-sdk
 echo   Done
 echo.

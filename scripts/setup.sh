@@ -91,7 +91,8 @@ echo "  Installing backend packages..."
     websockets \
     aiofiles \
     python-multipart \
-    roslibpy
+    roslibpy \
+    vicon-dssdk
 "$VENV_DIR/bin/pip" install --quiet -e packages/plugin-sdk
 echo "  Done"
 echo ""

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..core.failsafe_manager import failsafe_manager
 from ..core.marker_manager import marker_manager
 from ..core.node_registry import node_registry
+from ..core.vicon_manager import vicon_manager
 from ..core.zone_manager import zone_manager
 from ..plugin_system.loader import PluginLoader
 from ..storage.mission_store import mission_store
@@ -83,6 +84,10 @@ def create_app() -> FastAPI:
             await marker_manager.initialize()
             logger.info("Marker manager ready")
 
+            # VICON manager before failsafe — needs node_registry to be ready
+            await vicon_manager.start()
+            logger.info("VICON manager running")
+
             # Start failsafe manager last
             await failsafe_manager.start()
             logger.info("Failsafe manager running")
@@ -96,6 +101,7 @@ def create_app() -> FastAPI:
     async def shutdown():
         logger.info("Henosync backend shutting down...")
         await failsafe_manager.stop()
+        await vicon_manager.stop()
         await node_registry.shutdown()
 
     @app.get("/health")
