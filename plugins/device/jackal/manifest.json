@@ -1,0 +1,133 @@
+{
+  "id": "jackal",
+  "name": "Clearpath Jackal (ROS2)",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack. VICON or GPS positioning. Nav2 goal_pose movement, plus manual teleop.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "fixed_capabilities": ["gps", "battery", "imu", "move_2d"],
+  "optional_capabilities": ["camera", "lidar"],
+  "capabilities": [
+    {
+      "id": "move_to",
+      "label": "Move To",
+      "params": ["lat", "lon", "alt"],
+      "destructive": false
+    },
+    {
+      "id": "stop",
+      "label": "Stop",
+      "params": [],
+      "destructive": false
+    },
+    {
+      "id": "return_home",
+      "label": "Return Home",
+      "params": [],
+      "destructive": false
+    },
+    {
+      "id": "cmd_vel",
+      "label": "Drive (linear/angular velocity)",
+      "params": ["linear", "angular"],
+      "destructive": false
+    }
+  ],
+  "config_schema": {
+    "host": {
+      "type": "string",
+      "label": "Rosbridge IP Address",
+      "required": true,
+      "placeholder": "192.168.1.100",
+      "description": "IP of the Jackal's onboard computer running rosbridge_server."
+    },
+    "port": {
+      "type": "number",
+      "label": "Rosbridge Port",
+      "required": false,
+      "default": 9090,
+      "min": 1,
+      "max": 65535
+    },
+    "namespace": {
+      "type": "string",
+      "label": "ROS2 Namespace",
+      "required": false,
+      "default": "",
+      "placeholder": "a200_0000",
+      "description": "Clearpath's ROS2 stack derives this from the robot serial by default (e.g. serial cpr-a200-0001 -> a200_0001). Leave blank if unnamespaced."
+    },
+    "position_source": {
+      "type": "select",
+      "label": "Positioning Source",
+      "required": true,
+      "default": "vicon",
+      "description": "VICON: position from motion capture (lab use). GPS: onboard GPS receiver (outdoor use).",
+      "options": [
+        { "label": "VICON (motion capture)", "value": "vicon" },
+        { "label": "GPS (onboard)", "value": "gps" }
+      ]
+    },
+    "vicon_object_name": {
+      "type": "string",
+      "label": "VICON Object Name",
+      "required": false,
+      "placeholder": "jackal",
+      "description": "VICON mode only — must exactly match the object name in the VICON software."
+    },
+    "home_lat": {
+      "type": "number",
+      "label": "Home Latitude",
+      "required": false,
+      "placeholder": "-37.9105",
+      "description": "VICON mode only — WGS84 latitude of the VICON arena origin (X=0, Y=0). Also assumed to be the origin of the Jackal's Nav2 map frame — verify this alignment before trusting Move To."
+    },
+    "home_lon": {
+      "type": "number",
+      "label": "Home Longitude",
+      "required": false,
+      "placeholder": "145.1362",
+      "description": "VICON mode only — WGS84 longitude of the VICON arena origin (X=0, Y=0)."
+    },
+    "gps_topic": {
+      "type": "string",
+      "label": "GPS Topic Override",
+      "required": false,
+      "placeholder": "/a200_0000/sensors/gps_0/fix",
+      "description": "GPS mode only. Default guess follows Clearpath's sensor naming convention — the exact topic depends on which GPS unit is attached. Verify with `ros2 topic list` on the robot."
+    },
+    "camera_topic": {
+      "type": "string",
+      "label": "Camera Topic Override",
+      "required": false,
+      "placeholder": "/a200_0000/sensors/camera_0/color/image",
+      "description": "Only used if Camera capability is selected below. Jackal is a modular platform — verify the actual topic with `ros2 topic list` since it depends on which camera is attached. Also requires web_video_server running on the robot."
+    },
+    "lidar_topic": {
+      "type": "string",
+      "label": "LIDAR Topic Override",
+      "required": false,
+      "placeholder": "/a200_0000/sensors/lidar2d_0/scan",
+      "description": "Only used if LIDAR capability is selected below. Verify the actual topic with `ros2 topic list` since it depends on which lidar is attached (2D sensor_msgs/LaserScan assumed)."
+    },
+    "max_linear_speed": {
+      "type": "number",
+      "label": "Max Linear Speed (m/s)",
+      "required": false,
+      "default": 1.0,
+      "min": 0.05,
+      "max": 5.0,
+      "description": "Used for manual teleop driving (arrow keys) — tune to this robot's actual safe operating limit."
+    },
+    "max_angular_speed": {
+      "type": "number",
+      "label": "Max Angular Speed (rad/s)",
+      "required": false,
+      "default": 1.0,
+      "min": 0.1,
+      "max": 5.0,
+      "description": "Used for manual teleop driving (arrow keys) — tune to this robot's actual safe operating limit."
+    }
+  }
+}

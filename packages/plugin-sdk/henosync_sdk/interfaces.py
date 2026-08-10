@@ -117,6 +117,9 @@ class NodePlugin(ABC):
                 lat=p.get("lat", 0.0),
                 lon=p.get("lon", 0.0),
                 alt=p.get("alt", 0.0),
+                x=p.get("x"),
+                y=p.get("y"),
+                z=p.get("z"),
             )
         if envelope.command_type == CommandType.STOP:
             return await self.cmd_stop(node)
@@ -129,9 +132,24 @@ class NodePlugin(ABC):
     # ── Standard Command Handlers (override per declared capability) ──────────
 
     async def cmd_move_to(
-        self, node: Node, lat: float, lon: float, alt: float = 0.0
+        self,
+        node: Node,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        alt: float = 0.0,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
     ) -> CommandResult:
-        """Override if you declare MOVE_2D or MOVE_3D capability."""
+        """
+        Override if you declare MOVE_2D or MOVE_3D capability.
+
+        For coordinate_frame="gps" devices, lat/lon/alt are the target (WGS84).
+        For coordinate_frame="local" devices, DeviceProxy converts the WGS84
+        target to local metres before dispatch — x/y/z are populated instead
+        and lat/lon/alt are left at their defaults. Check node.specs.coordinate_frame
+        (or simply whether x is not None) to know which set to use.
+        """
         return CommandResult(success=False, message="move_to not implemented")
 
     async def cmd_stop(self, node: Node) -> CommandResult:

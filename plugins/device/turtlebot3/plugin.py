@@ -390,13 +390,28 @@ class TurtleBot3Plugin(NodePlugin, PositioningMixin):
     # ── Command handlers ───────────────────────────────────────────────────────
 
     async def cmd_move_to(
-        self, node: Node, lat: float, lon: float, alt: float = 0.0
+        self,
+        node: Node,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        alt: float = 0.0,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
     ) -> CommandResult:
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
         if not state.position_received:
             return CommandResult(success=False, message="No position fix — cannot navigate")
+
+        # coordinate_frame="local" (VICON mode) devices receive x/y/z metres instead
+        # of lat/lon/alt — convert back to WGS84 using the same home origin so the
+        # distance/bearing controller below stays identical for both modes.
+        if x is not None and y is not None:
+            if not node.local_origin:
+                return CommandResult(success=False, message="No local_origin set — cannot convert local target")
+            lat, lon = self._local_to_gps(x, y, node.local_origin.lat, node.local_origin.lon)
 
         state.stop_requested = False
         logger.info("TurtleBot3 [%s]: goto %.6f, %.6f", node.name, lat, lon)

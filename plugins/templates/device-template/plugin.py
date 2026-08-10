@@ -285,12 +285,28 @@ class MyRobotPlugin(NodePlugin, PositioningMixin):
     # move_to / stop / return_home to these methods automatically.
 
     async def cmd_move_to(
-        self, node: Node, lat: float, lon: float, alt: float = 0.0
+        self,
+        node: Node,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        alt: float = 0.0,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
     ) -> CommandResult:
+        """
+        x/y/z (local metres) are populated instead of lat/lon/alt when this
+        device's coordinate_frame is "local" (VICON mode) — DeviceProxy
+        converts the WGS84 target before dispatch. Branch on `x is not None`.
+        """
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
-        # TODO: Send move command to robot
+        if x is not None:
+            # TODO: Send local-frame move command to robot
+            logger.info("MyRobot [%s]: moving to local (%.2f, %.2f)", node.name, x, y)
+            return CommandResult(success=True, message=f"Moving to local ({x:.2f}, {y:.2f})")
+        # TODO: Send GPS move command to robot
         logger.info("MyRobot [%s]: moving to %.5f, %.5f", node.name, lat, lon)
         return CommandResult(success=True, message=f"Moving to {lat:.5f}, {lon:.5f}")
 
