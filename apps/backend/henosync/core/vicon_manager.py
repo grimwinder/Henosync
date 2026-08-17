@@ -45,6 +45,8 @@ class VICONManager:
         self._fix_warned: dict[str, bool] = {}
         # node_id → sequence counter for position frames
         self._sequences: dict[str, int] = {}
+        # suppress repeated "SDK not installed" log
+        self._sdk_warning_logged: bool = False
 
     async def start(self) -> None:
         self._running = True
@@ -129,9 +131,14 @@ class VICONManager:
 
     async def _connect(self, host: str, loop) -> None:
         if not _VICON_AVAILABLE:
-            logger.error(
-                "vicon_manager: vicon-dssdk not installed — run: pip install vicon-dssdk"
-            )
+            if not self._sdk_warning_logged:
+                self._sdk_warning_logged = True
+                logger.error(
+                    "vicon_manager: vicon-dssdk not installed — run: pip install vicon-dssdk"
+                )
+            import time
+            # Block retries so the loop stays quiet until the backend restarts.
+            self._last_failure[host] = time.monotonic() + 86400
             return
         try:
             client = await loop.run_in_executor(
@@ -176,8 +183,8 @@ class VICONManager:
         z_m = trans.Translation[2] / 1000.0
         yaw = rot.Rotation[2] if rot.Result == _DataStream.Result.Success else 0.0
 
-        home_lat = float(node.config.get("home_lat", 0.0))
-        home_lon = float(node.config.get("home_lon", 0.0))
+        home_lat = float(node.config.get("home_lat") or 0)
+        home_lon = float(node.config.get("home_lon") or 0)
         lat, lon = _local_to_gps(x_m, y_m, home_lat, home_lon)
 
         position = Position(lat=lat, lon=lon, alt=z_m, heading=yaw)

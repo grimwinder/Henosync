@@ -46,8 +46,8 @@
       "label": "ROS2 Namespace",
       "required": false,
       "default": "",
-      "placeholder": "/tb3_0",
-      "description": "Leave blank if using a single robot with no namespace."
+      "placeholder": "tb2",
+      "description": "ROS2 namespace prefix without slashes, e.g. tb2 for /tb2/cmd_vel. Leave blank if no namespace."
     },
     "position_source": {
       "type": "select",

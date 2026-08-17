@@ -73,7 +73,8 @@ class TurtleBot3Plugin(ROS2Plugin):
     # ── setup_node ─────────────────────────────────────────────────────────────
 
     async def setup_node(self, node: Node, state: _NodeState, config: dict) -> None:
-        ns = config.get("namespace", "").rstrip("/")
+        ns = config.get("namespace", "").strip("/")
+        prefix = f"/{ns}" if ns else ""
         source = config.get("position_source", "vicon")
 
         node.specs = DeviceSpecs(
@@ -90,31 +91,28 @@ class TurtleBot3Plugin(ROS2Plugin):
             # Set local_origin so DeviceProxy can convert GPS targets to local coords.
             # Position is published automatically by vicon_manager — nothing more needed.
             node.local_origin = LocalOrigin(
-                lat=float(config.get("home_lat", 0.0)),
-                lon=float(config.get("home_lon", 0.0)),
+                lat=float(config.get("home_lat") or 0),
+                lon=float(config.get("home_lon") or 0),
             )
         else:
-            gps_topic = config.get("gps_topic") or (
-                f"{ns}/gps/fix" if ns else "/gps/fix"
-            )
+            gps_topic = config.get("gps_topic") or f"{prefix}/gps/fix"
             self.subscribe(state, gps_topic, "sensor_msgs/NavSatFix",
                            lambda msg: self._on_gps(node.id, msg))
-
         self.subscribe(
             state,
-            f"{ns}/odom" if ns else "/odom",
+            f"{prefix}/odom",
             "nav_msgs/Odometry",
             lambda msg: self._on_odom(node.id, msg),
         )
         self.subscribe(
             state,
-            f"{ns}/battery_state" if ns else "/battery_state",
+            f"{prefix}/battery_state",
             "sensor_msgs/BatteryState",
             lambda msg: self._on_battery(node.id, msg),
         )
         state.cmd_vel_pub = self.advertise(
             state,
-            f"{ns}/cmd_vel" if ns else "/cmd_vel",
+            f"{prefix}/cmd_vel",
             "geometry_msgs/TwistStamped",
         )
 
@@ -141,13 +139,25 @@ class TurtleBot3Plugin(ROS2Plugin):
             state.heading = self._quat_to_yaw(q)
         state.last_message_time = time.monotonic()
 
+    # TurtleBot3 Burger: 3S Li-Po, 12.6V full, 9.0V empty
+    _BATTERY_FULL_V = 12.6
+    _BATTERY_EMPTY_V = 9.0
+
     def _on_battery(self, node_id: str, msg: dict) -> None:
         state = self._nodes.get(node_id)
         if not state:
             return
         pct = msg.get("percentage", -1.0)
-        if pct >= 0.0:
+        if pct > 0.0:
             state.battery_percent = pct if pct > 1.0 else pct * 100.0
+        else:
+            voltage = msg.get("voltage", 0.0)
+            if voltage > 0.0:
+                state.battery_percent = max(0.0, min(100.0, (
+                    (voltage - self._BATTERY_EMPTY_V)
+                    / (self._BATTERY_FULL_V - self._BATTERY_EMPTY_V)
+                    * 100.0
+                )))
 
     # ── Telemetry ──────────────────────────────────────────────────────────────
 

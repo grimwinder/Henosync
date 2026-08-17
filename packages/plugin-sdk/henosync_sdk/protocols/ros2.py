@@ -217,7 +217,7 @@ class ROS2Plugin(NodePlugin):
             failed_event = asyncio.Event()
 
             ros.on_ready(lambda: connected_event.set())
-            ros.on("close", lambda: self._on_close(node.id))
+            ros.on("close", lambda *_: self._on_close(node.id))
             ros.on(
                 "error",
                 lambda e: (

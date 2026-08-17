@@ -82,6 +82,19 @@ class NodeRegistry:
         if not plugin_registry.is_registered(node_create.plugin_id):
             raise ValueError(f"Plugin not found: {node_create.plugin_id}")
 
+        new_host = node_create.config.get("host")
+        new_port = node_create.config.get("port")
+        if new_host:
+            for existing in self._nodes.values():
+                if (
+                    existing.config.get("host") == new_host
+                    and existing.config.get("port") == new_port
+                ):
+                    raise ValueError(
+                        f"A device is already connected to {new_host}:{new_port} "
+                        f"({existing.name})"
+                    )
+
         node = Node(
             name=node_create.name,
             plugin_id=node_create.plugin_id,

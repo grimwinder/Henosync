@@ -117,8 +117,8 @@ class MyRobotPlugin(ROS2Plugin):
             # local coords for navigation. Position itself is published by
             # henosync core (vicon_manager) — nothing else needed here.
             node.local_origin = LocalOrigin(
-                lat=float(config.get("home_lat", 0.0)),
-                lon=float(config.get("home_lon", 0.0)),
+                lat=float(config.get("home_lat") or 0),
+                lon=float(config.get("home_lon") or 0),
             )
         else:
             # GPS: subscribe to the NavSatFix topic and write to state.
