@@ -45,3 +45,19 @@ async def stop_operation(plugin_id: str):
 async def list_operations():
     """Get status of all running operations."""
     return {"operations": operation_manager.get_all_operation_statuses()}
+
+
+class OperatorInputRequest(BaseModel):
+    input_key: str
+    value: Any = None
+
+
+@router.post("/api/operations/{plugin_id}/input")
+async def send_operator_input(plugin_id: str, request: OperatorInputRequest):
+    """Forward operator input (e.g. keyboard) to a running operation."""
+    success, message = await operation_manager.send_operator_input(
+        plugin_id, request.input_key, request.value
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"success": True, "message": message}

@@ -13,6 +13,7 @@ import type {
   MapMarker,
   MapMarkerCreate,
   HealthResponse,
+  VICONStatus,
   CommandResult,
 } from "../types";
 
@@ -176,6 +177,19 @@ export const stopOperation = (plugin_id: string) =>
     },
   );
 
+export const sendOperatorInput = (
+  plugin_id: string,
+  input_key: string,
+  value: unknown,
+) =>
+  apiFetch<{ success: boolean; message: string }>(
+    `/api/operations/${plugin_id}/input`,
+    {
+      method: "POST",
+      body: JSON.stringify({ input_key, value }),
+    },
+  );
+
 // ── Zones ──────────────────────────────────────────────────────────────────────
 
 export const getZones = () =>
@@ -200,6 +214,23 @@ export const createMarker = (body: MapMarkerCreate) =>
 
 export const deleteMarker = (id: string) =>
   apiFetch<{ success: boolean }>(`/api/markers/${id}`, { method: "DELETE" });
+
+// ── VICON ──────────────────────────────────────────────────────────────────────
+
+export const getViconConnection = () =>
+  apiFetch<VICONStatus>("/api/vicon/connection");
+
+export const connectVicon = (host: string, port = 801) =>
+  apiFetch<{ success: boolean }>("/api/vicon/connection", {
+    method: "POST",
+    body: JSON.stringify({ host, port }),
+  });
+
+export const disconnectVicon = () =>
+  apiFetch<{ success: boolean }>("/api/vicon/connection", { method: "DELETE" });
+
+export const getViconObjects = () =>
+  apiFetch<{ objects: string[] }>("/api/vicon/objects").then((r) => r.objects);
 
 // ── Safety ─────────────────────────────────────────────────────────────────────
 

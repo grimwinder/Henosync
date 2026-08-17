@@ -288,6 +288,7 @@ export interface PluginConfigField {
   options?: Array<{ label: string; value: string | number }>;
   min?: number;
   max?: number;
+  show_when?: { field: string; value: unknown };
 }
 
 export interface PluginManifest {
@@ -407,4 +408,12 @@ export interface HealthResponse {
   version: string;
   nodes_total: number;
   nodes_online: number;
+  vicon_configured: boolean;
+  vicon_connected: boolean;
+}
+
+export interface VICONStatus {
+  host: string | null;
+  port: number;
+  connected: boolean;
 }

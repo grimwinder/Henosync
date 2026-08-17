@@ -46,8 +46,8 @@
       "label": "ROS2 Namespace",
       "required": false,
       "default": "",
-      "placeholder": "/tb3_0",
-      "description": "Leave blank if using a single robot with no namespace."
+      "placeholder": "tb2",
+      "description": "ROS2 namespace prefix without slashes, e.g. tb2 for /tb2/cmd_vel. Leave blank if no namespace."
     },
     "position_source": {
       "type": "select",
@@ -65,21 +65,32 @@
       "label": "VICON Object Name",
       "required": false,
       "placeholder": "TurtleBot3",
-      "description": "VICON mode only — must exactly match the object name in VICON software."
+      "description": "Must exactly match the rigid body name in VICON Tracker.",
+      "show_when": { "field": "position_source", "value": "vicon" }
     },
     "home_lat": {
       "type": "number",
-      "label": "Home Latitude",
+      "label": "Arena Origin Latitude",
       "required": false,
       "placeholder": "-37.9105",
-      "description": "VICON mode only — WGS84 latitude of the VICON arena origin (X=0, Y=0)."
+      "description": "WGS84 latitude of the VICON arena origin (X=0, Y=0).",
+      "show_when": { "field": "position_source", "value": "vicon" }
     },
     "home_lon": {
       "type": "number",
-      "label": "Home Longitude",
+      "label": "Arena Origin Longitude",
       "required": false,
       "placeholder": "145.1362",
-      "description": "VICON mode only — WGS84 longitude of the VICON arena origin (X=0, Y=0)."
+      "description": "WGS84 longitude of the VICON arena origin (X=0, Y=0).",
+      "show_when": { "field": "position_source", "value": "vicon" }
+    },
+    "gps_topic": {
+      "type": "string",
+      "label": "GPS Topic",
+      "required": false,
+      "placeholder": "/gps/fix",
+      "description": "ROS2 topic publishing sensor_msgs/NavSatFix. Leave blank for /gps/fix.",
+      "show_when": { "field": "position_source", "value": "gps" }
     }
   }
 }
