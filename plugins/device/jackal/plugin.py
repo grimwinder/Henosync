@@ -2,7 +2,13 @@
 Clearpath Jackal UGV device plugin for Henosync.
 
 Connects via rosbridge (roslibpy) to a Jackal running Clearpath's ROS2 stack.
-VICON (default) or onboard GPS positioning. Two ways to move it:
+Positioning:
+  - VICON mode: handled entirely by henosync core (vicon_manager) — a direct
+    TCP connection to the VICON DataStream SDK, independent of rosbridge.
+    No plugin code here beyond setting node.local_origin.
+  - GPS  mode:  subscribes to the onboard GPS topic via rosbridge.
+
+Two ways to move it:
 
   - move_to: publishes geometry_msgs/PoseStamped to bt_navigator's goal_pose
     topic rather than calling the NavigateToPose action — roslibpy's ROS2
@@ -22,7 +28,6 @@ axes). If they differ, goal_pose targets will land at the wrong physical
 location — verify this alignment on the robot before trusting cmd_move_to.
 
 Topics subscribed (all optionally prefixed with `namespace`, e.g. a200_0000):
-  vicon/{object_name}/{object_name}   geometry_msgs/TransformStamped  (VICON mode)
   sensors/gps_0/fix                   sensor_msgs/NavSatFix           (GPS mode — topic varies by
                                                                         attached GPS unit, override
                                                                         via gps_topic config)
@@ -71,7 +76,6 @@ from henosync_sdk import (
     NodePlugin,
     NodePluginContext,
     Position,
-    PositioningMixin,
     TelemetryFrame,
 )
 from henosync_sdk.rosbridge import ensure_reactor
@@ -93,7 +97,8 @@ class _NodeState:
         self.cmd_vel_pub: Optional[Any] = None
         self.goal_pose_pub: Optional[Any] = None
 
-        # Position — written by _on_vicon or _on_gps
+        # Position — GPS mode only, written by _on_gps.
+        # VICON mode: vicon_manager sets node.position directly, nothing here.
         self.lat: float = 0.0
         self.lon: float = 0.0
         self.alt: float = 0.0
@@ -117,11 +122,12 @@ class _NodeState:
         self._subscriptions: list = []
 
 
-class JackalPlugin(NodePlugin, PositioningMixin):
+class JackalPlugin(NodePlugin):
     """
     Clearpath Jackal UGV device plugin.
 
-    Positioning: VICON (default) or GPS — selected in Add Device config.
+    Positioning: VICON (default, handled by core vicon_manager) or GPS
+    (subscribed here) — selected in Add Device config.
     Movement: publishes a Nav2 goal_pose (PoseStamped) for move_to; direct
     zero-Twist to cmd_vel for stop/safe state.
     """
@@ -251,18 +257,10 @@ class JackalPlugin(NodePlugin, PositioningMixin):
                     self._nodes.pop(node.id, None)
                     return False, "VICON mode requires home_lat and home_lon in config"
 
+                # Position is published directly by the core vicon_manager (a
+                # TCP connection to the VICON DataStream SDK, independent of
+                # rosbridge) — nothing to subscribe here.
                 node.local_origin = LocalOrigin(lat=home_lat, lon=home_lon)
-
-                object_name = config.get("vicon_object_name", "jackal")
-                vicon_topic = roslibpy.Topic(
-                    ros,
-                    f"/vicon/{object_name}/{object_name}",
-                    "geometry_msgs/TransformStamped",
-                )
-                vicon_topic.subscribe(
-                    lambda msg: self._on_vicon(node.id, msg, home_lat, home_lon)
-                )
-                state._subscriptions.append(vicon_topic)
 
             else:
                 gps_topic_name = config.get("gps_topic") or self._topic(ns, "sensors/gps_0/fix")
@@ -323,27 +321,6 @@ class JackalPlugin(NodePlugin, PositioningMixin):
         state.lat = msg.get("latitude", 0.0)
         state.lon = msg.get("longitude", 0.0)
         state.alt = msg.get("altitude", 0.0)
-        state.position_received = True
-        now = time.monotonic()
-        state.last_position_time = now
-        state.last_message_time = now
-
-    def _on_vicon(
-        self, node_id: str, msg: dict, home_lat: float, home_lon: float
-    ) -> None:
-        """
-        Assumes VICON X = East, Y = North from the arena origin.
-        If your setup uses a different axis convention, swap/negate x_m/y_m here.
-        """
-        state = self._nodes.get(node_id)
-        if not state:
-            return
-        t = msg.get("transform", {}).get("translation", {})
-        x_m = t.get("x", 0.0)
-        y_m = t.get("y", 0.0)
-        z_m = t.get("z", 0.0)
-        state.lat, state.lon = self._local_to_gps(x_m, y_m, home_lat, home_lon)
-        state.alt = z_m
         state.position_received = True
         now = time.monotonic()
         state.last_position_time = now
@@ -650,40 +627,56 @@ class JackalPlugin(NodePlugin, PositioningMixin):
         while node.id in self._nodes:
             state = self._nodes[node.id]
             now = time.monotonic()
+            position_source = node.config.get("position_source", "vicon")
 
-            if (
-                not state.position_received
-                and not state._no_fix_warned
-                and now - state.connect_time > self.POSITION_FIX_TIMEOUT
-            ):
-                state._no_fix_warned = True
-                logger.warning(
-                    "Jackal [%s]: no position after %.0fs", node.name, self.POSITION_FIX_TIMEOUT
+            if position_source == "gps":
+                if (
+                    not state.position_received
+                    and not state._no_fix_warned
+                    and now - state.connect_time > self.POSITION_FIX_TIMEOUT
+                ):
+                    state._no_fix_warned = True
+                    logger.warning(
+                        "Jackal [%s]: no position after %.0fs", node.name, self.POSITION_FIX_TIMEOUT
+                    )
+                    if self._context:
+                        await self._context.emit_event(
+                            "No position data",
+                            f"No position received after {self.POSITION_FIX_TIMEOUT:.0f}s. "
+                            "Check the GPS topic and gps_topic config.",
+                            EventSeverity.WARNING,
+                        )
+
+                position_stale = (
+                    state.position_received
+                    and now - state.last_position_time > self.POSITION_STALE_TIMEOUT
                 )
-                if self._context:
-                    await self._context.emit_event(
-                        "No position data",
-                        f"No position received after {self.POSITION_FIX_TIMEOUT:.0f}s. "
-                        "Check VICON bridge / GPS topic, object name, and home_lat/lon.",
-                        EventSeverity.WARNING,
-                    )
+                if position_stale and not state._stale_warned:
+                    state._stale_warned = True
+                    logger.warning("Jackal [%s]: position updates stopped", node.name)
+                    if self._context:
+                        await self._context.emit_event(
+                            "Position tracking lost",
+                            f"No position update for {self.POSITION_STALE_TIMEOUT:.0f}s. "
+                            "GPS signal may be lost.",
+                            EventSeverity.WARNING,
+                        )
+                if not position_stale and state._stale_warned:
+                    state._stale_warned = False
 
-            position_stale = (
-                state.position_received
-                and now - state.last_position_time > self.POSITION_STALE_TIMEOUT
-            )
-            if position_stale and not state._stale_warned:
-                state._stale_warned = True
-                logger.warning("Jackal [%s]: position updates stopped", node.name)
-                if self._context:
-                    await self._context.emit_event(
-                        "Position tracking lost",
-                        f"No position update for {self.POSITION_STALE_TIMEOUT:.0f}s. "
-                        "VICON may have lost tracking or GPS signal is lost.",
-                        EventSeverity.WARNING,
-                    )
-            if not position_stale and state._stale_warned:
-                state._stale_warned = False
+                position = Position(
+                    lat=state.lat, lon=state.lon, alt=state.alt
+                ) if state.position_received and not position_stale else None
+                status_text = (
+                    "Position lost" if position_stale
+                    else "Online" if state.position_received
+                    else "Connected — waiting for GPS fix"
+                )
+            else:
+                # VICON mode: node.position is set by the core vicon_manager,
+                # which also emits its own no-fix warning — nothing to do here.
+                position = None
+                status_text = "Online" if node.position is not None else "Connected — waiting for VICON"
 
             yield TelemetryFrame(
                 node_id=node.id,
@@ -692,14 +685,8 @@ class JackalPlugin(NodePlugin, PositioningMixin):
                 battery=BatteryData(percentage=state.battery_percent),
                 imu=state.imu,
                 lidar=state.lidar,
-                position=Position(
-                    lat=state.lat, lon=state.lon, alt=state.alt
-                ) if state.position_received and not position_stale else None,
-                status_text=(
-                    "Position lost" if position_stale
-                    else "Online" if state.position_received
-                    else "Connected — waiting for position"
-                ),
+                position=position,
+                status_text=status_text,
             )
             seq += 1
             await asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
