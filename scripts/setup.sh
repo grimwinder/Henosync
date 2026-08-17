@@ -79,8 +79,8 @@ else
 fi
 
 echo "  Installing backend packages..."
-"$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet \
+"$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
+"$VENV_DIR/bin/python" -m pip install --quiet \
     uvicorn \
     fastapi \
     aiosqlite \
@@ -89,9 +89,13 @@ echo "  Installing backend packages..."
     websockets \
     aiofiles \
     python-multipart \
-    roslibpy \
-    vicon-dssdk
-"$VENV_DIR/bin/pip" install --quiet -e packages/plugin-sdk
+    roslibpy
+"$VENV_DIR/bin/python" -m pip install --quiet -e packages/plugin-sdk
+echo ""
+echo "  NOTE: VICON positioning requires the Vicon DataStream SDK, which ships"
+echo "  with Vicon Tracker or Nexus. After installing Vicon software, run:"
+echo "    $VENV_DIR/bin/python -m pip install '/path/to/Vicon/DataStream SDK/.../Python/vicon_dssdk'"
+echo "  The backend works fine without it — only VICON-mode devices will be unavailable."
 echo "  Done"
 echo ""
 

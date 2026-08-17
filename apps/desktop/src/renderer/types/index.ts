@@ -408,4 +408,12 @@ export interface HealthResponse {
   version: string;
   nodes_total: number;
   nodes_online: number;
+  vicon_configured: boolean;
+  vicon_connected: boolean;
+}
+
+export interface VICONStatus {
+  host: string | null;
+  port: number;
+  connected: boolean;
 }

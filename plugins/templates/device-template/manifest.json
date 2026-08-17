@@ -59,15 +59,6 @@
         { "label": "VICON (motion capture)", "value": "vicon" }
       ]
     },
-    "vicon_host": {
-      "type": "string",
-      "label": "VICON PC Host",
-      "required": false,
-      "default": "localhost",
-      "placeholder": "192.168.1.50",
-      "description": "IP address of the PC running VICON Tracker.",
-      "show_when": { "field": "position_source", "value": "vicon" }
-    },
     "vicon_object_name": {
       "type": "string",
       "label": "VICON Object Name",

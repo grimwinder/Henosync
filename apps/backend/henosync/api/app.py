@@ -18,6 +18,7 @@ from .routes.missions import router as missions_router
 from .routes.nodes import router as nodes_router
 from .routes.operations import router as operations_router
 from .routes.safety import router as safety_router
+from .routes.vicon import router as vicon_router
 from .routes.zones import router as zones_router
 from .websocket_server import events_websocket_handler, telemetry_websocket_handler
 
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(operations_router)
     app.include_router(zones_router)
     app.include_router(markers_router)
+    app.include_router(vicon_router)
 
     # WebSocket routes
     @app.websocket("/ws/telemetry")
@@ -111,7 +113,9 @@ def create_app() -> FastAPI:
             "status": "ok",
             "version": "0.1.0",
             "nodes_total": len(nodes),
-            "nodes_online": len(node_registry.get_online_nodes())
+            "nodes_online": len(node_registry.get_online_nodes()),
+            "vicon_configured": vicon_manager.saved_connection is not None,
+            "vicon_connected": vicon_manager.is_connected,
         }
 
     @app.get("/api/plugins")

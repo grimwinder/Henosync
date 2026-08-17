@@ -65,8 +65,8 @@ if exist apps\backend\.venv (
 )
 
 echo   Installing backend packages...
-apps\backend\.venv\Scripts\pip install --quiet --upgrade pip
-apps\backend\.venv\Scripts\pip install --quiet ^
+apps\backend\.venv\Scripts\python.exe -m pip install --quiet --upgrade pip
+apps\backend\.venv\Scripts\python.exe -m pip install --quiet ^
     uvicorn ^
     fastapi ^
     aiosqlite ^
@@ -75,9 +75,13 @@ apps\backend\.venv\Scripts\pip install --quiet ^
     websockets ^
     aiofiles ^
     python-multipart ^
-    roslibpy ^
-    vicon-dssdk
-apps\backend\.venv\Scripts\pip install --quiet -e packages\plugin-sdk
+    roslibpy
+apps\backend\.venv\Scripts\python.exe -m pip install --quiet -e packages\plugin-sdk
+echo.
+echo   NOTE: VICON positioning requires the Vicon DataStream SDK, which ships
+echo   with Vicon Tracker or Nexus. After installing Vicon software, run:
+echo     apps\backend\.venv\Scripts\python.exe -m pip install "C:\Program Files\Vicon\DataStream SDK\Win64\Python\vicon_dssdk"
+echo   The backend works fine without it — only VICON-mode devices will be unavailable.
 echo   Done
 echo.
 

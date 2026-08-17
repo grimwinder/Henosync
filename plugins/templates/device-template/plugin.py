@@ -99,7 +99,7 @@ class MyRobotPlugin(ROS2Plugin):
         Raise an exception here to abort the connection with a reason message.
         """
         source = config.get("position_source", "gps")
-        ns = config.get("namespace", "").rstrip("/")
+        ns = config.get("namespace", "").strip("/")
 
         node.specs = DeviceSpecs(
             category=DeviceCategory.AGV,        # TODO: change to your robot's category
