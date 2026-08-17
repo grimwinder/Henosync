@@ -115,6 +115,9 @@ class TurtleBot3Plugin(ROS2Plugin):
             f"{prefix}/cmd_vel",
             "geometry_msgs/TwistStamped",
         )
+        # Start the liveness clock from connect time so a wrong namespace
+        # (topics never publish) triggers DEGRADED within MESSAGE_TIMEOUT seconds.
+        state.last_message_time = time.monotonic()
 
     # ── Topic callbacks ────────────────────────────────────────────────────────
 
