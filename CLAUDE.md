@@ -598,6 +598,7 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 - Emergency stop: `POST /api/safety/emergency-stop` → stops all operations → aborts mission → concurrent safe state all nodes.
 - No simulation transports exist. `transport/` contains only `ROS2Transport`. UE sim connects via same rosbridge path as real hardware.
 - Setup: `scripts/setup.bat` / `scripts/setup.sh` create `.venv` and install packages with pip directly. Poetry (`pyproject.toml`) is for documentation only — not used for actual installs.
+- **Python version: 3.11 or 3.12 required.** 3.13+ is not supported — `vicon-dssdk` and several ROS2 packages have no wheels for it yet. `setup.bat` uses the Windows py launcher (`py -3.12` / `py -3.11`); `setup.sh` searches for `python3.12` / `python3.11` explicitly. Both fail fast with a clear message if neither is found.
 - Plugin loader identifies plugin type by inspecting module for `NodePlugin` or `ControlPlugin` subclass — first match wins.
 
 ---
@@ -685,3 +686,4 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 
 | 2026-08-12 | Fixed plugin loader: \_find_plugin_class now skips abstract classes (ROS2Plugin, MAVLinkPlugin imported into plugin modules were being picked up before the concrete subclass) |
 | 2026-08-17 | Removed plugins/device/ros2-diffdrive/ entirely |
+| 2026-08-17 | setup.bat/setup.sh: pin Python to 3.11 or 3.12 — vicon-dssdk has no wheels for 3.13+; setup.bat uses py launcher, setup.sh searches python3.12/python3.11 explicitly; both fail fast with clear message |

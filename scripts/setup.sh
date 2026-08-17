@@ -29,23 +29,21 @@ if ! command -v pnpm &> /dev/null; then
 fi
 echo "  pnpm $(pnpm -v)"
 
-# Check Python 3.11+
+# Check Python 3.11 or 3.12 specifically.
+# vicon-dssdk (and several ROS2 packages) do not publish wheels for 3.13+.
 PYTHON=""
-for candidate in python3 python3.13 python3.12 python3.11; do
+for candidate in python3.12 python3.11; do
     if command -v "$candidate" &> /dev/null; then
-        VERSION=$("$candidate" -c 'import sys; print(sys.version_info.minor)')
-        MAJOR=$("$candidate" -c 'import sys; print(sys.version_info.major)')
-        if [ "$MAJOR" -eq 3 ] && [ "$VERSION" -ge 11 ]; then
-            PYTHON="$candidate"
-            break
-        fi
+        PYTHON="$candidate"
+        break
     fi
 done
 
 if [ -z "$PYTHON" ]; then
-    echo "ERROR: Python 3.11+ not found."
-    echo "  Install via Homebrew:  brew install python@3.11"
-    echo "  Or download from:      https://python.org"
+    echo "ERROR: Python 3.11 or 3.12 not found."
+    echo "  Python 3.13+ is not yet supported (vicon-dssdk has no wheel for it)."
+    echo "  Install via Homebrew:  brew install python@3.12"
+    echo "  Or download from:      https://python.org/downloads/release/python-3120/"
     exit 1
 fi
 echo "  $("$PYTHON" --version)"

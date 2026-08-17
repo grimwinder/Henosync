@@ -19,14 +19,26 @@ if %errorlevel% neq 0 (
 )
 echo   pnpm found
 
-:: Check Python
-where python >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ERROR: Python 3.11+ not found. Please install from https://python.org
-    exit /b 1
+:: Check Python 3.11 or 3.12 via py launcher
+:: vicon-dssdk (and several ROS2 packages) do not publish wheels for 3.13+.
+set PYTHON_CMD=
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON_CMD=py -3.12
+    goto :python_found
 )
-echo   Python found
-python --version
+py -3.11 --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON_CMD=py -3.11
+    goto :python_found
+)
+echo ERROR: Python 3.11 or 3.12 not found.
+echo   Python 3.13+ is not yet supported (vicon-dssdk has no wheel for it).
+echo   Install Python 3.12 from: https://python.org/downloads/release/python-3120/
+echo   Make sure to tick "Add to PATH" and install the py launcher.
+exit /b 1
+:python_found
+for /f "tokens=*" %%v in ('%PYTHON_CMD% --version') do echo   %%v
 
 :: Check Git
 where git >nul 2>&1
@@ -48,7 +60,7 @@ echo Setting up Python virtual environment...
 if exist apps\backend\.venv (
     echo   .venv already exists - skipping creation
 ) else (
-    python -m venv apps\backend\.venv
+    %PYTHON_CMD% -m venv apps\backend\.venv
     echo   Created .venv
 )
 
