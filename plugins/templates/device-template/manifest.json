@@ -64,21 +64,32 @@
       "label": "VICON Object Name",
       "required": false,
       "placeholder": "robot",
-      "description": "VICON mode only — the object name as configured in the VICON system."
+      "description": "Must exactly match the rigid body name in VICON Tracker.",
+      "show_when": { "field": "position_source", "value": "vicon" }
     },
     "home_lat": {
       "type": "number",
-      "label": "Home Latitude",
+      "label": "Arena Origin Latitude",
       "required": false,
       "placeholder": "-37.9105",
-      "description": "VICON mode only — WGS84 latitude of the VICON arena origin."
+      "description": "WGS84 latitude of the VICON arena origin (X=0, Y=0).",
+      "show_when": { "field": "position_source", "value": "vicon" }
     },
     "home_lon": {
       "type": "number",
-      "label": "Home Longitude",
+      "label": "Arena Origin Longitude",
       "required": false,
       "placeholder": "145.1362",
-      "description": "VICON mode only — WGS84 longitude of the VICON arena origin."
+      "description": "WGS84 longitude of the VICON arena origin (X=0, Y=0).",
+      "show_when": { "field": "position_source", "value": "vicon" }
+    },
+    "gps_topic": {
+      "type": "string",
+      "label": "GPS Topic",
+      "required": false,
+      "placeholder": "/gps/fix",
+      "description": "ROS2 topic publishing sensor_msgs/NavSatFix. Leave blank for /gps/fix.",
+      "show_when": { "field": "position_source", "value": "gps" }
     }
   }
 }

@@ -52,7 +52,6 @@ class TeleopPlugin(ControlPlugin):
 
     async def start(self, context) -> None:
         if not context.devices:
-            self._stop_requested = True
             return
 
         self._device = context.devices[0]

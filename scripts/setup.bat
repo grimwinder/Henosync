@@ -19,14 +19,26 @@ if %errorlevel% neq 0 (
 )
 echo   pnpm found
 
-:: Check Python
-where python >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ERROR: Python 3.11+ not found. Please install from https://python.org
-    exit /b 1
+:: Check Python 3.11 or 3.12 via py launcher
+:: vicon-dssdk (and several ROS2 packages) do not publish wheels for 3.13+.
+set PYTHON_CMD=
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON_CMD=py -3.12
+    goto :python_found
 )
-echo   Python found
-python --version
+py -3.11 --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON_CMD=py -3.11
+    goto :python_found
+)
+echo ERROR: Python 3.11 or 3.12 not found.
+echo   Python 3.13+ is not yet supported (vicon-dssdk has no wheel for it).
+echo   Install Python 3.12 from: https://python.org/downloads/release/python-3120/
+echo   Make sure to tick "Add to PATH" and install the py launcher.
+exit /b 1
+:python_found
+for /f "tokens=*" %%v in ('%PYTHON_CMD% --version') do echo   %%v
 
 :: Check Git
 where git >nul 2>&1
@@ -48,13 +60,13 @@ echo Setting up Python virtual environment...
 if exist apps\backend\.venv (
     echo   .venv already exists - skipping creation
 ) else (
-    python -m venv apps\backend\.venv
+    %PYTHON_CMD% -m venv apps\backend\.venv
     echo   Created .venv
 )
 
 echo   Installing backend packages...
-apps\backend\.venv\Scripts\pip install --quiet --upgrade pip
-apps\backend\.venv\Scripts\pip install --quiet ^
+apps\backend\.venv\Scripts\python.exe -m pip install --quiet --upgrade pip
+apps\backend\.venv\Scripts\python.exe -m pip install --quiet ^
     uvicorn ^
     fastapi ^
     aiosqlite ^
@@ -64,7 +76,12 @@ apps\backend\.venv\Scripts\pip install --quiet ^
     aiofiles ^
     python-multipart ^
     roslibpy
-apps\backend\.venv\Scripts\pip install --quiet -e packages\plugin-sdk
+apps\backend\.venv\Scripts\python.exe -m pip install --quiet -e packages\plugin-sdk
+echo.
+echo   NOTE: VICON positioning requires the Vicon DataStream SDK, which ships
+echo   with Vicon Tracker or Nexus. After installing Vicon software, run:
+echo     apps\backend\.venv\Scripts\python.exe -m pip install "C:\Program Files\Vicon\DataStream SDK\Win64\Python\vicon_dssdk"
+echo   The backend works fine without it — only VICON-mode devices will be unavailable.
 echo   Done
 echo.
 

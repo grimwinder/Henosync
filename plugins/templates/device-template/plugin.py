@@ -1,288 +1,196 @@
 """
 Henosync Device Plugin Template
 ================================
-Copy this folder, rename it, and implement the methods below.
+Choose the starter that matches your robot's communication protocol,
+then implement the required methods.
 
-Supports two positioning modes selectable at device-setup time:
-  GPS   — robot has its own GPS; reads sensor_msgs/NavSatFix
-  VICON — VICON motion capture provides position; converts local X/Y to WGS84
+  ROS2 / rosbridge  →  subclass ROS2Plugin      (most ground robots, ROS2 sim)
+  MAVLink           →  subclass MAVLinkPlugin    (PX4/ArduPilot drones, ArduRover)
+  Other protocol    →  subclass NodePlugin       (HTTP, MQTT, custom UDP, …)
 
 Steps:
-1. Update manifest.json with your robot's details
-2. Rename MyRobotPlugin and set PLUGIN_ID to match manifest id
-3. Fill in the TODO sections for your transport (rosbridge, serial, HTTP, …)
-4. Implement the command handlers and get_safe_state()
-5. Override is_connected() for fast dead-connection detection
+  1. Delete the starter you are NOT using (keep only one class).
+  2. Rename MyRobotPlugin and set PLUGIN_ID to match manifest.json id.
+  3. Implement setup_node(), build_telemetry(), get_safe_state().
+  4. Add command handlers your manifest declares (cmd_move_to, etc.).
+  5. Update manifest.json with your robot's details.
 
-Standard commands flow through the base class send_command dispatcher:
-    DeviceProxy.move_to()     → cmd_move_to()
-    DeviceProxy.stop()        → cmd_stop()
-    DeviceProxy.return_home() → cmd_return_home()
-    Custom manifest commands  → handle_custom_command()
+Positioning:
+  - VICON: configured automatically by henosync core (vicon_manager).
+            In setup_node(), just set node.local_origin from config — done.
+  - GPS:   subscribe to the /gps/fix topic in setup_node() and update state.
 """
 
-import asyncio
-import logging
-import time
-from typing import Any, AsyncGenerator, Optional
+# ──────────────────────────────────────────────────────────────────────────────
+# Common SDK imports — use what you need, delete the rest
+# ──────────────────────────────────────────────────────────────────────────────
 
 from henosync_sdk import (
     BatteryData,
     CapabilitySpec,
+    CommandEnvelope,
     CommandResult,
     DeviceCapability,
     DeviceCategory,
     DeviceSpecs,
-    EventSeverity,
     LocalOrigin,
     Node,
-    NodePlugin,
-    NodePluginContext,
     Position,
-    PositioningMixin,
     TelemetryFrame,
 )
+
+import logging
 
 logger = logging.getLogger(__name__)
 
 
-class _NodeState:
-    """Per-node connection state. One instance per connected robot."""
+# ==============================================================================
+# OPTION A — ROS2 / rosbridge
+# Use this for: TurtleBot, Jackal, Husky, any robot running rosbridge_server,
+#               or ROS2 simulation environments.
+# Delete this section if you are using MAVLink or a custom protocol.
+# ==============================================================================
+
+from henosync_sdk.protocols.ros2 import ROS2NodeState, ROS2Plugin
+
+
+class _NodeState(ROS2NodeState):
+    """
+    Per-node state. Add your robot's data fields here.
+    GPS mode: add lat/lon/alt/gps_received to track the subscription.
+    VICON mode: no position fields needed — vicon_manager updates node.position.
+    """
 
     def __init__(self):
-        self.connected: bool = False
-        self.transport: Optional[Any] = None  # TODO: replace with your connection type
-
-        # Live sensor data — written by position callbacks below
+        super().__init__()
+        # GPS mode fields (delete if using VICON only):
         self.lat: float = 0.0
         self.lon: float = 0.0
         self.alt: float = 0.0
+        self.gps_received: bool = False
+        # TODO: add your robot's own data fields:
         self.speed: float = 0.0
         self.battery_percent: float = 100.0
-        self.position_received: bool = False  # guards against emitting lat=0,lon=0 before first fix
-
-        # VICON local frame (used only in "vicon" positioning mode)
-        self.local_x: float = 0.0
-        self.local_y: float = 0.0
-
-        # Timing for position health checks
-        self.connect_time: float = time.monotonic()
-        self.last_position_time: float = 0.0
-
-        # Warning flags — each fires once so the operator isn't spammed
-        self._no_fix_warned: bool = False
-        self._stale_warned: bool = False
-
-        # Track active subscriptions so disconnect() can unsubscribe cleanly
-        self._subscriptions: list = []
+        self.cmd_vel_pub = None  # store publishers here so command handlers can reach them
 
 
-class MyRobotPlugin(NodePlugin, PositioningMixin):
-    """
-    Replace MyRobotPlugin with your robot's name.
-    Replace all TODO comments with your implementation.
+class MyRobotPlugin(ROS2Plugin):
+    """Replace MyRobotPlugin with your robot's name."""
 
-    Inheriting PositioningMixin provides _local_to_gps() for VICON mode.
-    """
-
-    PLUGIN_ID = "my-robot"           # must match manifest id
-    PLUGIN_NAME = "My Robot"
+    PLUGIN_ID      = "my-robot"        # must match manifest.json id
+    PLUGIN_NAME    = "My Robot"
     PLUGIN_VERSION = "0.1.0"
-    PLUGIN_AUTHOR = "Your Name"
+    PLUGIN_AUTHOR  = "Your Name"
     PLUGIN_DESCRIPTION = "Plugin for My Robot"
 
     TELEMETRY_RATE_HZ: float = 2.0
 
-    # Warn if no position arrives within this many seconds of connecting.
-    # Catches: vicon_bridge not running, wrong object name, GPS topic missing.
-    POSITION_FIX_TIMEOUT: float = 10.0
-
-    # Warn and stop emitting position if no update arrives for this many seconds.
-    # Catches: VICON tracking loss, marker occlusion, GPS signal lost.
-    POSITION_STALE_TIMEOUT: float = 3.0
-
     def __init__(self):
         super().__init__()
-        self._nodes: dict[str, _NodeState] = {}
 
-    # ── Connect ───────────────────────────────────────────────────────────────
+    def create_state(self) -> _NodeState:
+        return _NodeState()
 
-    async def connect(
-        self, node: Node, config: dict[str, Any], context: NodePluginContext
-    ) -> tuple[bool, str]:
+    # ── Required: called immediately after rosbridge connects ──────────────────
+
+    async def setup_node(self, node: Node, state: _NodeState, config: dict) -> None:
         """
-        Establish connection to the robot.
-        Return (False, "reason") on failure — never raise exceptions here.
+        Set node.specs, subscribe to topics, create publishers.
+        Raise an exception here to abort the connection with a reason message.
         """
-        self._context = context
+        source = config.get("position_source", "gps")
+        ns = config.get("namespace", "").strip("/")
 
-        host = config.get("host", "localhost")
-        port = int(config.get("port", 9090))
-        position_source = config.get("position_source", "gps")
+        node.specs = DeviceSpecs(
+            category=DeviceCategory.AGV,        # TODO: change to your robot's category
+            capabilities=[
+                CapabilitySpec(capability=DeviceCapability.GPS),
+                CapabilitySpec(capability=DeviceCapability.BATTERY),
+                # TODO: add capabilities your robot has:
+                # CapabilitySpec(capability=DeviceCapability.MOVE_2D),
+            ],
+            coordinate_frame="local" if source == "vicon" else "gps",
+        )
 
-        state = _NodeState()
-        self._nodes[node.id] = state
-
-        try:
-            # TODO: Open your transport connection here.
-            # Example for rosbridge via roslibpy:
-            #
-            #   import roslibpy
-            #   ros = roslibpy.Ros(host=host, port=port)
-            #   ros.run_in_thread()          # or use the _ensure_reactor() pattern
-            #   ... wait for connected event ...
-            #   state.transport = ros
-
-            state.connected = True
-
-            # Declare what this robot is and what it can do.
-            # Drives capability matching, camera detection, and control plugin selection.
-            node.specs = DeviceSpecs(
-                category=DeviceCategory.AGV,    # TODO: change to your robot's category
-                capabilities=[
-                    CapabilitySpec(capability=DeviceCapability.GPS),
-                    CapabilitySpec(capability=DeviceCapability.BATTERY),
-                    # TODO: add capabilities your robot has, e.g.:
-                    # CapabilitySpec(capability=DeviceCapability.CAMERA),
-                    # CapabilitySpec(capability=DeviceCapability.LIDAR),
-                ],
-                # "local" tells DeviceProxy this device works in a local coordinate frame.
-                # GPS mode uses "gps" — DeviceProxy converts GPS waypoints directly.
-                coordinate_frame="local" if position_source == "vicon" else "gps",
+        if source == "vicon":
+            # VICON: set local_origin so DeviceProxy can convert GPS targets to
+            # local coords for navigation. Position itself is published by
+            # henosync core (vicon_manager) — nothing else needed here.
+            node.local_origin = LocalOrigin(
+                lat=float(config.get("home_lat") or 0),
+                lon=float(config.get("home_lon") or 0),
             )
-
-            if position_source == "gps":
-                # ── GPS mode ───────────────────────────────────────────────────
-                # Subscribe to the robot's GPS topic (sensor_msgs/NavSatFix).
-                # TODO: replace "/gps/fix" with your robot's actual topic name.
-                #
-                #   gps_topic = roslibpy.Topic(ros, "/gps/fix", "sensor_msgs/NavSatFix")
-                #   gps_topic.subscribe(lambda msg: self._on_gps(node.id, msg))
-                #   state._subscriptions.append(gps_topic)
-                pass
-
-            else:
-                # ── VICON mode ─────────────────────────────────────────────────
-                # VICON publishes local X/Y/Z in metres from the arena origin.
-                # We convert to WGS84 using the home lat/lon from config.
-                home_lat = float(config.get("home_lat", 0.0))
-                home_lon = float(config.get("home_lon", 0.0))
-                if home_lat == 0.0 and home_lon == 0.0:
-                    self._nodes.pop(node.id, None)
-                    return False, "VICON mode requires home_lat and home_lon in config"
-
-                # Store the local origin so DeviceProxy can convert GPS waypoints
-                # back to local frame when sending move_to commands.
-                node.local_origin = LocalOrigin(lat=home_lat, lon=home_lon)
-
-                # Subscribe to the VICON topic for this object.
-                # Standard vicon_bridge topic: /vicon/{object_name}/{object_name}
-                # Message type: geometry_msgs/TransformStamped
-                # TODO: update topic path and type to match your VICON bridge setup.
-                #
-                #   object_name = config.get("vicon_object_name", "robot")
-                #   vicon_topic = roslibpy.Topic(
-                #       ros,
-                #       f"/vicon/{object_name}/{object_name}",
-                #       "geometry_msgs/TransformStamped",
-                #   )
-                #   vicon_topic.subscribe(
-                #       lambda msg: self._on_vicon(node.id, msg, home_lat, home_lon)
-                #   )
-                #   state._subscriptions.append(vicon_topic)
-                pass
-
-            logger.info(
-                "MyRobot [%s]: connected to %s:%d (%s mode)",
-                node.name, host, port, position_source,
+        else:
+            # GPS: subscribe to the NavSatFix topic and write to state.
+            gps_topic = config.get("gps_topic") or (
+                f"{ns}/gps/fix" if ns else "/gps/fix"
             )
-            return True, ""
+            self.subscribe(state, gps_topic, "sensor_msgs/NavSatFix",
+                           lambda msg: self._on_gps(node.id, msg))
 
-        except Exception as e:
-            logger.error("MyRobot [%s]: connect failed: %s", node.name, e)
-            self._nodes.pop(node.id, None)
-            return False, str(e)
+        # TODO: subscribe to robot-specific topics
+        # self.subscribe(state, f"{ns}/odom" if ns else "/odom",
+        #                "nav_msgs/Odometry",
+        #                lambda msg: self._on_odom(node.id, msg))
+        # self.subscribe(state, f"{ns}/battery_state" if ns else "/battery_state",
+        #                "sensor_msgs/BatteryState",
+        #                lambda msg: self._on_battery(node.id, msg))
 
-    # ── Position callbacks ────────────────────────────────────────────────────
-    # These run on the transport thread — only write to state fields, no awaits.
+        # TODO: create publishers for topics you need to write to
+        # state.cmd_vel_pub = self.advertise(
+        #     state, f"{ns}/cmd_vel" if ns else "/cmd_vel", "geometry_msgs/Twist"
+        # )
+
+    # ── Required: return a TelemetryFrame from current state ──────────────────
+
+    def build_telemetry(self, node: Node, state: _NodeState, seq: int) -> TelemetryFrame:
+        """Sync — read state fields and return a TelemetryFrame. No awaits here."""
+        source = node.config.get("position_source", "gps")
+        return TelemetryFrame(
+            node_id=node.id,
+            sequence_number=seq,
+            speed=state.speed,
+            battery=BatteryData(percentage=state.battery_percent),
+            # GPS mode: include position from subscription
+            # VICON mode: vicon_manager publishes position; omit here to avoid conflict
+            position=(
+                Position(lat=state.lat, lon=state.lon, alt=state.alt)
+                if source == "gps" and state.gps_received
+                else None
+            ),
+        )
+
+    # ── Required: make the robot safe ─────────────────────────────────────────
+
+    async def get_safe_state(self, node: Node) -> CommandResult:
+        """Called on heartbeat loss or emergency stop. Stop the robot here."""
+        state = self._nodes.get(node.id)
+        if state and state.cmd_vel_pub:
+            self.publish(state.cmd_vel_pub, {
+                "linear":  {"x": 0.0, "y": 0.0, "z": 0.0},
+                "angular": {"x": 0.0, "y": 0.0, "z": 0.0},
+            })
+        return CommandResult(success=True, message="Stopped")
+
+    # ── Topic callbacks (run on Twisted thread — no awaits) ───────────────────
 
     def _on_gps(self, node_id: str, msg: dict) -> None:
-        """Callback for sensor_msgs/NavSatFix (GPS mode)."""
         state = self._nodes.get(node_id)
         if not state:
             return
         state.lat = msg.get("latitude", 0.0)
         state.lon = msg.get("longitude", 0.0)
         state.alt = msg.get("altitude", 0.0)
-        state.position_received = True
-        state.last_position_time = time.monotonic()
+        state.gps_received = True
 
-    def _on_vicon(
-        self, node_id: str, msg: dict, home_lat: float, home_lon: float
-    ) -> None:
-        """
-        Callback for geometry_msgs/TransformStamped (VICON mode).
+    # TODO: add callbacks for your robot's other topics
+    # def _on_odom(self, node_id: str, msg: dict) -> None:
+    #     state = self._nodes.get(node_id)
+    #     if not state:
+    #         return
+    #     state.speed = msg.get("twist", {}).get("twist", {}).get("linear", {}).get("x", 0.0)
 
-        Assumes X = East, Y = North from the VICON arena origin.
-        If your VICON setup uses a different axis convention, swap or negate
-        x_m / y_m before calling _local_to_gps().
-        """
-        state = self._nodes.get(node_id)
-        if not state:
-            return
-        t = msg.get("transform", {}).get("translation", {})
-        x_m = t.get("x", 0.0)
-        y_m = t.get("y", 0.0)
-        z_m = t.get("z", 0.0)
-        state.local_x = x_m
-        state.local_y = y_m
-        state.lat, state.lon = self._local_to_gps(x_m, y_m, home_lat, home_lon)
-        state.alt = z_m
-        state.position_received = True
-        state.last_position_time = time.monotonic()
-
-    # ── Disconnect ────────────────────────────────────────────────────────────
-
-    async def disconnect(self, node: Node) -> None:
-        """Clean up all resources for this node."""
-        state = self._nodes.pop(node.id, None)
-        if not state:
-            return
-        state.connected = False
-        for sub in state._subscriptions:
-            try:
-                sub.unsubscribe()
-            except Exception:
-                pass
-        if state.transport:
-            try:
-                state.transport.close()  # TODO: use your transport's close method
-            except Exception:
-                pass
-        logger.info("MyRobot [%s]: disconnected", node.name)
-
-    # ── Liveness check ────────────────────────────────────────────────────────
-
-    async def is_connected(self, node: Node) -> bool:
-        """
-        Return False if the underlying connection is dead.
-        node_registry polls this every 2 s and sets DEGRADED if False —
-        faster than the 5 s failsafe heartbeat fallback.
-
-        TODO: check your transport's live state, e.g.:
-            return (
-                state is not None
-                and state.connected
-                and state.transport is not None
-                and state.transport.is_connected
-            )
-        """
-        state = self._nodes.get(node.id)
-        return state is not None and state.connected
-
-    # ── Standard command handlers ─────────────────────────────────────────────
-    # Override these instead of send_command. The base class routes
-    # move_to / stop / return_home to these methods automatically.
+    # ── Command handlers (add the ones your manifest declares) ────────────────
 
     async def cmd_move_to(
         self,
@@ -302,113 +210,122 @@ class MyRobotPlugin(NodePlugin, PositioningMixin):
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
-        if x is not None:
-            # TODO: Send local-frame move command to robot
-            logger.info("MyRobot [%s]: moving to local (%.2f, %.2f)", node.name, x, y)
-            return CommandResult(success=True, message=f"Moving to local ({x:.2f}, {y:.2f})")
-        # TODO: Send GPS move command to robot
-        logger.info("MyRobot [%s]: moving to %.5f, %.5f", node.name, lat, lon)
-        return CommandResult(success=True, message=f"Moving to {lat:.5f}, {lon:.5f}")
+        # node.position is set by vicon_manager (VICON) or telemetry pipeline (GPS).
+        if node.position is None:
+            return CommandResult(success=False, message="No position fix — cannot navigate")
+        # TODO: send navigation command to robot
+        return CommandResult(success=True, message=f"Moving to {lat:.5f}, {lon:.5f}, alt={alt:.1f}m")
 
-    async def cmd_stop(self, node: Node) -> CommandResult:
+    async def handle_custom_command(
+        self, node: Node, envelope: CommandEnvelope
+    ) -> CommandResult:
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
-        # TODO: Send stop command to robot
-        logger.info("MyRobot [%s]: stop", node.name)
-        return CommandResult(success=True, message="Stopped")
+        # TODO: handle custom commands declared in manifest.json
+        # Example: cmd_vel for teleop
+        # if envelope.command_type == "cmd_vel":
+        #     linear  = envelope.params.get("linear",  0.0)
+        #     angular = envelope.params.get("angular", 0.0)
+        #     self.publish(state.cmd_vel_pub, { ... })
+        #     return CommandResult(success=True, message="cmd_vel sent")
+        return CommandResult(
+            success=False, message=f"Unknown command: {envelope.command_type}"
+        )
 
-    async def cmd_return_home(self, node: Node) -> CommandResult:
-        state = self._nodes.get(node.id)
-        if not state or not state.connected:
-            return CommandResult(success=False, message="Not connected")
-        # TODO: Send return-home command to robot
-        logger.info("MyRobot [%s]: return home", node.name)
-        return CommandResult(success=True, message="Returning home")
 
-    # ── Telemetry stream ──────────────────────────────────────────────────────
+# ==============================================================================
+# OPTION B — MAVLink (PX4 / ArduPilot)
+# Use this for: drones, ArduRover ground vehicles, any MAVLink device over WiFi.
+# Connect the device to Henosync via UDP (no companion computer required if the
+# flight controller has WiFi).
+# Delete this section if you are using ROS2.
+#
+# VICON positioning works with MAVLink devices: vicon_manager is protocol-agnostic.
+# GPS positioning in MAVLink mode: register a GLOBAL_POSITION_INT handler and
+# write to state.lat/lon/alt directly (shown below).
+# ==============================================================================
 
-    async def telemetry_stream(
-        self, node: Node
-    ) -> AsyncGenerator[TelemetryFrame, None]:
-        """
-        Yield typed TelemetryFrame at TELEMETRY_RATE_HZ until the node is removed.
-        Connection checking is handled globally by node_registry — no connection
-        logic belongs in this loop.
-        """
-        seq = 0
-        while node.id in self._nodes:
-            state = self._nodes[node.id]
-            now = time.monotonic()
-
-            # ── Fix 1: no initial position ─────────────────────────────────
-            # Fires once if no position arrives within POSITION_FIX_TIMEOUT seconds.
-            # Likely causes: vicon_bridge not running, wrong object name, GPS topic missing.
-            if (
-                not state.position_received
-                and not state._no_fix_warned
-                and now - state.connect_time > self.POSITION_FIX_TIMEOUT
-            ):
-                state._no_fix_warned = True
-                logger.warning("MyRobot [%s]: no position received after %.0fs", node.name, self.POSITION_FIX_TIMEOUT)
-                if self._context:
-                    await self._context.emit_event(
-                        "No position data",
-                        f"Connected but no position received after {self.POSITION_FIX_TIMEOUT:.0f}s. "
-                        "Check that the position topic is publishing and the object name is correct.",
-                        EventSeverity.WARNING,
-                    )
-
-            # ── Fix 2: position gone stale ─────────────────────────────────
-            # Fires once when updates stop arriving after an initial fix.
-            # Likely causes: VICON tracking loss, marker occlusion, GPS signal lost.
-            position_stale = (
-                state.position_received
-                and now - state.last_position_time > self.POSITION_STALE_TIMEOUT
-            )
-            if position_stale and not state._stale_warned:
-                state._stale_warned = True
-                logger.warning("MyRobot [%s]: position updates stopped", node.name)
-                if self._context:
-                    await self._context.emit_event(
-                        "Position tracking lost",
-                        f"No position update for {self.POSITION_STALE_TIMEOUT:.0f}s. "
-                        "VICON may have lost tracking or GPS signal is lost.",
-                        EventSeverity.WARNING,
-                    )
-
-            # ── Fix 3: recovery ────────────────────────────────────────────
-            # Clear stale warning when updates resume so the next dropout fires again.
-            if not position_stale and state._stale_warned:
-                state._stale_warned = False
-
-            yield TelemetryFrame(
-                node_id=node.id,
-                sequence_number=seq,
-                speed=state.speed,
-                battery=BatteryData(percentage=state.battery_percent),
-                # Suppress position when stale — robot stays at last known location
-                # on the map rather than freezing at a potentially wrong position.
-                position=Position(
-                    lat=state.lat, lon=state.lon, alt=state.alt
-                ) if state.position_received and not position_stale else None,
-                status_text=(
-                    "Position lost"    if position_stale
-                    else "Online"      if state.position_received
-                    else "Connected — waiting for position"
-                ),
-            )
-            seq += 1
-            await asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
-
-    # ── Safe state ────────────────────────────────────────────────────────────
-
-    async def get_safe_state(self, node: Node) -> CommandResult:
-        """
-        Put the robot in its safest possible state immediately.
-        Called automatically on heartbeat loss or emergency stop.
-        Do NOT kill the telemetry stream here.
-        """
-        logger.warning("MyRobot [%s]: safe state engaged", node.name)
-        # TODO: Send your robot's stop/safe command here
-        return CommandResult(success=True, message="Safe state engaged")
+# from henosync_sdk.protocols.mavlink import MAVLinkNodeState, MAVLinkPlugin
+#
+# class _State(MAVLinkNodeState):
+#     def __init__(self):
+#         super().__init__()
+#         self.lat: float = 0.0
+#         self.lon: float = 0.0
+#         self.alt: float = 0.0
+#         self.gps_received: bool = False
+#         self.battery: float = 100.0
+#
+#
+# class MyDronePlugin(MAVLinkPlugin):
+#     PLUGIN_ID      = "my-drone"
+#     PLUGIN_NAME    = "My Drone"
+#     PLUGIN_VERSION = "0.1.0"
+#     PLUGIN_AUTHOR  = "Your Name"
+#
+#     TELEMETRY_RATE_HZ: float = 2.0
+#
+#     def __init__(self):
+#         super().__init__()
+#
+#     def create_state(self):
+#         return _State()
+#
+#     async def setup_node(self, node, state, config):
+#         source = config.get("position_source", "vicon")
+#         node.specs = DeviceSpecs(
+#             category=DeviceCategory.DRONE,
+#             capabilities=[
+#                 CapabilitySpec(capability=DeviceCapability.GPS),
+#                 CapabilitySpec(capability=DeviceCapability.BATTERY),
+#                 CapabilitySpec(capability=DeviceCapability.MOVE_3D),
+#             ],
+#             coordinate_frame="local" if source == "vicon" else "gps",
+#         )
+#         if source == "vicon":
+#             node.local_origin = LocalOrigin(
+#                 lat=float(config.get("home_lat", 0.0)),
+#                 lon=float(config.get("home_lon", 0.0)),
+#             )
+#         else:
+#             self.register_handler(state, "GLOBAL_POSITION_INT", self._on_position)
+#             self.request_message_interval(state, 33, 100_000)  # 10 Hz
+#         self.register_handler(state, "BATTERY_STATUS", self._on_battery)
+#         self.request_message_interval(state, 147, 1_000_000)   # 1 Hz
+#
+#     def _on_position(self, state, msg):
+#         state.lat = msg.lat / 1e7
+#         state.lon = msg.lon / 1e7
+#         state.alt = msg.relative_alt / 1000.0
+#         state.gps_received = True
+#
+#     def _on_battery(self, state, msg):
+#         state.battery = msg.battery_remaining
+#
+#     def build_telemetry(self, node, state, seq):
+#         source = node.config.get("position_source", "vicon")
+#         return TelemetryFrame(
+#             node_id=node.id,
+#             sequence_number=seq,
+#             position=(
+#                 Position(lat=state.lat, lon=state.lon, alt=state.alt)
+#                 if source == "gps" and state.gps_received else None
+#             ),
+#             battery=BatteryData(percentage=state.battery),
+#         )
+#
+#     async def get_safe_state(self, node):
+#         state = self._nodes.get(node.id)
+#         if state:
+#             self.send_command_long(state, 21)   # MAV_CMD_NAV_LAND
+#         return CommandResult(success=True, message="Landing")
+#
+#     async def cmd_move_to(self, node, lat, lon, alt=0.0):
+#         state = self._nodes.get(node.id)
+#         if not state or not state.connected:
+#             return CommandResult(success=False, message="Not connected")
+#         if node.position is None:
+#             return CommandResult(success=False, message="No position fix")
+#         self.send_set_position_target(state, lat, lon, alt)
+#         return CommandResult(success=True, message=f"Moving to {lat:.5f}, {lon:.5f}")
