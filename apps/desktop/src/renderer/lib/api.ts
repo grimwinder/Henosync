@@ -60,6 +60,15 @@ export const addNode = (body: NodeCreate) =>
 export const removeNode = (id: string) =>
   apiFetch<{ success: boolean }>(`/api/nodes/${id}`, { method: "DELETE" });
 
+export const updateNode = (
+  id: string,
+  body: { name?: string; config?: Record<string, unknown> },
+) =>
+  apiFetch<Node>(`/api/nodes/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
 export const reconnectNode = (id: string) =>
   apiFetch<{ success: boolean }>(`/api/nodes/${id}/reconnect`, {
     method: "POST",

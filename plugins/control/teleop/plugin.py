@@ -54,7 +54,16 @@ class TeleopPlugin(ControlPlugin):
         if not context.devices:
             return
 
-        self._device = context.devices[0]
+        target_id = self._config.get("node_id", "")
+        if target_id:
+            self._device = next(
+                (d for d in context.devices if d.id == target_id), None
+            )
+            if self._device is None:
+                logger.warning("Teleop: requested node %s not available, falling back", target_id)
+                self._device = context.devices[0]
+        else:
+            self._device = context.devices[0]
 
         while not self._stop_requested:
             self._linear = (1.0 if self._pressed["up"] else 0.0) - (
@@ -91,9 +100,16 @@ class TeleopPlugin(ControlPlugin):
     def get_ui_contribution(self) -> UIContribution:
         return UIContribution(
             display_name="Teleop (Arrow Keys)",
-            description="Drive the assigned vehicle with the arrow keys.",
+            description="Drive the selected vehicle with the arrow keys.",
             icon="gamepad-2",
-            config_schema={},
+            config_schema={
+                "node_id": {
+                    "type": "device_select",
+                    "label": "Robot",
+                    "required": False,
+                    "description": "Which robot to drive. Leave blank to use the first available AGV.",
+                }
+            },
         )
 
     async def on_operator_input(self, input_key: str, value) -> None:

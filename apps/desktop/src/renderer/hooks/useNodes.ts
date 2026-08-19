@@ -7,6 +7,7 @@ import {
   removeNode,
   reconnectNode,
   sendCommand,
+  updateNode,
 } from "../lib/api";
 import { useNodeStore } from "../stores/nodeStore";
 import type { NodeCreate } from "../types";
@@ -70,6 +71,24 @@ export function useReconnectNode() {
   return useMutation({
     mutationFn: (id: string) => reconnectNode(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: NODE_KEYS.all }),
+  });
+}
+
+export function useUpdateNode() {
+  const qc = useQueryClient();
+  const upsertNode = useNodeStore((s) => s.upsertNode);
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: { name?: string; config?: Record<string, unknown> };
+    }) => updateNode(id, body),
+    onSuccess: (node) => {
+      upsertNode(node);
+      qc.invalidateQueries({ queryKey: NODE_KEYS.all });
+    },
   });
 }
 

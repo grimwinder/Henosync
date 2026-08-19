@@ -411,6 +411,7 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
   const stopOperation = useStopOperation();
 
   const running = operations.find((op) => op.plugin_id === plugin.id);
+  const isTeleop = plugin.id === "teleop";
 
   return (
     <div

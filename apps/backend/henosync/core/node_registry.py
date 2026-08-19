@@ -228,6 +228,20 @@ class NodeRegistry:
         self._last_frames.pop(node.id, None)
         await self._update_status(node, NodeStatus.OFFLINE)
 
+    async def update_node(self, node_id: str, name: str | None, config: dict | None) -> "Node | None":
+        """Update a node's name and/or config, persist, and reconnect."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return None
+        if name is not None:
+            node.name = name
+        if config is not None:
+            node.config = config
+        await self._save_node_to_db(node)
+        await self._disconnect_node(node)
+        asyncio.create_task(self._connect_node(node))
+        return node
+
     async def reconnect_node(self, node_id: str) -> bool:
         """Manually trigger a reconnection attempt."""
         node = self._nodes.get(node_id)
