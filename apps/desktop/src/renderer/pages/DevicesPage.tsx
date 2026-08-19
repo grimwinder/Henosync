@@ -1,10 +1,16 @@
 import { useState, useMemo } from "react";
-import { Plus, Search, RefreshCw, Trash2, Cpu } from "lucide-react";
+import { Plus, Search, RefreshCw, Trash2, Pencil, Cpu, X } from "lucide-react";
 import { useNodeStore } from "../stores/nodeStore";
-import { useNodes, useRemoveNode, useReconnectNode } from "../hooks/useNodes";
+import {
+  useNodes,
+  useRemoveNode,
+  useReconnectNode,
+  useUpdateNode,
+} from "../hooks/useNodes";
+import { useDevicePlugins } from "../hooks/usePlugins";
 import DeviceIcon from "../components/fleet/DeviceIcon";
 import AddNodeModal from "../components/fleet/AddNodeModal";
-import type { Node, NodeStatus } from "../types";
+import type { Node, NodeStatus, PluginConfigField } from "../types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -180,10 +186,311 @@ function DeviceRow({ node }: { node: Node }) {
   );
 }
 
+// ── Edit device modal ──────────────────────────────────────────────────────────
+
+function EditNodeModal({ node, onClose }: { node: Node; onClose: () => void }) {
+  const { data: plugins = [] } = useDevicePlugins();
+  const { mutate: updateNode, isPending } = useUpdateNode();
+
+  const manifest = plugins.find((p) => p.id === node.plugin_id);
+  const schema = manifest?.config_schema ?? {};
+  const schemaEntries = Object.entries(schema) as [string, PluginConfigField][];
+
+  const [name, setName] = useState(node.name);
+  const [config, setConfig] = useState<Record<string, unknown>>({
+    ...node.config,
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  function isVisible(field: PluginConfigField): boolean {
+    if (!field.show_when) return true;
+    return config[field.show_when.field] === field.show_when.value;
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError("Name is required.");
+      return;
+    }
+    updateNode(
+      { id: node.id, body: { name: name.trim(), config } },
+      { onSuccess: onClose, onError: (err) => setError(String(err)) },
+    );
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 300,
+        backgroundColor: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={{
+          backgroundColor: "#1C1F24",
+          border: "1px solid #2A2F38",
+          borderRadius: "8px",
+          width: "480px",
+          maxHeight: "80vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            height: "44px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 16px",
+            borderBottom: "1px solid #2A2F38",
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: "13px", fontWeight: 600, color: "#EFEFEF" }}>
+            Edit Device
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#999999",
+              cursor: "pointer",
+              padding: "4px",
+              borderRadius: "4px",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <form
+          onSubmit={handleSubmit}
+          style={{ overflowY: "auto", padding: "20px", flex: 1 }}
+        >
+          {/* Name */}
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "11px",
+                color: "#999999",
+                marginBottom: "6px",
+              }}
+            >
+              Device Name
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "7px 10px",
+                backgroundColor: "#141414",
+                border: "1px solid #2D2D2D",
+                borderRadius: "6px",
+                fontSize: "12px",
+                color: "#EFEFEF",
+                outline: "none",
+                fontFamily: "Inter, sans-serif",
+              }}
+            />
+          </div>
+
+          {/* Plugin (read-only) */}
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "11px",
+                color: "#999999",
+                marginBottom: "6px",
+              }}
+            >
+              Plugin
+            </label>
+            <div
+              style={{
+                padding: "7px 10px",
+                backgroundColor: "#0D0D0D",
+                border: "1px solid #2D2D2D",
+                borderRadius: "6px",
+                fontSize: "12px",
+                color: "#666666",
+              }}
+            >
+              {node.plugin_id}
+            </div>
+          </div>
+
+          {/* Config fields */}
+          {schemaEntries
+            .filter(([, f]) => isVisible(f))
+            .map(([key, field]) => (
+              <div key={key} style={{ marginBottom: "14px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "11px",
+                    color: "#999999",
+                    marginBottom: "6px",
+                  }}
+                >
+                  {field.label}
+                  {field.required && (
+                    <span style={{ color: "#F05252" }}> *</span>
+                  )}
+                </label>
+                {field.type === "select" ? (
+                  <select
+                    value={String(config[key] ?? field.default ?? "")}
+                    onChange={(e) =>
+                      setConfig((c) => ({ ...c, [key]: e.target.value }))
+                    }
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      padding: "7px 10px",
+                      backgroundColor: "#141414",
+                      border: "1px solid #2D2D2D",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      color: "#EFEFEF",
+                      outline: "none",
+                      fontFamily: "Inter, sans-serif",
+                    }}
+                  >
+                    {(field.options ?? []).map((opt) => (
+                      <option key={String(opt.value)} value={String(opt.value)}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : field.type === "boolean" ? (
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config[key] ?? field.default ?? false)}
+                    onChange={(e) =>
+                      setConfig((c) => ({ ...c, [key]: e.target.checked }))
+                    }
+                  />
+                ) : (
+                  <input
+                    type={field.type === "number" ? "number" : "text"}
+                    value={String(config[key] ?? "")}
+                    placeholder={field.placeholder}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        [key]:
+                          field.type === "number"
+                            ? Number(e.target.value)
+                            : e.target.value,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      padding: "7px 10px",
+                      backgroundColor: "#141414",
+                      border: "1px solid #2D2D2D",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      color: "#EFEFEF",
+                      outline: "none",
+                      fontFamily: "Inter, sans-serif",
+                    }}
+                  />
+                )}
+                {field.description && (
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      color: "#666666",
+                      marginTop: "4px",
+                    }}
+                  >
+                    {field.description}
+                  </div>
+                )}
+              </div>
+            ))}
+
+          {error && (
+            <div
+              style={{
+                fontSize: "11px",
+                color: "#F05252",
+                marginBottom: "12px",
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {/* Footer */}
+          <div style={{ display: "flex", gap: "8px", paddingTop: "8px" }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                flex: 1,
+                padding: "8px 0",
+                borderRadius: "6px",
+                background: "none",
+                border: "1px solid #2D2D2D",
+                color: "#999999",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              style={{
+                flex: 1,
+                padding: "8px 0",
+                borderRadius: "6px",
+                backgroundColor: isPending ? "#2D2D2D" : "#4A9EFF",
+                border: "none",
+                color: isPending ? "#999999" : "white",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: isPending ? "not-allowed" : "pointer",
+              }}
+            >
+              {isPending ? "Saving…" : "Save & Reconnect"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Device config panel (main area) ───────────────────────────────────────────
 
 function DeviceConfigPanel({ node }: { node: Node }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const setSelectedNode = useNodeStore((s) => s.setSelectedNode);
   const { mutate: removeNode, isPending: isRemoving } = useRemoveNode();
   const { mutate: reconnect, isPending: isReconnecting } = useReconnectNode();
@@ -198,6 +505,19 @@ function DeviceConfigPanel({ node }: { node: Node }) {
     ([, v]) => v != null,
   );
 
+  const textBtnBase: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "background-color 150ms, border-color 150ms",
+    whiteSpace: "nowrap",
+  };
+
   return (
     <div
       style={{
@@ -210,11 +530,12 @@ function DeviceConfigPanel({ node }: { node: Node }) {
       {/* ── Hero ──────────────────────────────────────────────────────────── */}
       <div
         style={{
+          position: "relative",
           padding: "24px 32px 20px",
           borderBottom: "1px solid #2D2D2D",
           backgroundColor: "#0D0D0D",
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           gap: "20px",
           flexShrink: 0,
         }}
@@ -314,6 +635,137 @@ function DeviceConfigPanel({ node }: { node: Node }) {
               </button>
             )}
           </div>
+        </div>
+
+        {/* ── Top-right action buttons ─────────────────────────────────── */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            flexShrink: 0,
+            alignItems: "flex-end",
+          }}
+        >
+          {/* Edit Device */}
+          <button
+            onClick={() => {
+              setConfirmDelete(false);
+              setShowEdit(true);
+            }}
+            style={{
+              ...textBtnBase,
+              backgroundColor: "transparent",
+              border: "1px solid #2D2D2D",
+              color: "#8B95A3",
+            }}
+            onMouseEnter={(e) => {
+              const b = e.currentTarget as HTMLButtonElement;
+              b.style.backgroundColor = "#252A31";
+              b.style.borderColor = "#4A9EFF40";
+              b.style.color = "#4A9EFF";
+            }}
+            onMouseLeave={(e) => {
+              const b = e.currentTarget as HTMLButtonElement;
+              b.style.backgroundColor = "transparent";
+              b.style.borderColor = "#2D2D2D";
+              b.style.color = "#8B95A3";
+            }}
+          >
+            <Pencil size={12} />
+            Edit Device
+          </button>
+
+          {/* Remove Device */}
+          {confirmDelete ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "80px",
+                right: "32px",
+                backgroundColor: "#1C1F24",
+                border: "1px solid #2A2F38",
+                borderRadius: "8px",
+                padding: "16px",
+                width: "260px",
+                zIndex: 10,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: "12px",
+                  color: "#EFEFEF",
+                  marginBottom: "14px",
+                  lineHeight: "1.6",
+                }}
+              >
+                Remove <strong>{node.name}</strong>? This cannot be undone.
+              </p>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: "6px",
+                    background: "none",
+                    border: "1px solid #2D2D2D",
+                    color: "#999999",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={isRemoving}
+                  onClick={() =>
+                    removeNode(node.id, {
+                      onSuccess: () => setSelectedNode(null),
+                    })
+                  }
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: "6px",
+                    backgroundColor: isRemoving ? "#2D2D2D" : "#F05252",
+                    border: "none",
+                    color: isRemoving ? "#999999" : "white",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                    cursor: isRemoving ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {isRemoving ? "Removing…" : "Remove"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setShowEdit(false);
+                setConfirmDelete(true);
+              }}
+              style={{
+                ...textBtnBase,
+                backgroundColor: "#F0525218",
+                border: "1px solid #F0525240",
+                color: "#F05252",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#F0525230";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                  "#F0525218";
+              }}
+            >
+              <Trash2 size={12} />
+              Remove Device
+            </button>
+          )}
         </div>
       </div>
 
@@ -502,109 +954,11 @@ function DeviceConfigPanel({ node }: { node: Node }) {
             ))}
           </Section>
         )}
-
-        {/* Danger zone */}
-        <div
-          style={{
-            paddingTop: "20px",
-            borderTop: "1px solid #2D2D2D",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "10px",
-              fontWeight: 600,
-              letterSpacing: "1px",
-              color: "#999999",
-              textTransform: "uppercase",
-              marginBottom: "12px",
-            }}
-          >
-            Danger Zone
-          </div>
-          {confirmDelete ? (
-            <div>
-              <p
-                style={{
-                  fontSize: "12px",
-                  color: "#EFEFEF",
-                  marginBottom: "14px",
-                  lineHeight: "1.6",
-                }}
-              >
-                Remove <strong>{node.name}</strong> from Henosync? This action
-                cannot be undone.
-              </p>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  style={{
-                    flex: 1,
-                    padding: "8px 0",
-                    borderRadius: "6px",
-                    background: "none",
-                    border: "1px solid #2D2D2D",
-                    color: "#999999",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={isRemoving}
-                  onClick={() =>
-                    removeNode(node.id, {
-                      onSuccess: () => setSelectedNode(null),
-                    })
-                  }
-                  style={{
-                    flex: 1,
-                    padding: "8px 0",
-                    borderRadius: "6px",
-                    backgroundColor: isRemoving ? "#2D2D2D" : "#F05252",
-                    border: "none",
-                    color: isRemoving ? "#999999" : "white",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                    cursor: isRemoving ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {isRemoving ? "Removing…" : "Remove Device"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              style={{
-                padding: "8px 16px",
-                borderRadius: "6px",
-                background: "none",
-                border: "1px solid #F0525240",
-                color: "#F05252",
-                fontSize: "12px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                transition: "background-color 150ms",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                  "#F0525218";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                  "transparent";
-              }}
-            >
-              <Trash2 size={13} />
-              Remove Device
-            </button>
-          )}
-        </div>
       </div>
+
+      {showEdit && (
+        <EditNodeModal node={node} onClose={() => setShowEdit(false)} />
+      )}
     </div>
   );
 }

@@ -129,12 +129,16 @@ class PluginLoader:
                 )
 
     def _find_plugin_class(self, module, plugin_name: str):
-        """Find NodePlugin or ControlPlugin subclass in module."""
+        """Find a concrete NodePlugin or ControlPlugin subclass in module."""
         from .control_interfaces import ControlPlugin
 
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if not isinstance(attr, type):
+                continue
+            # Skip abstract classes — base classes (ROS2Plugin, MAVLinkPlugin, …)
+            # are imported into plugin modules and must not be picked up.
+            if getattr(attr, "__abstractmethods__", None):
                 continue
             if issubclass(attr, NodePlugin) and attr is not NodePlugin:
                 return attr, "device"

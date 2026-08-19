@@ -1,0 +1,10 @@
+{
+  "id": "teleop",
+  "name": "Teleop (Arrow Keys)",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Manually drive a single ground vehicle with the arrow keys.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "capabilities": []
+}

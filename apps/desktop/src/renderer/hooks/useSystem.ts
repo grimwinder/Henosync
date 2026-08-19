@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getHealth, emergencyStop } from "../lib/api";
+import { getHealth, emergencyStop, getViconConnection } from "../lib/api";
 import { useSystemStore } from "../stores";
 
 export function useHealth() {
@@ -17,6 +17,15 @@ export function useHealth() {
         throw err;
       }
     },
+    refetchInterval: 5_000,
+    retry: false,
+  });
+}
+
+export function useViconConnection() {
+  return useQuery({
+    queryKey: ["vicon-connection"],
+    queryFn: getViconConnection,
     refetchInterval: 5_000,
     retry: false,
   });

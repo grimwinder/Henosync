@@ -82,6 +82,19 @@ class NodeRegistry:
         if not plugin_registry.is_registered(node_create.plugin_id):
             raise ValueError(f"Plugin not found: {node_create.plugin_id}")
 
+        new_host = node_create.config.get("host")
+        new_port = node_create.config.get("port")
+        if new_host:
+            for existing in self._nodes.values():
+                if (
+                    existing.config.get("host") == new_host
+                    and existing.config.get("port") == new_port
+                ):
+                    raise ValueError(
+                        f"A device is already connected to {new_host}:{new_port} "
+                        f"({existing.name})"
+                    )
+
         node = Node(
             name=node_create.name,
             plugin_id=node_create.plugin_id,
@@ -214,6 +227,20 @@ class NodeRegistry:
         telemetry_bus.remove_node_queue(node.id)
         self._last_frames.pop(node.id, None)
         await self._update_status(node, NodeStatus.OFFLINE)
+
+    async def update_node(self, node_id: str, name: str | None, config: dict | None) -> "Node | None":
+        """Update a node's name and/or config, persist, and reconnect."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return None
+        if name is not None:
+            node.name = name
+        if config is not None:
+            node.config = config
+        await self._save_node_to_db(node)
+        await self._disconnect_node(node)
+        asyncio.create_task(self._connect_node(node))
+        return node
 
     async def reconnect_node(self, node_id: str) -> bool:
         """Manually trigger a reconnection attempt."""

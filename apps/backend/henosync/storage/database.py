@@ -50,5 +50,12 @@ async def init_db() -> None:
                 color        TEXT NOT NULL DEFAULT '#4A9EFF'
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS vicon_connections (
+                id    TEXT PRIMARY KEY DEFAULT 'default',
+                host  TEXT NOT NULL,
+                port  INTEGER NOT NULL DEFAULT 801
+            )
+        """)
         await db.commit()
         logger.info(f"Database initialized at {DB_PATH}")

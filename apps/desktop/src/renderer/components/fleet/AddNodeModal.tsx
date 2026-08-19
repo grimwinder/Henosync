@@ -431,15 +431,21 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
           </div>
 
           {/* Dynamic config fields */}
-          {schemaEntries.map(([key, field]) => (
-            <ConfigField
-              key={key}
-              fieldKey={key}
-              field={field}
-              value={config[key]}
-              onChange={handleConfigChange}
-            />
-          ))}
+          {schemaEntries
+            .filter(
+              ([, field]) =>
+                !field.show_when ||
+                config[field.show_when.field] === field.show_when.value,
+            )
+            .map(([key, field]) => (
+              <ConfigField
+                key={key}
+                fieldKey={key}
+                field={field}
+                value={config[key]}
+                onChange={handleConfigChange}
+              />
+            ))}
 
           {/* Capabilities */}
           {hasCapabilities && (

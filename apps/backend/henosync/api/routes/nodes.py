@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from ...core.node_registry import node_registry
-from ...models import NodeCreate
+from ...models import NodeCreate, NodeUpdate
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
@@ -27,6 +27,15 @@ async def add_node(node_create: NodeCreate):
 async def get_node(node_id: str):
     """Get a specific node by id."""
     node = node_registry.get_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    return node.model_dump()
+
+
+@router.put("/{node_id}")
+async def update_node(node_id: str, node_update: NodeUpdate):
+    """Update a node's name and/or config and reconnect."""
+    node = await node_registry.update_node(node_id, node_update.name, node_update.config)
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
     return node.model_dump()

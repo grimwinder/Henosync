@@ -23,5 +23,8 @@
     "*.{json,md,yaml,yml}": [
       "prettier --write"
     ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
   }
 }

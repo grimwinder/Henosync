@@ -214,6 +214,20 @@ class OperationManager:
 
         return True, "Operation stopped"
 
+    async def send_operator_input(
+        self,
+        plugin_id: str,
+        input_key: str,
+        value: Any
+    ) -> tuple[bool, str]:
+        """Forward operator input (e.g. keyboard) to a running operation."""
+        operation = self._operations.get(plugin_id)
+        if not operation:
+            return False, f"No running operation: {plugin_id}"
+
+        await operation.plugin.on_operator_input(input_key, value)
+        return True, "Input delivered"
+
     async def stop_all_operations(self) -> None:
         """Stop all running operations. Called by emergency stop."""
         logger.critical("Stopping all control plugin operations")

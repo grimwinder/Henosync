@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useNodeStore } from "../stores/nodeStore";
 import maplibregl from "maplibre-gl";
 import {
   Plus,
@@ -58,6 +59,56 @@ function defaultParams(
       (field.type === "boolean" ? false : field.type === "number" ? 0 : "");
   }
   return out;
+}
+
+// ── Node selector (live dropdown from connected devices) ───────────────────────
+
+function DeviceSelectField({
+  fieldKey,
+  field,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  field: PluginConfigField;
+  value: unknown;
+  onChange: (key: string, val: unknown) => void;
+}) {
+  const nodes = useNodeStore((s) => Object.values(s.nodes));
+  const inputBase: React.CSSProperties = {
+    width: "100%",
+    backgroundColor: "#0D0D0D",
+    border: "1px solid #2D2D2D",
+    borderRadius: "5px",
+    color: "#EFEFEF",
+    fontSize: "11px",
+    padding: "5px 8px",
+    outline: "none",
+    boxSizing: "border-box",
+    cursor: "pointer",
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+      <span style={{ fontSize: "10px", color: "#666666" }}>{field.label}</span>
+      <select
+        value={String(value ?? "")}
+        onChange={(e) => onChange(fieldKey, e.target.value)}
+        style={inputBase}
+      >
+        <option value="">Any available robot</option>
+        {nodes.map((n) => (
+          <option key={n.id} value={n.id}>
+            {n.name} ({n.status})
+          </option>
+        ))}
+      </select>
+      {field.description && (
+        <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
+          {field.description}
+        </span>
+      )}
+    </div>
+  );
 }
 
 // ── Shared icon button ─────────────────────────────────────────────────────────
@@ -165,6 +216,17 @@ function ConfigField({
         />
         {field.label}
       </label>
+    );
+  }
+
+  if (field.type === "device_select") {
+    return (
+      <DeviceSelectField
+        fieldKey={fieldKey}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
     );
   }
 
