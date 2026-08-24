@@ -706,3 +706,5 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-08-18 | fleet_context: added marker_manager property (same pattern as zone_manager); operation_manager now injects marker_manager into FleetContext at start |
 | 2026-08-18 | marker_manager: added get_marker(id) method |
 | 2026-08-18 | frontend: added marker_select field type; MarkerSelectField component in MissionPage renders live dropdown from markerStore |
+| 2026-08-18 | turtlebot3: added missing Optional import — plugin failed to load entirely (name 'Optional' is not defined at startup) |
+| 2026-08-18 | desktop: renamed postcss.config.js → postcss.config.mjs — eliminates Node ESM/CJS ambiguity warning on startup |

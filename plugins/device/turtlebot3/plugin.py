@@ -11,7 +11,7 @@ import asyncio
 import logging
 import math
 import time
-from typing import Any
+from typing import Any, Optional
 
 from henosync_sdk import (
     BatteryData,
