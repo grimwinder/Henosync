@@ -13,6 +13,7 @@ from .device_proxy import DeviceProxy
 from .event_bus import event_bus
 from .fleet_context import FleetContext
 from .telemetry_bus import telemetry_bus
+from .marker_manager import marker_manager
 from .zone_manager import zone_manager
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ class OperationManager:
             plugin_id=plugin_id,
             initial_devices=matched_devices,
             zone_manager=zone_manager,
+            marker_manager=marker_manager,
             event_bus=event_bus
         )
 

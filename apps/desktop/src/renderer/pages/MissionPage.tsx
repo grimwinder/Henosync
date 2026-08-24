@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNodeStore } from "../stores/nodeStore";
+import { useMarkerStore } from "../stores/markerStore";
 import maplibregl from "maplibre-gl";
 import {
   Plus,
@@ -171,6 +172,56 @@ function IconBtn({
   );
 }
 
+// ── Marker selector (live dropdown from map markers) ──────────────────────────
+
+function MarkerSelectField({
+  fieldKey,
+  field,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  field: PluginConfigField;
+  value: unknown;
+  onChange: (key: string, val: unknown) => void;
+}) {
+  const markers = useMarkerStore((s) => Object.values(s.markers));
+  const inputBase: React.CSSProperties = {
+    width: "100%",
+    backgroundColor: "#0D0D0D",
+    border: "1px solid #2D2D2D",
+    borderRadius: "5px",
+    color: "#EFEFEF",
+    fontSize: "11px",
+    padding: "5px 8px",
+    outline: "none",
+    boxSizing: "border-box",
+    cursor: "pointer",
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+      <span style={{ fontSize: "10px", color: "#666666" }}>{field.label}</span>
+      <select
+        value={String(value ?? "")}
+        onChange={(e) => onChange(fieldKey, e.target.value)}
+        style={inputBase}
+      >
+        <option value="">— select a marker —</option>
+        {markers.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+      {field.description && (
+        <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
+          {field.description}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Config field renderer ──────────────────────────────────────────────────────
 
 function ConfigField({
@@ -222,6 +273,17 @@ function ConfigField({
   if (field.type === "device_select") {
     return (
       <DeviceSelectField
+        fieldKey={fieldKey}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "marker_select") {
+    return (
+      <MarkerSelectField
         fieldKey={fieldKey}
         field={field}
         value={value}

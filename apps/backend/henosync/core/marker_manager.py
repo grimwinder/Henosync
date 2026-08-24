@@ -1,6 +1,7 @@
 import logging
 import uuid
 from enum import Enum
+from typing import Optional
 
 import aiosqlite
 from pydantic import BaseModel, Field
@@ -78,6 +79,9 @@ class MarkerManager:
             await db.commit()
         logger.info(f"Marker deleted: {name}")
         return True
+
+    def get_marker(self, marker_id: str) -> Optional["MapMarker"]:
+        return self._markers.get(marker_id)
 
     def get_all_markers(self) -> list[MapMarker]:
         return list(self._markers.values())
