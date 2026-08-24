@@ -183,14 +183,14 @@ class JackalPlugin(NodePlugin):
             failed_event = asyncio.Event()
 
             ros.on_ready(lambda: connected_event.set())
-            ros.on("close", lambda: self._on_close(node.id))
+            ros.on("close", lambda *_: self._on_close(node.id))
             ros.on("error", lambda e: (
                 logger.error("Jackal [%s]: rosbridge error: %s", node.name, e),
                 failed_event.set(),
             ))
 
             reactor_ready = ensure_reactor()
-            await asyncio.get_event_loop().run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None, lambda: reactor_ready.wait(5.0)
             )
             if not reactor_ready.is_set():
@@ -202,8 +202,8 @@ class JackalPlugin(NodePlugin):
 
             done, _ = await asyncio.wait(
                 [
-                    asyncio.ensure_future(connected_event.wait()),
-                    asyncio.ensure_future(failed_event.wait()),
+                    asyncio.create_task(connected_event.wait()),
+                    asyncio.create_task(failed_event.wait()),
                 ],
                 timeout=10.0,
                 return_when=asyncio.FIRST_COMPLETED,
@@ -293,6 +293,10 @@ class JackalPlugin(NodePlugin):
                 lidar_topic = roslibpy.Topic(ros, lidar_topic_name, "sensor_msgs/LaserScan")
                 lidar_topic.subscribe(lambda msg: self._on_lidar(node.id, msg))
                 state._subscriptions.append(lidar_topic)
+
+            # Anchor liveness clock to connect time so a wrong namespace
+            # (topics never publish) triggers DEGRADED within MESSAGE_TIMEOUT seconds.
+            state.last_message_time = time.monotonic()
 
             logger.info(
                 "Jackal [%s]: connected to %s:%d (%s mode, ns='%s')",
