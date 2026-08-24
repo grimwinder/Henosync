@@ -58,4 +58,14 @@ async def init_db() -> None:
             )
         """)
         await db.commit()
+        # Safe migrations — ADD COLUMN silently fails if already present
+        for tbl, col, typedef in [
+            ("zones", "map_mode", "TEXT NOT NULL DEFAULT 'gps'"),
+            ("map_markers", "map_mode", "TEXT NOT NULL DEFAULT 'gps'"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typedef}")
+                await db.commit()
+            except Exception:
+                pass  # column already exists
         logger.info(f"Database initialized at {DB_PATH}")

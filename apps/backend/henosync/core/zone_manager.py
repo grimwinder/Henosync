@@ -46,6 +46,7 @@ class Zone(BaseModel):
     created_by: str = "operator"  # "operator" or plugin_id
     active: bool = True
     color: str = "#F05252"        # Display color on map
+    map_mode: str = "gps"         # "gps" or "vicon"
 
 
 class ZoneCheckResult(BaseModel):
@@ -101,6 +102,7 @@ class ZoneManager:
                 created_by=row["created_by"],
                 active=bool(row["active"]),
                 color=row["color"],
+                map_mode=row["map_mode"] if "map_mode" in row.keys() else "gps",
             )
             self._zones[zone.id] = zone
         logger.info(f"Zone manager loaded {len(self._zones)} zones")
@@ -115,7 +117,8 @@ class ZoneManager:
         center: Optional[GeoPoint] = None,
         radius_m: Optional[float] = None,
         created_by: str = "operator",
-        color: str = "#4A9EFF"
+        color: str = "#4A9EFF",
+        map_mode: str = "gps",
     ) -> Zone:
         """Create a new zone and persist to database."""
         points = points or []
@@ -128,21 +131,22 @@ class ZoneManager:
             center=center,
             radius_m=radius_m,
             created_by=created_by,
-            color=color
+            color=color,
+            map_mode=map_mode,
         )
         self._zones[zone.id] = zone
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute("""
                 INSERT INTO zones
                 (id, name, zone_type, shape, points, center_lat, center_lon,
-                 radius_m, created_by, active, color)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 radius_m, created_by, active, color, map_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 zone.id, zone.name, zone.zone_type.value, zone.shape.value,
                 json.dumps([p.model_dump() for p in zone.points]),
                 center.lat if center else None,
                 center.lon if center else None,
-                radius_m, created_by, 1, color
+                radius_m, created_by, 1, color, map_mode,
             ))
             await db.commit()
         logger.info(f"Zone created: {name} ({zone_type}) by {created_by}")
@@ -164,9 +168,12 @@ class ZoneManager:
         """Get a zone by ID."""
         return self._zones.get(zone_id)
 
-    def get_all_zones(self) -> list[Zone]:
-        """Get all zones."""
-        return [z for z in self._zones.values() if z.active]
+    def get_all_zones(self, map_mode: Optional[str] = None) -> list[Zone]:
+        """Get all active zones, optionally filtered by map_mode."""
+        return [
+            z for z in self._zones.values()
+            if z.active and (map_mode is None or z.map_mode == map_mode)
+        ]
 
     def get_zones_by_type(self, zone_type: ZoneType) -> list[Zone]:
         """Get all active zones of a specific type."""

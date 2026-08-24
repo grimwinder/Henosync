@@ -296,7 +296,12 @@ class VICONManager:
         seq = self._sequences.get(node.id, 0)
         self._sequences[node.id] = seq + 1
 
-        frame = TelemetryFrame(node_id=node.id, sequence_number=seq, position=position)
+        frame = TelemetryFrame(
+            node_id=node.id,
+            sequence_number=seq,
+            position=position,
+            custom={"vicon_x": x_m, "vicon_y": y_m},
+        )
         await telemetry_bus.publish_telemetry(frame)
 
     # ── No-fix warning ──────────────────────────────────────────────────────────
