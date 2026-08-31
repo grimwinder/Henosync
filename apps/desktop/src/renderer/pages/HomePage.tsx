@@ -9,8 +9,10 @@ import {
   Video,
   VideoOff,
   Camera,
+  Settings,
 } from "lucide-react";
 import { useNodeStore } from "../stores/nodeStore";
+import { useUIStore } from "../stores/uiStore";
 import DevicePanel from "../components/fleet/DevicePanel";
 import DeviceDetailPanel from "../components/fleet/DeviceDetailPanel";
 import MissionMap, {
@@ -20,10 +22,225 @@ import MissionMap, {
 import MapStylePicker from "../components/map/MapStylePicker";
 import NodeMarkers from "../components/map/NodeMarkers";
 import HubMarker from "../components/map/HubMarker";
+import VICONMap, { type VICONSpace } from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useMissionEngineStatus } from "../hooks/useMissions";
 import { getStreamUrl } from "../lib/api";
 import type { Node } from "../types";
+
+// ── VICON setup modal ──────────────────────────────────────────────────────────
+
+function VICONSetupModal({
+  initial,
+  onApply,
+  onCancel,
+}: {
+  initial: VICONSpace | null;
+  onApply: (space: VICONSpace) => void;
+  onCancel: () => void;
+}) {
+  const [shape, setShape] = useState<"rectangle" | "circle">(
+    initial?.shape ?? "rectangle",
+  );
+  const [widthStr, setWidthStr] = useState(String(initial?.width_m ?? ""));
+  const [heightStr, setHeightStr] = useState(String(initial?.height_m ?? ""));
+
+  const width = parseFloat(widthStr);
+  const height = parseFloat(heightStr);
+  const valid =
+    shape === "circle"
+      ? !isNaN(width) && width > 0
+      : !isNaN(width) && width > 0 && !isNaN(height) && height > 0;
+
+  function submit() {
+    if (!valid) return;
+    onApply({
+      shape,
+      width_m: width,
+      height_m: shape === "circle" ? width : height,
+    });
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "7px 10px",
+    backgroundColor: "#0D0F12",
+    border: "1px solid #2A2F38",
+    borderRadius: "6px",
+    color: "#E8EAED",
+    fontSize: "13px",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: "10px",
+    fontWeight: 700,
+    letterSpacing: "0.8px",
+    color: "#8B95A3",
+    textTransform: "uppercase",
+    display: "block",
+    marginBottom: "5px",
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(0,0,0,0.7)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 200,
+      }}
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
+    >
+      <div
+        style={{
+          width: "360px",
+          backgroundColor: "#141619",
+          border: "1px solid #2A2F38",
+          borderRadius: "8px",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "0 16px",
+            height: "40px",
+            backgroundColor: "#0D0F12",
+            borderBottom: "1px solid #2A2F38",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontSize: "13px", fontWeight: 600, color: "#E8EAED" }}>
+            VICON Space Setup
+          </span>
+        </div>
+
+        {/* Body */}
+        <div
+          style={{
+            padding: "16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "14px",
+          }}
+        >
+          {/* Shape */}
+          <div>
+            <span style={labelStyle}>Shape</span>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {(["rectangle", "circle"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setShape(s)}
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: "6px",
+                    border:
+                      shape === s ? "1px solid #4A9EFF" : "1px solid #2A2F38",
+                    backgroundColor: shape === s ? "#4A9EFF18" : "#0D0F12",
+                    color: shape === s ? "#4A9EFF" : "#8B95A3",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Dimensions */}
+          {shape === "rectangle" ? (
+            <div style={{ display: "flex", gap: "10px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Width (m)</label>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  placeholder="e.g. 6"
+                  value={widthStr}
+                  onChange={(e) => setWidthStr(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Depth (m)</label>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  placeholder="e.g. 8"
+                  value={heightStr}
+                  onChange={(e) => setHeightStr(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label style={labelStyle}>Diameter (m)</label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.1}
+                placeholder="e.g. 5"
+                value={widthStr}
+                onChange={(e) => setWidthStr(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+          )}
+
+          {/* Actions */}
+          <div
+            style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
+          >
+            <button
+              onClick={onCancel}
+              style={{
+                padding: "7px 16px",
+                borderRadius: "6px",
+                border: "1px solid #2A2F38",
+                backgroundColor: "transparent",
+                color: "#8B95A3",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={!valid}
+              style={{
+                padding: "7px 20px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: valid ? "#4A9EFF" : "#2A2F38",
+                color: valid ? "#fff" : "#555",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: valid ? "pointer" : "not-allowed",
+              }}
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Mission status panel ───────────────────────────────────────────────────────
 
@@ -552,6 +769,27 @@ export default function HomePage() {
 
   const [showCameraPanel, setShowCameraPanel] = useState(false);
 
+  // ── Map mode (shared via uiStore) ────────────────────────────
+  const mapMode = useUIStore((s) => s.mapMode);
+  const viconSpace = useUIStore((s) => s.viconSpace);
+  const setMapMode = useUIStore((s) => s.setMapMode);
+  const setViconSpace = useUIStore((s) => s.setViconSpace);
+  const [showViconSetup, setShowViconSetup] = useState(false);
+
+  function switchToVICON() {
+    setMapMode("vicon");
+    if (!viconSpace) setShowViconSetup(true);
+  }
+
+  function switchToGPS() {
+    setMapMode("gps");
+  }
+
+  function applyViconSpace(space: VICONSpace) {
+    setViconSpace(space);
+    setShowViconSetup(false);
+  }
+
   function handleMapReady(m: maplibregl.Map) {
     mapRef.current = m;
     setMap(m);
@@ -587,7 +825,7 @@ export default function HomePage() {
         position: "relative",
       }}
     >
-      {/* Map fills the entire background */}
+      {/* GPS map — always mounted, never unmounted (keeps maplibre lifecycle stable) */}
       <div style={{ position: "absolute", inset: 0 }}>
         <MissionMap
           key={styleKey}
@@ -601,17 +839,59 @@ export default function HomePage() {
         {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 
-      {/* Map style picker — top-center, with hub button */}
-      <MapStylePicker
-        mapBase={mapBase}
-        mapTheme={mapTheme}
-        onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
-        onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
-        position="top-center"
-        onCenterHub={centerOnHub}
-      />
+      {/* VICON overlay — sits above GPS map; solid background blocks GPS tiles/zones */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 2,
+          display: mapMode === "vicon" ? "block" : "none",
+          backgroundColor: "#0D0D0D",
+        }}
+      >
+        {viconSpace ? (
+          <VICONMap space={viconSpace} />
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <button
+              onClick={() => setShowViconSetup(true)}
+              style={{
+                padding: "10px 20px",
+                borderRadius: "6px",
+                border: "1px solid #2A2F38",
+                backgroundColor: "#141619",
+                color: "#8B95A3",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Configure VICON Space
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* Top-right toolbar — camera button, shifts left when panel is open */}
+      {/* Map style picker — GPS mode only */}
+      {mapMode === "gps" && (
+        <MapStylePicker
+          mapBase={mapBase}
+          mapTheme={mapTheme}
+          onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
+          onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
+          position="top-center"
+          onCenterHub={centerOnHub}
+        />
+      )}
+
+      {/* Top-right toolbar */}
       <div
         style={{
           position: "absolute",
@@ -620,8 +900,52 @@ export default function HomePage() {
           zIndex: 20,
           display: "flex",
           gap: "6px",
+          alignItems: "center",
         }}
       >
+        {/* GPS / VICON toggle */}
+        <div
+          style={{
+            display: "flex",
+            borderRadius: "6px",
+            border: "1px solid #2A2F38",
+            overflow: "hidden",
+            backgroundColor: "#141414",
+          }}
+        >
+          {(["gps", "vicon"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={mode === "gps" ? switchToGPS : switchToVICON}
+              style={{
+                padding: "0 12px",
+                height: "32px",
+                border: "none",
+                borderRight: mode === "gps" ? "1px solid #2A2F38" : "none",
+                backgroundColor: mapMode === mode ? "#4A9EFF18" : "transparent",
+                color: mapMode === mode ? "#4A9EFF" : "#8B95A3",
+                fontSize: "11px",
+                fontWeight: 600,
+                letterSpacing: "0.5px",
+                cursor: "pointer",
+                transition: "background-color 150ms, color 150ms",
+              }}
+            >
+              {mode.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* VICON space settings (VICON mode only) */}
+        {mapMode === "vicon" && (
+          <ToolbarButton
+            title="Configure VICON space"
+            onClick={() => setShowViconSetup(true)}
+          >
+            <Settings size={15} strokeWidth={2} />
+          </ToolbarButton>
+        )}
+
         <ToolbarButton
           title="Camera feeds"
           onClick={() => setShowCameraPanel((v) => !v)}
@@ -681,6 +1005,15 @@ export default function HomePage() {
         >
           <CameraPanel nodes={nodesArr} />
         </div>
+      )}
+
+      {/* VICON space setup modal */}
+      {showViconSetup && (
+        <VICONSetupModal
+          initial={viconSpace}
+          onApply={applyViconSpace}
+          onCancel={() => setShowViconSetup(false)}
+        />
       )}
     </div>
   );

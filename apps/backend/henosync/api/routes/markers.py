@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ...core.marker_manager import MarkerType, marker_manager
@@ -12,11 +12,12 @@ class MarkerCreateRequest(BaseModel):
     lat: float
     lon: float
     color: str = "#4A9EFF"
+    map_mode: str = "gps"
 
 
 @router.get("")
-async def list_markers():
-    markers = marker_manager.get_all_markers()
+async def list_markers(mode: str = Query(default="gps")):
+    markers = marker_manager.get_all_markers(map_mode=mode)
     return {"markers": [m.model_dump() for m in markers]}
 
 
@@ -32,6 +33,7 @@ async def create_marker(body: MarkerCreateRequest):
         lat=body.lat,
         lon=body.lon,
         color=body.color,
+        map_mode=body.map_mode,
     )
     return marker.model_dump()
 

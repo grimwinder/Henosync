@@ -26,6 +26,7 @@ class MapMarker(BaseModel):
     lat: float
     lon: float
     color: str = "#4A9EFF"
+    map_mode: str = "gps"
 
 
 class MarkerManager:
@@ -46,6 +47,7 @@ class MarkerManager:
                 lat=row["lat"],
                 lon=row["lon"],
                 color=row["color"],
+                map_mode=row["map_mode"] if "map_mode" in row.keys() else "gps",
             )
             self._markers[marker.id] = marker
         logger.info(f"Marker manager loaded {len(self._markers)} markers")
@@ -57,13 +59,19 @@ class MarkerManager:
         lat: float,
         lon: float,
         color: str = "#4A9EFF",
+        map_mode: str = "gps",
     ) -> MapMarker:
-        marker = MapMarker(name=name, marker_type=marker_type, lat=lat, lon=lon, color=color)
+        marker = MapMarker(
+            name=name, marker_type=marker_type, lat=lat, lon=lon,
+            color=color, map_mode=map_mode,
+        )
         self._markers[marker.id] = marker
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
-                "INSERT INTO map_markers (id, name, marker_type, lat, lon, color) VALUES (?, ?, ?, ?, ?, ?)",
-                (marker.id, marker.name, marker.marker_type.value, marker.lat, marker.lon, marker.color),
+                "INSERT INTO map_markers (id, name, marker_type, lat, lon, color, map_mode) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (marker.id, marker.name, marker.marker_type.value, marker.lat, marker.lon,
+                 marker.color, marker.map_mode),
             )
             await db.commit()
         logger.info(f"Marker created: {name} ({marker_type})")
@@ -83,8 +91,11 @@ class MarkerManager:
     def get_marker(self, marker_id: str) -> Optional["MapMarker"]:
         return self._markers.get(marker_id)
 
-    def get_all_markers(self) -> list[MapMarker]:
-        return list(self._markers.values())
+    def get_all_markers(self, map_mode: str | None = None) -> list[MapMarker]:
+        return [
+            m for m in self._markers.values()
+            if map_mode is None or m.map_mode == map_mode
+        ]
 
 
 marker_manager = MarkerManager()
