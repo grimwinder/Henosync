@@ -20,6 +20,7 @@ interface VICONMapProps {
 
 const VB = 600;
 const PAD = 52;
+const PAN_THRESHOLD_PX = 3;
 
 const DOT_COLOR: Record<string, string> = {
   online: "#3DD68C",
@@ -68,6 +69,17 @@ export default function VICONMap({
   );
   const [mouseVicon, setMouseVicon] = useState<[number, number] | null>(null);
 
+  // Pan state
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanActive, setIsPanActive] = useState(false);
+  const panStartRef = useRef<{
+    clientX: number;
+    clientY: number;
+    panX: number;
+    panY: number;
+  } | null>(null);
+  const didPanRef = useRef(false);
+
   const cx = VB / 2;
   const cy = VB / 2;
 
@@ -92,7 +104,16 @@ export default function VICONMap({
     [cx, cy, scale],
   );
 
-  // Convert a DOM mouse event to VICON x_m, y_m
+  // SVG units per screen pixel (accounting for preserveAspectRatio letterboxing)
+  function getSvgPerPx(): number {
+    const svg = svgRef.current;
+    if (!svg) return 1;
+    const rect = svg.getBoundingClientRect();
+    const dim = Math.min(rect.width, rect.height);
+    return VB / Math.max(dim, 1);
+  }
+
+  // Convert a DOM mouse event to VICON x_m, y_m (accounts for current pan)
   function eventToVicon(
     e: React.MouseEvent<SVGSVGElement>,
   ): [number, number] | null {
@@ -102,24 +123,63 @@ export default function VICONMap({
     const dim = Math.min(rect.width, rect.height);
     const offX = (rect.width - dim) / 2;
     const offY = (rect.height - dim) / 2;
-    const svgX = ((e.clientX - rect.left - offX) / dim) * VB;
-    const svgY = ((e.clientY - rect.top - offY) / dim) * VB;
+    const svgX = -panOffset.x + ((e.clientX - rect.left - offX) / dim) * VB;
+    const svgY = -panOffset.y + ((e.clientY - rect.top - offY) / dim) * VB;
     return [(svgX - cx) / scale, (cy - svgY) / scale];
   }
 
   const isDrawing =
     drawMode === "polygon" || drawMode === "circle" || drawMode === "marker";
 
+  function handleMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    if (isDrawing) return;
+    panStartRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      panX: panOffset.x,
+      panY: panOffset.y,
+    };
+    didPanRef.current = false;
+  }
+
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const start = panStartRef.current;
+    if (start) {
+      const dx = e.clientX - start.clientX;
+      const dy = e.clientY - start.clientY;
+      if (Math.abs(dx) > PAN_THRESHOLD_PX || Math.abs(dy) > PAN_THRESHOLD_PX) {
+        if (!didPanRef.current) {
+          didPanRef.current = true;
+          setIsPanActive(true);
+        }
+        const svgPerPx = getSvgPerPx();
+        setPanOffset({
+          x: start.panX + dx * svgPerPx,
+          y: start.panY + dy * svgPerPx,
+        });
+      }
+      return; // don't update mouseVicon while pan is in progress
+    }
     if (!isDrawing) return;
     setMouseVicon(eventToVicon(e));
   }
 
+  function handleMouseUp() {
+    panStartRef.current = null;
+    if (isPanActive) setIsPanActive(false);
+  }
+
   function handleMouseLeave() {
+    panStartRef.current = null;
+    if (isPanActive) setIsPanActive(false);
     setMouseVicon(null);
   }
 
   function handleClick(e: React.MouseEvent<SVGSVGElement>) {
+    if (didPanRef.current) {
+      didPanRef.current = false;
+      return;
+    }
     const pt = eventToVicon(e);
     if (!pt) return;
 
@@ -146,6 +206,7 @@ export default function VICONMap({
   }
 
   function handleDoubleClick(e: React.MouseEvent<SVGSVGElement>) {
+    if (didPanRef.current) return;
     e.preventDefault();
     if (drawMode !== "polygon") return;
     if (draftPoly.length < 3) return;
@@ -180,7 +241,8 @@ export default function VICONMap({
     draftCircleR = Math.sqrt(dx * dx + dy * dy) * scale;
   }
 
-  const cursor = isDrawing ? "crosshair" : "default";
+  const cursor = isDrawing ? "crosshair" : isPanActive ? "grabbing" : "grab";
+  const viewBox = `${-panOffset.x} ${-panOffset.y} ${VB} ${VB}`;
 
   return (
     <div
@@ -193,15 +255,23 @@ export default function VICONMap({
     >
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${VB} ${VB}`}
+        viewBox={viewBox}
         style={{ width: "100%", height: "100%", display: "block", cursor }}
         preserveAspectRatio="xMidYMid meet"
+        onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
       >
-        <rect width={VB} height={VB} fill="#0D0D0D" />
+        <rect
+          x={-panOffset.x}
+          y={-panOffset.y}
+          width={VB}
+          height={VB}
+          fill="#0D0D0D"
+        />
 
         {/* Space fill */}
         {isCircle ? (

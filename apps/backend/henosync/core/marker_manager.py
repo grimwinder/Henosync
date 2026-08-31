@@ -88,9 +88,6 @@ class MarkerManager:
         logger.info(f"Marker deleted: {name}")
         return True
 
-    def get_marker(self, marker_id: str) -> Optional["MapMarker"]:
-        return self._markers.get(marker_id)
-
     def get_all_markers(self, map_mode: str | None = None) -> list[MapMarker]:
         return [
             m for m in self._markers.values()
