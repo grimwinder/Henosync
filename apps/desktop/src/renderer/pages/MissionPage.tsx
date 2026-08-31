@@ -27,10 +27,12 @@ import MissionMap, {
 import MapStylePicker from "../components/map/MapStylePicker";
 import HubMarker from "../components/map/HubMarker";
 import NodeMarkers from "../components/map/NodeMarkers";
+import VICONMap from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useControlPlugins } from "../hooks/usePlugins";
 import { useMissionPlans, type MissionPlan } from "../hooks/useMissionPlans";
 import { startOperation, stopOperation, getOperations } from "../lib/api";
+import { useUIStore } from "../stores/uiStore";
 import type { ControlPluginInfo, PluginConfigField } from "../types";
 
 // ── Layout constants ───────────────────────────────────────────────────────────
@@ -1846,6 +1848,11 @@ function ControlsPanel({
 export default function MissionPage() {
   const hubLocation = useHubLocation();
   const { data: controlPlugins = [] } = useControlPlugins();
+  const { mapMode, setMapMode, viconSpace } = useUIStore((s) => ({
+    mapMode: s.mapMode,
+    setMapMode: s.setMapMode,
+    viconSpace: s.viconSpace,
+  }));
 
   // Map state
   const [map, setMap] = useState<maplibregl.Map | null>(null);
@@ -2031,7 +2038,7 @@ export default function MissionPage() {
         position: "relative",
       }}
     >
-      {/* Map — full background */}
+      {/* Map — full background (always mounted to avoid WebGL teardown) */}
       <div style={{ position: "absolute", inset: 0 }}>
         <MissionMap
           key={styleKey}
@@ -2045,22 +2052,81 @@ export default function MissionPage() {
         {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 
-      {/* Map style picker — top-center, with hub button */}
-      <MapStylePicker
-        mapBase={mapBase}
-        mapTheme={mapTheme}
-        onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
-        onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
-        position="top-center"
-        onCenterHub={() => {
-          if (mapRef.current && hubLocation)
-            mapRef.current.flyTo({
-              center: hubLocation,
-              zoom: 15,
-              duration: 1000,
-            });
+      {/* VICON overlay — covers GPS map when in VICON mode */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 2,
+          backgroundColor: "#0D0D0D",
+          display: mapMode === "vicon" ? "flex" : "none",
+          alignItems: "center",
+          justifyContent: "center",
         }}
-      />
+      >
+        {viconSpace ? (
+          <VICONMap space={viconSpace} />
+        ) : (
+          <div style={{ color: "#8B95A3", fontSize: 13 }}>
+            VICON space not configured — set it up on the Home page
+          </div>
+        )}
+      </div>
+
+      {/* GPS / VICON mode toggle — top-left */}
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 12,
+          zIndex: 20,
+          display: "flex",
+          background: "#1C1F24",
+          border: "1px solid #2A2F38",
+          borderRadius: 6,
+          overflow: "hidden",
+        }}
+      >
+        {(["gps", "vicon"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMapMode(m)}
+            style={{
+              padding: "5px 12px",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.5px",
+              cursor: "pointer",
+              border: "none",
+              background: mapMode === m ? "#4A9EFF" : "transparent",
+              color: mapMode === m ? "#fff" : "#8B95A3",
+              textTransform: "uppercase",
+              transition: "background 150ms ease, color 150ms ease",
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {/* Map style picker — top-center, with hub button (GPS mode only) */}
+      {mapMode === "gps" && (
+        <MapStylePicker
+          mapBase={mapBase}
+          mapTheme={mapTheme}
+          onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
+          onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
+          position="top-center"
+          onCenterHub={() => {
+            if (mapRef.current && hubLocation)
+              mapRef.current.flyTo({
+                center: hubLocation,
+                zoom: 15,
+                duration: 1000,
+              });
+          }}
+        />
+      )}
 
       {/* Controls — floating top-left */}
       <ControlsPanel
