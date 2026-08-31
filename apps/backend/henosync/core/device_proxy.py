@@ -119,24 +119,36 @@ class DeviceProxy:
     ) -> CommandResult:
         """
         Move device to a WGS84 GPS position.
-        GPS-less devices using odometry have their target converted automatically.
+
+        Always sends the target as lat/lon/alt. For local-frame devices
+        (coordinate_frame="local") with a configured local_origin, ALSO sends
+        the equivalent local x/y/z metres, matching cmd_move_to()'s contract
+        in interfaces.py (a device can use whichever representation it needs
+        — turtlebot3 converts x/y back to lat/lon itself when present).
+
+        Previously this sent x/y/z INSTEAD OF lat/lon for local-frame
+        devices — but send_command()'s MOVE_TO dispatch only read "lat"/
+        "lon" from params (at the time), so local-frame devices silently got
+        cmd_move_to(lat=0.0, lon=0.0) (bug, fixed 2026-08-23). The dispatcher
+        now forwards x/y/z too, so both representations are sent — lat/lon
+        is never lost, and a device that specifically wants local metres
+        still gets them.
         """
         plugin = self._get_plugin()
         if not plugin:
             return CommandResult(success=False, message="No plugin instance available")
 
+        params: dict[str, float] = {"lat": lat, "lon": lon, "alt": alt}
         if (
             self._node.specs
             and self._node.specs.coordinate_frame == "local"
             and self._node.local_origin
         ):
             x, y = self._gps_to_local(lat, lon)
-            params = {"x": x, "y": y, "z": alt}
+            params["x"], params["y"], params["z"] = x, y, alt
             logger.debug(
-                f"Converted GPS ({lat}, {lon}) to local ({x:.3f}, {y:.3f}) for {self.name}"
+                f"Also converted GPS ({lat}, {lon}) to local ({x:.3f}, {y:.3f}) for {self.name}"
             )
-        else:
-            params = {"lat": lat, "lon": lon, "alt": alt}
 
         envelope = CommandEnvelope(command_type=CommandType.MOVE_TO, params=params)
         return await plugin.send_command(self._node, envelope)
@@ -248,8 +260,9 @@ class DeviceProxy:
 
     def _gps_to_local(self, lat: float, lon: float) -> tuple[float, float]:
         """
-        Convert GPS coordinates to local frame metres relative to the device's origin.
-        Equirectangular approximation — accurate for distances under 1km.
+        Convert GPS coordinates to local frame metres relative to the device's
+        origin. Equirectangular approximation — accurate for distances under
+        1km. Used by move_to() to also populate x/y/z for local-frame devices.
         """
         origin = self._node.local_origin
         if not origin:

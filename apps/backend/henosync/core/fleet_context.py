@@ -6,6 +6,7 @@ from .device_proxy import DeviceProxy
 
 if TYPE_CHECKING:
     from .event_bus import EventBus
+    from .marker_manager import MarkerManager
     from .zone_manager import ZoneManager
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class FleetContext:
         plugin_id: str,
         initial_devices: list[DeviceProxy],
         zone_manager: "ZoneManager",
+        marker_manager: "MarkerManager",
         event_bus: "EventBus"
     ):
         self._plugin_id = plugin_id
@@ -37,6 +39,7 @@ class FleetContext:
             d.id: d for d in initial_devices
         }
         self._zone_manager = zone_manager
+        self._marker_manager = marker_manager
         self._event_bus = event_bus
 
     # ── Device Access ──────────────────────────────────────────
@@ -169,6 +172,11 @@ class FleetContext:
     def zone_manager(self) -> "ZoneManager":
         """Access the zone manager for creating/querying zones."""
         return self._zone_manager
+
+    @property
+    def marker_manager(self) -> "MarkerManager":
+        """Access the marker manager for querying map markers."""
+        return self._marker_manager
 
     # ── Inter-Plugin Communication ─────────────────────────────
 

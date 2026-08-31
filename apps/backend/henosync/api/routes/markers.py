@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ...core.marker_manager import MarkerType, marker_manager
+from ...core.vicon_manager import local_to_gps, vicon_manager
 
 router = APIRouter(prefix="/api/markers", tags=["markers"])
 
@@ -27,11 +28,27 @@ async def create_marker(body: MarkerCreateRequest):
         marker_type = MarkerType(body.marker_type)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid marker_type: {body.marker_type}")
+
+    lat, lon = body.lat, body.lon
+    if body.map_mode == "vicon":
+        origin = vicon_manager.origin
+        if origin is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Set a VICON arena origin before placing VICON markers — "
+                       "open the VICON panel in the title bar.",
+            )
+        # VICONMap.tsx's marker placement passes raw arena metres in lat/lon
+        # (convention: lon=x_m, lat=y_m) — convert to real WGS84 once, here,
+        # so downstream consumers can keep assuming real coordinates.
+        home_lat, home_lon = origin
+        lat, lon = local_to_gps(lon, lat, home_lat, home_lon)
+
     marker = await marker_manager.create_marker(
         name=body.name,
         marker_type=marker_type,
-        lat=body.lat,
-        lon=body.lon,
+        lat=lat,
+        lon=lon,
         color=body.color,
         map_mode=body.map_mode,
     )

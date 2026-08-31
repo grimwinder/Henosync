@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { Plug, Cpu, Zap, Gamepad2 } from "lucide-react";
+import { Plug, Cpu, Zap, Gamepad2, UserPlus } from "lucide-react";
 import { useDevicePlugins, useControlPlugins } from "../hooks/usePlugins";
 import {
   useOperations,
   useStartOperation,
   useStopOperation,
+  useRecruitableDevices,
+  useRecruitDevice,
 } from "../hooks/useOperations";
 import { useArrowKeyDrive } from "../hooks/useArrowKeyDrive";
+import { ConfigField, initConfig } from "../components/common/ConfigField";
 import type { PluginManifest, ControlPluginInfo } from "../types";
 
 const CAPABILITY_LABEL: Record<string, string> = {
@@ -409,9 +412,26 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
   const { data: operations = [] } = useOperations();
   const startOperation = useStartOperation();
   const stopOperation = useStopOperation();
+  const [config, setConfig] = useState<Record<string, unknown>>(() =>
+    initConfig(plugin.ui.config_schema),
+  );
 
   const running = operations.find((op) => op.plugin_id === plugin.id);
   const isTeleop = plugin.id === "teleop";
+  const schemaEntries = Object.entries(plugin.ui.config_schema ?? {});
+
+  // Devices that could be manually added to this operation while it's
+  // running (e.g. a robot that just connected). No auto-join — the operator
+  // has to explicitly add it, same as confirming Start in the first place.
+  const { data: recruitable = [] } = useRecruitableDevices(
+    plugin.id,
+    !!running,
+  );
+  const recruitDevice = useRecruitDevice();
+
+  function handleConfigChange(key: string, value: unknown) {
+    setConfig((prev) => ({ ...prev, [key]: value }));
+  }
 
   return (
     <div
@@ -431,12 +451,33 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px 48px" }}>
         {/* Operation Control */}
         <Section title="Operation">
+          {!running && schemaEntries.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+                marginBottom: "14px",
+              }}
+            >
+              {schemaEntries.map(([key, field]) => (
+                <ConfigField
+                  key={key}
+                  fieldKey={key}
+                  field={field}
+                  value={config[key]}
+                  onChange={handleConfigChange}
+                />
+              ))}
+            </div>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <button
               onClick={() =>
                 running
                   ? stopOperation.mutate(plugin.id)
-                  : startOperation.mutate({ plugin_id: plugin.id })
+                  : startOperation.mutate({ plugin_id: plugin.id, config })
               }
               style={{
                 padding: "7px 14px",
@@ -455,6 +496,66 @@ function ControlPluginPanel({ plugin }: { plugin: ControlPluginInfo }) {
               {running ? running.status.status_text : "Not running"}
             </span>
           </div>
+
+          {running && recruitable.length > 0 && (
+            <div
+              style={{
+                marginTop: "14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+              }}
+            >
+              <span
+                style={{ fontSize: "10px", color: "#666666", fontWeight: 500 }}
+              >
+                Available devices — not yet in this operation
+              </span>
+              {recruitable.map((device) => (
+                <div
+                  key={device.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #2D2D2D",
+                    backgroundColor: "#141414",
+                  }}
+                >
+                  <span style={{ fontSize: "11px", color: "#C8CAD0" }}>
+                    {device.name}
+                  </span>
+                  <button
+                    onClick={() =>
+                      recruitDevice.mutate({
+                        plugin_id: plugin.id,
+                        device_id: device.id,
+                      })
+                    }
+                    disabled={recruitDevice.isPending}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      padding: "4px 8px",
+                      borderRadius: "5px",
+                      border: "1px solid #4A9EFF55",
+                      backgroundColor: "#4A9EFF18",
+                      color: "#4A9EFF",
+                      fontSize: "10px",
+                      fontWeight: 600,
+                      cursor: recruitDevice.isPending ? "default" : "pointer",
+                    }}
+                  >
+                    <UserPlus size={11} />
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {isTeleop && (
             <div
@@ -701,7 +802,10 @@ export default function PluginsPage() {
         {selectedDevicePlugin ? (
           <DevicePluginPanel plugin={selectedDevicePlugin} />
         ) : selectedControlPlugin ? (
-          <ControlPluginPanel plugin={selectedControlPlugin} />
+          <ControlPluginPanel
+            key={selectedControlPlugin.id}
+            plugin={selectedControlPlugin}
+          />
         ) : (
           <div
             style={{

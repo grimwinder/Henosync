@@ -57,6 +57,13 @@ async def init_db() -> None:
                 port  INTEGER NOT NULL DEFAULT 801
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS vicon_origin (
+                id       TEXT PRIMARY KEY DEFAULT 'default',
+                home_lat REAL NOT NULL,
+                home_lon REAL NOT NULL
+            )
+        """)
         await db.commit()
         # Safe migrations — ADD COLUMN silently fails if already present
         for tbl, col, typedef in [

@@ -61,3 +61,25 @@ async def send_operator_input(plugin_id: str, request: OperatorInputRequest):
     if not success:
         raise HTTPException(status_code=400, detail=message)
     return {"success": True, "message": message}
+
+
+@router.get("/api/operations/{plugin_id}/recruitable")
+async def list_recruitable_devices(plugin_id: str):
+    """Devices that could be manually added to this running operation."""
+    devices = await operation_manager.get_recruitable_devices(plugin_id)
+    return {"devices": devices}
+
+
+class RecruitDeviceRequest(BaseModel):
+    device_id: str
+
+
+@router.post("/api/operations/{plugin_id}/recruit")
+async def recruit_device(plugin_id: str, request: RecruitDeviceRequest):
+    """Manually add an online device to a running operation."""
+    success, message = await operation_manager.recruit_device_into_operation(
+        plugin_id, request.device_id
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"success": True, "message": message}

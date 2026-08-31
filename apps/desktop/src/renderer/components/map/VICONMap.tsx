@@ -16,10 +16,29 @@ interface VICONMapProps {
   onFinishPolygon?: (points: [number, number][]) => void; // [x_m, y_m] pairs
   onFinishCircle?: (center: [number, number], radiusM: number) => void;
   onPlaceMarker?: (x_m: number, y_m: number) => void;
+  // Real-world anchor for the arena's (0, 0) point (set via the VICON panel
+  // in the title bar). Zones/markers are now stored as real WGS84 (backend
+  // converts on create — see zones.py/markers.py), so rendering them here
+  // needs the inverse conversion back to local metres. Until an origin is
+  // set, existing zones/markers can't be placed correctly, so they're
+  // hidden rather than drawn at a wrong position.
+  homeLat?: number | null;
+  homeLon?: number | null;
 }
 
 const VB = 600;
 const PAD = 52;
+const EARTH_RADIUS_M = 6_371_000;
+
+/** Inverse of the backend's local_to_gps() (vicon_manager.py) — real WGS84 back to local arena metres. */
+function gpsToLocal(
+  lat: number, lon: number, homeLat: number, homeLon: number,
+): [number, number] {
+  const latRad = (homeLat * Math.PI) / 180;
+  const y_m = ((lat - homeLat) * Math.PI / 180) * EARTH_RADIUS_M;
+  const x_m = ((lon - homeLon) * Math.PI / 180) * EARTH_RADIUS_M * Math.cos(latRad);
+  return [x_m, y_m];
+}
 
 const DOT_COLOR: Record<string, string> = {
   online: "#3DD68C",
@@ -52,7 +71,15 @@ export default function VICONMap({
   onFinishPolygon,
   onFinishCircle,
   onPlaceMarker,
+  homeLat,
+  homeLon,
 }: VICONMapProps) {
+  const hasOrigin = homeLat != null && homeLon != null;
+  const toLocal = useCallback(
+    (lat: number, lon: number): [number, number] =>
+      hasOrigin ? gpsToLocal(lat, lon, homeLat, homeLon) : [0, 0],
+    [hasOrigin, homeLat, homeLon],
+  );
   const nodes = Object.values(useNodeStore((s) => s.nodes)).filter(
     (n) => n.config?.position_source === "vicon",
   );
@@ -241,11 +268,14 @@ export default function VICONMap({
         {/* Origin dot */}
         <circle cx={cx} cy={cy} r={3} fill="#3A3F48" />
 
-        {/* Existing zones */}
-        {zones.map((zone) => {
+        {/* Existing zones — points/center are real WGS84 (converted by the
+            backend at creation time), so convert back to local metres
+            before projecting to SVG. Hidden until an arena origin is set,
+            since there's no correct position to draw them at. */}
+        {hasOrigin && zones.map((zone) => {
           const color = zone.color || ZONE_COLORS[zone.zone_type] || "#4A9EFF";
           if (zone.shape === "circle" && zone.center && zone.radius_m != null) {
-            const [sx, sy] = toSvg(zone.center.lon, zone.center.lat); // lon=x_m, lat=y_m
+            const [sx, sy] = toSvg(...toLocal(zone.center.lat, zone.center.lon));
             const sr = zone.radius_m * scale;
             return (
               <g key={zone.id}>
@@ -262,7 +292,7 @@ export default function VICONMap({
             );
           }
           if (zone.shape === "polygon" && zone.points.length >= 3) {
-            const pts = zone.points.map((p) => toSvg(p.lon, p.lat)); // lon=x_m, lat=y_m
+            const pts = zone.points.map((p) => toSvg(...toLocal(p.lat, p.lon)));
             const polyStr = pts.map(([x, y]) => `${x},${y}`).join(" ");
             return (
               <g key={zone.id}>
@@ -279,9 +309,9 @@ export default function VICONMap({
           return null;
         })}
 
-        {/* Existing markers */}
-        {markers.map((marker) => {
-          const [sx, sy] = toSvg(marker.lon, marker.lat); // lon=x_m, lat=y_m
+        {/* Existing markers — same real-WGS84-back-to-local conversion as zones. */}
+        {hasOrigin && markers.map((marker) => {
+          const [sx, sy] = toSvg(...toLocal(marker.lat, marker.lon));
           const color = MARKER_COLORS[marker.marker_type] || "#4A9EFF";
           return (
             <g key={marker.id}>

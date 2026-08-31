@@ -25,6 +25,7 @@ import HubMarker from "../components/map/HubMarker";
 import VICONMap, { type VICONSpace } from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useMissionEngineStatus } from "../hooks/useMissions";
+import { useViconConnection } from "../hooks/useSystem";
 import { getStreamUrl } from "../lib/api";
 import type { Node } from "../types";
 
@@ -754,6 +755,7 @@ export default function HomePage() {
   const selectedNodeId = useNodeStore((s) => s.selectedNodeId);
   const nodes = useNodeStore((s) => s.nodes);
   const nodesArr = Object.values(nodes);
+  const { data: viconConn } = useViconConnection();
   const selectedNode = selectedNodeId ? nodes[selectedNodeId] : null;
   const hubLocation = useHubLocation();
 
@@ -850,7 +852,11 @@ export default function HomePage() {
         }}
       >
         {viconSpace ? (
-          <VICONMap space={viconSpace} />
+          <VICONMap
+            space={viconSpace}
+            homeLat={viconConn?.home_lat}
+            homeLon={viconConn?.home_lon}
+          />
         ) : (
           <div
             style={{

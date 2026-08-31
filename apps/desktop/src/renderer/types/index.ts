@@ -346,6 +346,12 @@ export interface RunningOperation {
   status: OperationStatus;
 }
 
+export interface RecruitableDevice {
+  id: string;
+  name: string;
+  category: DeviceCategory;
+}
+
 // ── Zone models ────────────────────────────────────────────────────────────────
 
 export interface GeoPoint {
@@ -420,4 +426,6 @@ export interface VICONStatus {
   host: string | null;
   port: number;
   connected: boolean;
+  home_lat: number | null;
+  home_lon: number | null;
 }

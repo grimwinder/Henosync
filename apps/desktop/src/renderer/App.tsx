@@ -5,7 +5,7 @@ import { queryClient } from "./lib/queryClient";
 import { wsManager } from "./lib/websocket";
 import { useHealth, useViconConnection } from "./hooks/useSystem";
 import { useSystemStore } from "./stores/systemStore";
-import { connectVicon, disconnectVicon, getViconObjects } from "./lib/api";
+import { connectVicon, disconnectVicon, getViconObjects, setViconOrigin } from "./lib/api";
 import NavMenu from "./components/nav/NavMenu";
 import HomePage from "./pages/HomePage";
 import ZonesPage from "./pages/ZonesPage";
@@ -38,6 +38,30 @@ function VICONPanel({
   const [port, setPort] = useState(conn?.port ?? 801);
   const [connecting, setConnecting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const [originLat, setOriginLat] = useState(conn?.home_lat?.toString() ?? "");
+  const [originLon, setOriginLon] = useState(conn?.home_lon?.toString() ?? "");
+  const [savingOrigin, setSavingOrigin] = useState(false);
+  const [originErr, setOriginErr] = useState<string | null>(null);
+
+  async function handleSaveOrigin() {
+    const lat = Number(originLat);
+    const lon = Number(originLon);
+    if (originLat.trim() === "" || originLon.trim() === "" || Number.isNaN(lat) || Number.isNaN(lon)) {
+      setOriginErr("Enter both latitude and longitude");
+      return;
+    }
+    setSavingOrigin(true);
+    setOriginErr(null);
+    try {
+      await setViconOrigin(lat, lon);
+      onChanged();
+    } catch (e) {
+      setOriginErr(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingOrigin(false);
+    }
+  }
 
   async function handleConnect() {
     const h = host.trim();
@@ -87,6 +111,97 @@ function VICONPanel({
         }}
       >
         VICON System
+      </div>
+
+      <div
+        style={{
+          marginBottom: "14px",
+          paddingBottom: "14px",
+          borderBottom: "1px solid #2D2D2D",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "10px",
+            fontWeight: 700,
+            letterSpacing: "1px",
+            color: "#666666",
+            textTransform: "uppercase",
+            marginBottom: "8px",
+          }}
+        >
+          Arena Origin
+        </div>
+        <div style={{ fontSize: "11px", color: "#8B95A3", marginBottom: "8px" }}>
+          Real-world lat/lon of the VICON arena's (0, 0) point — needed to draw
+          zones/markers in VICON mode.
+        </div>
+        <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+          <input
+            type="number"
+            placeholder="Latitude"
+            value={originLat}
+            onChange={(e) => {
+              setOriginLat(e.target.value);
+              setOriginErr(null);
+            }}
+            style={{
+              padding: "7px 10px",
+              backgroundColor: "#141414",
+              border: "1px solid #2D2D2D",
+              borderRadius: "6px",
+              fontSize: "12px",
+              color: "#EFEFEF",
+              outline: "none",
+              fontFamily: "Inter, sans-serif",
+              width: "50%",
+              boxSizing: "border-box",
+            }}
+          />
+          <input
+            type="number"
+            placeholder="Longitude"
+            value={originLon}
+            onChange={(e) => {
+              setOriginLon(e.target.value);
+              setOriginErr(null);
+            }}
+            style={{
+              padding: "7px 10px",
+              backgroundColor: "#141414",
+              border: "1px solid #2D2D2D",
+              borderRadius: "6px",
+              fontSize: "12px",
+              color: "#EFEFEF",
+              outline: "none",
+              fontFamily: "Inter, sans-serif",
+              width: "50%",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        {originErr && (
+          <div style={{ fontSize: "11px", color: "#F05252", marginBottom: "8px" }}>
+            {originErr}
+          </div>
+        )}
+        <button
+          onClick={handleSaveOrigin}
+          disabled={savingOrigin}
+          style={{
+            width: "100%",
+            padding: "7px 0",
+            borderRadius: "6px",
+            backgroundColor: savingOrigin ? "#2D2D2D" : "#4A9EFF",
+            border: "none",
+            color: savingOrigin ? "#999999" : "white",
+            fontSize: "12px",
+            fontWeight: 500,
+            cursor: savingOrigin ? "not-allowed" : "pointer",
+          }}
+        >
+          {savingOrigin ? "Saving…" : "Save Origin"}
+        </button>
       </div>
 
       {conn?.connected ? (

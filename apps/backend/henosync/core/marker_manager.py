@@ -1,6 +1,7 @@
 import logging
 import uuid
 from enum import Enum
+from typing import Optional
 
 import aiosqlite
 from pydantic import BaseModel, Field
@@ -92,6 +93,10 @@ class MarkerManager:
             m for m in self._markers.values()
             if map_mode is None or m.map_mode == map_mode
         ]
+
+    def get_marker(self, marker_id: str) -> Optional[MapMarker]:
+        """Get a marker by ID."""
+        return self._markers.get(marker_id)
 
 
 marker_manager = MarkerManager()

@@ -8,6 +8,7 @@ import type {
   PluginManifest,
   ControlPluginInfo,
   RunningOperation,
+  RecruitableDevice,
   Zone,
   ZoneCreate,
   MapMarker,
@@ -199,6 +200,20 @@ export const sendOperatorInput = (
     },
   );
 
+export const getRecruitableDevices = (plugin_id: string) =>
+  apiFetch<{ devices: RecruitableDevice[] }>(
+    `/api/operations/${plugin_id}/recruitable`,
+  ).then((r) => r.devices);
+
+export const recruitDevice = (plugin_id: string, device_id: string) =>
+  apiFetch<{ success: boolean; message: string }>(
+    `/api/operations/${plugin_id}/recruit`,
+    {
+      method: "POST",
+      body: JSON.stringify({ device_id }),
+    },
+  );
+
 // ── Zones ──────────────────────────────────────────────────────────────────────
 
 export const getZones = (mode: string = "gps") =>
@@ -242,6 +257,12 @@ export const disconnectVicon = () =>
 
 export const getViconObjects = () =>
   apiFetch<{ objects: string[] }>("/api/vicon/objects").then((r) => r.objects);
+
+export const setViconOrigin = (home_lat: number, home_lon: number) =>
+  apiFetch<{ success: boolean }>("/api/vicon/origin", {
+    method: "POST",
+    body: JSON.stringify({ home_lat, home_lon }),
+  });
 
 // ── Safety ─────────────────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ from ..plugin_system.control_interfaces import (
 from .device_proxy import DeviceProxy
 from .event_bus import event_bus
 from .fleet_context import FleetContext
+from .marker_manager import marker_manager
 from .telemetry_bus import telemetry_bus
 from .zone_manager import zone_manager
 
@@ -131,6 +132,7 @@ class OperationManager:
             plugin_id=plugin_id,
             initial_devices=matched_devices,
             zone_manager=zone_manager,
+            marker_manager=marker_manager,
             event_bus=event_bus
         )
 
@@ -392,6 +394,87 @@ class OperationManager:
     async def is_device_available(self, device_id: str) -> bool:
         """Check if a device is available for recruitment."""
         return device_id not in self._device_assignments
+
+    # ── Manual Mid-Operation Recruitment ────────────────────────
+
+    async def get_recruitable_devices(self, plugin_id: str) -> list[dict]:
+        """
+        Devices that could be manually added to a running operation: online,
+        matching plugin_id's capability/category requirements, and not
+        already assigned to this (or any) operation.
+        """
+        operation = self._operations.get(plugin_id)
+        plugin_class = self._registered_plugins.get(plugin_id)
+        if not operation or not plugin_class:
+            return []
+
+        capabilities = [
+            req.capability for req in plugin_class.REQUIRED_CAPABILITIES
+            if req.required
+        ]
+        devices = await operation.context.get_available_devices(
+            capabilities=capabilities or None,
+            categories=plugin_class.SUPPORTED_CATEGORIES or None
+        )
+        return [
+            {"id": d.id, "name": d.name, "category": d.category}
+            for d in devices
+        ]
+
+    async def recruit_device_into_operation(
+        self,
+        plugin_id: str,
+        device_id: str
+    ) -> tuple[bool, str]:
+        """
+        Manually add an online device to a running operation. Operator-
+        triggered only — nothing auto-joins a newly-connected device.
+
+        FleetContext.recruit_device() itself only checks priority/
+        availability, not capabilities — validate those here first so an
+        operator can't recruit an incompatible device (e.g. no GPS) into an
+        operation that needs it.
+        """
+        from .node_registry import node_registry
+
+        operation = self._operations.get(plugin_id)
+        if not operation:
+            return False, f"No running operation: {plugin_id}"
+
+        plugin_class = self._registered_plugins.get(plugin_id)
+        node = node_registry.get_node(device_id)
+        if not node:
+            return False, f"Device not found: {device_id}"
+
+        candidate = DeviceProxy(node)
+        if (
+            plugin_class.SUPPORTED_CATEGORIES
+            and candidate.category not in plugin_class.SUPPORTED_CATEGORIES
+        ):
+            return False, (
+                f"{candidate.name} is not a supported category for "
+                f"{plugin_class.PLUGIN_NAME}"
+            )
+        for req in plugin_class.REQUIRED_CAPABILITIES:
+            if req.required and not candidate.meets_requirement(req):
+                return False, (
+                    f"{candidate.name} does not meet required capability: "
+                    f"{req.capability}"
+                )
+
+        proxy = await operation.context.recruit_device(device_id)
+        if not proxy:
+            return False, (
+                f"{candidate.name} is unavailable — offline, or held by a "
+                f"higher-priority operation"
+            )
+
+        try:
+            await operation.plugin.on_device_joined(proxy)
+        except Exception as e:
+            logger.error(f"Plugin {plugin_id} on_device_joined error: {e}")
+
+        return True, f"{proxy.name} added to {operation.plugin.OPERATION_NAME}"
 
     # ── Graceful Degradation ───────────────────────────────────
 

@@ -1,5 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getOperations, startOperation, stopOperation } from "../lib/api";
+import {
+  getOperations,
+  startOperation,
+  stopOperation,
+  getRecruitableDevices,
+  recruitDevice,
+} from "../lib/api";
 
 export const OPERATION_KEYS = {
   all: ["operations"] as const,
@@ -32,5 +38,33 @@ export function useStopOperation() {
   return useMutation({
     mutationFn: (plugin_id: string) => stopOperation(plugin_id),
     onSuccess: () => qc.invalidateQueries({ queryKey: OPERATION_KEYS.all }),
+  });
+}
+
+export function useRecruitableDevices(plugin_id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...OPERATION_KEYS.all, "recruitable", plugin_id],
+    queryFn: () => getRecruitableDevices(plugin_id),
+    enabled,
+    refetchInterval: enabled ? 3_000 : false,
+  });
+}
+
+export function useRecruitDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      plugin_id,
+      device_id,
+    }: {
+      plugin_id: string;
+      device_id: string;
+    }) => recruitDevice(plugin_id, device_id),
+    onSuccess: (_data, { plugin_id }) => {
+      qc.invalidateQueries({ queryKey: OPERATION_KEYS.all });
+      qc.invalidateQueries({
+        queryKey: [...OPERATION_KEYS.all, "recruitable", plugin_id],
+      });
+    },
   });
 }
