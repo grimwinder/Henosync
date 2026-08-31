@@ -21,7 +21,6 @@ import MeasureOverlay from "../components/zones/MeasureOverlay";
 import { useZones } from "../hooks/useZones";
 import { useMarkers } from "../hooks/useMarkers";
 import { useHubLocation } from "../hooks/useHubLocation";
-import { useViconConnection } from "../hooks/useSystem";
 import { useZoneStore } from "../stores/zoneStore";
 import { useUIStore } from "../stores/uiStore";
 import VICONMap from "../components/map/VICONMap";
@@ -47,7 +46,6 @@ export default function ZonesPage() {
   useZones(); // populate store on mount
   useMarkers(); // populate marker store on mount
   const hubLocation = useHubLocation();
-  const { data: viconConn } = useViconConnection();
   const mapMode = useUIStore((s) => s.mapMode);
   const viconSpace = useUIStore((s) => s.viconSpace);
   const setMapMode = useUIStore((s) => s.setMapMode);
@@ -489,8 +487,6 @@ export default function ZonesPage() {
         {viconSpace ? (
           <VICONMap
             space={viconSpace}
-            homeLat={viconConn?.home_lat}
-            homeLon={viconConn?.home_lon}
             drawMode={drawMode}
             onFinishPolygon={(pts) => {
               setPendingShape({ type: "polygon", points: pts });

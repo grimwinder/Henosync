@@ -258,12 +258,6 @@ export const disconnectVicon = () =>
 export const getViconObjects = () =>
   apiFetch<{ objects: string[] }>("/api/vicon/objects").then((r) => r.objects);
 
-export const setViconOrigin = (home_lat: number, home_lon: number) =>
-  apiFetch<{ success: boolean }>("/api/vicon/origin", {
-    method: "POST",
-    body: JSON.stringify({ home_lat, home_lon }),
-  });
-
 // ── Safety ─────────────────────────────────────────────────────────────────────
 
 export const emergencyStop = () =>

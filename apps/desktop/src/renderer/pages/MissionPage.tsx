@@ -29,7 +29,6 @@ import HubMarker from "../components/map/HubMarker";
 import NodeMarkers from "../components/map/NodeMarkers";
 import VICONMap from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
-import { useViconConnection } from "../hooks/useSystem";
 import { useControlPlugins } from "../hooks/usePlugins";
 import { useMissionPlans, type MissionPlan } from "../hooks/useMissionPlans";
 import { startOperation, stopOperation, getOperations } from "../lib/api";
@@ -1849,7 +1848,6 @@ function ControlsPanel({
 export default function MissionPage() {
   const hubLocation = useHubLocation();
   const { data: controlPlugins = [] } = useControlPlugins();
-  const { data: viconConn } = useViconConnection();
   const { mapMode, setMapMode, viconSpace } = useUIStore((s) => ({
     mapMode: s.mapMode,
     setMapMode: s.setMapMode,
@@ -2067,11 +2065,7 @@ export default function MissionPage() {
         }}
       >
         {viconSpace ? (
-          <VICONMap
-            space={viconSpace}
-            homeLat={viconConn?.home_lat}
-            homeLon={viconConn?.home_lon}
-          />
+          <VICONMap space={viconSpace} />
         ) : (
           <div style={{ color: "#8B95A3", fontSize: 13 }}>
             VICON space not configured — set it up on the Home page

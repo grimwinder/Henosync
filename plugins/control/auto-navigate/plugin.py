@@ -15,6 +15,21 @@ sends it toward whatever target is currently active. get_status() reports
 per-device status text (self._device_status), since with concurrent devices
 a single shared status string would just have them racing to overwrite it.
 
+GPS vs VICON targets: a marker/zone's map_mode determines what its lat/lon
+fields actually mean. GPS-mode ones are real WGS84, used as-is. VICON-mode
+ones (map_mode=="vicon") hold raw VICON arena metres instead (VICONMap.tsx's
+convention: lon=x_m, lat=y_m) — there is no shared real-world coordinate for
+a VICON arena, so those targets are kept in that local frame throughout
+(_resolve_target/_generate_coverage_paths both return a "gps"/"local" tag)
+and only converted to lat/lon per DEVICE, via that device's own
+local_origin (device.local_to_gps()), right before each waypoint is
+dispatched (_go_to_local_waypoint_tracked, _run_coverage_path). This mirrors
+how a VICON-tracked device's own live position already works — vicon_manager
+converts that device's local x/y to a synthetic real lat/lon using the SAME
+per-device local_origin, so a target expressed in the arena's local frame
+and a device's live GPS reading stay on a consistent footing without needing
+any new arena-wide coordinate concept.
+
 Step types
 ----------
 MOVE_TO_MARKER   Navigate to a specific map marker position.
@@ -59,6 +74,11 @@ step began. The inter-robot separation guard (_collision_guard) still
 applies during coverage — since there's no longer one shared target, it
 tracks each device's current waypoint in self._device_target instead of
 self._current_target.
+
+For a VICON-mode zone, the sweep is generated and stored entirely in the
+zone's own local arena metres (no shared real-world coordinate exists to
+convert through) and only turned into lat/lon per device, one waypoint at a
+time, right before dispatch — see the GPS vs VICON targets paragraph above.
 
 PERIMETER_PATROL is still unimplemented — deferred.
 """
@@ -324,23 +344,51 @@ def _equal_area_band_bounds(
     return list(zip(boundaries[:-1], boundaries[1:]))
 
 
-def _generate_coverage_paths(
-    zone, num_robots: int, spacing_m: float, angle_deg: float
+def _vicon_zone_polygon(zone) -> list[tuple[float, float]]:
+    """
+    Local-XY polygon for a VICON-mode zone, directly in the zone's own
+    arena metres — map_mode == "vicon" means points/center.lat/lon ARE
+    x_m/y_m already (VICONMap.tsx's convention: lon=x_m, lat=y_m), not real
+    WGS84 degrees. No origin/projection step needed, unlike
+    _zone_polygon_and_origin() for GPS zones — every device in the arena
+    already shares this one flat local frame, so there's nothing to anchor
+    to a real-world coordinate.
+    """
+    if zone.center is not None and zone.radius_m is not None:
+        cx, cy = zone.center.lon, zone.center.lat
+        return [
+            (
+                cx + zone.radius_m * math.cos(2 * math.pi * i / CIRCLE_APPROXIMATION_SIDES),
+                cy + zone.radius_m * math.sin(2 * math.pi * i / CIRCLE_APPROXIMATION_SIDES),
+            )
+            for i in range(CIRCLE_APPROXIMATION_SIDES)
+        ]
+    if zone.points and len(zone.points) >= 3:
+        return [(p.lon, p.lat) for p in zone.points]
+    raise ValueError(f"Zone has no usable geometry: {getattr(zone, 'name', zone)}")
+
+
+def _sweep_bands(
+    polygon: list[tuple[float, float]], num_robots: int, spacing_m: float, angle_deg: float
 ) -> list[list[tuple[float, float]]]:
     """
-    Partition `zone` into `num_robots` parallel strips of equal AREA
-    (perpendicular to angle_deg — see _equal_area_band_bounds()) and
-    generate a boustrophedon sweep path within each strip, clipped to the
-    zone boundary. Returns one waypoint list per robot, in the same order
-    bands are assigned (index i runs from the angle_deg+90 side of the
-    zone).
+    Core boustrophedon band-sweep generation, entirely in whatever local-XY
+    metres frame `polygon` is already expressed in — shared by both GPS
+    zones (XY derived by projecting real WGS84 down, via
+    _zone_polygon_and_origin) and VICON zones (XY is already the zone's
+    native arena-metres frame, via _vicon_zone_polygon); the rotate/
+    equal-area-band/scanline math doesn't care which. Partitions into
+    `num_robots` strips of equal AREA (perpendicular to angle_deg — see
+    _equal_area_band_bounds()), clipped to the zone boundary. Returns one
+    waypoint list per robot, in the same order bands are assigned (index i
+    runs from the angle_deg+90 side of the zone), in the SAME frame as the
+    input polygon.
     """
     if num_robots < 1:
         raise ValueError("No robots assigned")
     if spacing_m <= 0:
         raise ValueError("Coverage spacing must be positive")
 
-    polygon, origin_lat, origin_lon = _zone_polygon_and_origin(zone)
     rotated = [_rotate(x, y, angle_deg) for x, y in polygon]
 
     x_min = min(p[0] for p in rotated)
@@ -388,13 +436,40 @@ def _generate_coverage_paths(
             waypoints_xy.append((start_x, y))
             waypoints_xy.append((end_x, y))
 
-        path = [
-            _xy_to_latlon(*_unrotate(x, y, angle_deg), origin_lat, origin_lon)
-            for x, y in waypoints_xy
-        ]
+        path = [_unrotate(x, y, angle_deg) for x, y in waypoints_xy]
         paths.append(path)
 
     return paths
+
+
+def _generate_coverage_paths(
+    zone, num_robots: int, spacing_m: float, angle_deg: float
+) -> tuple[str, list[list[tuple[float, float]]]]:
+    """
+    Generate one boustrophedon sweep path per robot for `zone` (see
+    _sweep_bands()). Returns (kind, paths):
+
+    - kind == "gps": `zone.points`/`center` are real WGS84 (GPS-mode zone)
+      — paths are real lat/lon, ready to dispatch as-is.
+    - kind == "local": `zone.points`/`center` are raw VICON arena metres
+      (map_mode == "vicon" — VICONMap.tsx's convention: lon=x_m, lat=y_m)
+      — paths stay in that same local frame. There's no shared real-world
+      coordinate for a VICON arena, so converting to lat/lon happens per
+      DEVICE instead, via that device's own local_origin
+      (device.local_to_gps()), right before each waypoint is dispatched —
+      see _execute_area_coverage()/_run_coverage_path().
+    """
+    if getattr(zone, "map_mode", "gps") == "vicon":
+        polygon = _vicon_zone_polygon(zone)
+        return "local", _sweep_bands(polygon, num_robots, spacing_m, angle_deg)
+
+    polygon, origin_lat, origin_lon = _zone_polygon_and_origin(zone)
+    paths_xy = _sweep_bands(polygon, num_robots, spacing_m, angle_deg)
+    paths_latlon = [
+        [_xy_to_latlon(x, y, origin_lat, origin_lon) for x, y in path]
+        for path in paths_xy
+    ]
+    return "gps", paths_latlon
 
 
 # ── Step types ─────────────────────────────────────────────────────────────────
@@ -472,8 +547,13 @@ class AutoNavigatePlugin(ControlPlugin):
         # to overwrite the same string.
         self._device_status: dict[str, str] = {}
         # Current step's target, so a device added mid-operation via
-        # on_device_joined() has somewhere to go.
+        # on_device_joined() has somewhere to go. Exactly one of
+        # _current_target (real lat/lon — GPS-mode target) or
+        # _current_local_target (VICON arena metres — needs per-device
+        # device.local_to_gps() conversion before dispatch, see
+        # _go_to_local_waypoint_tracked) is set at a time.
         self._current_target: Optional[tuple[float, float]] = None
+        self._current_local_target: Optional[tuple[float, float]] = None
         # FleetContext, stashed here (the base class declares self._context
         # but operation_manager never actually populates it) so
         # on_device_joined() — which isn't passed a context — can still
@@ -502,6 +582,7 @@ class AutoNavigatePlugin(ControlPlugin):
         self._state = OperationState.RUNNING
         self._current_step = 0
         self._current_target = None
+        self._current_local_target = None
         self._device_status = {}
         self._collision_paused = set()
         self._device_target = {}
@@ -552,6 +633,7 @@ class AutoNavigatePlugin(ControlPlugin):
             pass
         finally:
             self._current_target = None
+            self._current_local_target = None
             if self._guard_task is not None:
                 self._guard_task.cancel()
                 try:
@@ -670,13 +752,18 @@ class AutoNavigatePlugin(ControlPlugin):
         operator explicitly adds it). If a MOVE_TO_MARKER/MOVE_TO_ZONE target
         is currently active, send the new device there too, concurrently with
         whatever's already in flight — fire-and-forget, since nothing awaits
-        this handler.
+        this handler. Exactly one of _current_target (GPS) / _current_local_target
+        (VICON arena metres) is set at a time — see _execute_step().
         """
         logger.info("%s: device joined — %s", self.PLUGIN_ID, device.name)
-        if self._stop_requested or self._current_target is None or self._context is None:
+        if self._stop_requested or self._context is None:
             return
-        lat, lon = self._current_target
-        asyncio.create_task(self._go_to_waypoint_tracked(device, lat, lon, self._context))
+        if self._current_target is not None:
+            lat, lon = self._current_target
+            asyncio.create_task(self._go_to_waypoint_tracked(device, lat, lon, self._context))
+        elif self._current_local_target is not None:
+            x_m, y_m = self._current_local_target
+            asyncio.create_task(self._go_to_local_waypoint_tracked(device, x_m, y_m, self._context))
 
     async def on_device_left(self, device) -> None:
         logger.warning("%s: device lost — %s", self.PLUGIN_ID, device.name)
@@ -691,18 +778,29 @@ class AutoNavigatePlugin(ControlPlugin):
         """
         Dispatch one step across every currently-assigned device.
         MOVE_TO_MARKER/MOVE_TO_ZONE resolve a single shared target once, then
-        run all devices toward it concurrently (see _run_on_devices) — every
-        matched robot starts at the same time. AREA_COVERAGE resolves one
-        zone, splits it into a per-device path (see _execute_area_coverage),
-        and runs every device on its own path concurrently. PERIMETER_PATROL
-        remains an unimplemented per-device stub.
+        run all devices toward it concurrently (see _run_on_devices /
+        _run_on_devices_local) — every matched robot starts at the same time.
+        The target comes back tagged "gps" (real lat/lon, shared verbatim) or
+        "local" (VICON arena metres — no shared real-world coordinate exists,
+        so each device converts it via its own local_origin at dispatch time;
+        see _resolve_target()). AREA_COVERAGE resolves one zone, splits it
+        into a per-device path (see _execute_area_coverage), and runs every
+        device on its own path concurrently. PERIMETER_PATROL remains an
+        unimplemented per-device stub.
         """
         if step.step_type in (StepType.MOVE_TO_MARKER, StepType.MOVE_TO_ZONE):
-            target = self._resolve_target(step, context)
-            if target is None:
+            resolved = self._resolve_target(step, context)
+            if resolved is None:
                 return
-            self._current_target = target
-            await self._run_on_devices(list(context.devices), target, context)
+            kind, a, b = resolved
+            if kind == "gps":
+                self._current_target = (a, b)
+                self._current_local_target = None
+                await self._run_on_devices(list(context.devices), (a, b), context)
+            else:
+                self._current_target = None
+                self._current_local_target = (a, b)
+                await self._run_on_devices_local(list(context.devices), (a, b), context)
         elif step.step_type == StepType.AREA_COVERAGE:
             await self._execute_area_coverage(step, context)
         elif step.step_type == StepType.PERIMETER_PATROL:
@@ -711,21 +809,35 @@ class AutoNavigatePlugin(ControlPlugin):
 
     def _resolve_target(
         self, step: NavigationStep, context
-    ) -> Optional[tuple[float, float]]:
-        """Look up a MOVE_TO_MARKER/MOVE_TO_ZONE step's target once, shared
+    ) -> Optional[tuple[str, float, float]]:
+        """
+        Look up a MOVE_TO_MARKER/MOVE_TO_ZONE step's target once, shared
         across every device — avoids re-resolving the same marker/zone
-        per-device now that they navigate concurrently."""
+        per-device now that they navigate concurrently.
+
+        Returns (kind, a, b): kind=="gps" means (a, b) is a real (lat, lon)
+        — a GPS-mode marker/zone. kind=="local" means (a, b) is (x_m, y_m)
+        in the VICON arena's own metres (map_mode=="vicon" — VICONMap.tsx's
+        convention: lon=x_m, lat=y_m) — there's no shared real-world
+        coordinate for a VICON arena, so the caller must convert per device
+        via device.local_to_gps() before dispatching (see
+        _run_on_devices_local / _go_to_local_waypoint_tracked).
+        """
         if step.step_type == StepType.MOVE_TO_MARKER:
             marker = context.marker_manager.get_marker(step.marker_id) if step.marker_id else None
             if not marker:
                 self._status_text = f"Marker not found: {step.marker_id}"
                 logger.error("%s: %s", self.PLUGIN_ID, self._status_text)
                 return None
+            is_vicon = getattr(marker, "map_mode", "gps") == "vicon"
             logger.info(
-                "%s: MOVE_TO_MARKER — %s (%.5f, %.5f)",
-                self.PLUGIN_ID, marker.name, marker.lat, marker.lon
+                "%s: MOVE_TO_MARKER — %s (%.5f, %.5f) [%s]",
+                self.PLUGIN_ID, marker.name, marker.lat, marker.lon,
+                "vicon" if is_vicon else "gps"
             )
-            return marker.lat, marker.lon
+            if is_vicon:
+                return "local", marker.lon, marker.lat  # (x_m, y_m)
+            return "gps", marker.lat, marker.lon
 
         if step.step_type == StepType.MOVE_TO_ZONE:
             zone = context.zone_manager.get_zone(step.zone_id) if step.zone_id else None
@@ -734,33 +846,62 @@ class AutoNavigatePlugin(ControlPlugin):
                 logger.error("%s: %s", self.PLUGIN_ID, self._status_text)
                 return None
 
+            is_vicon = getattr(zone, "map_mode", "gps") == "vicon"
             if zone.center is not None and zone.radius_m is not None:
-                lat, lon = zone.center.lat, zone.center.lon
+                a, b = (zone.center.lon, zone.center.lat) if is_vicon else (zone.center.lat, zone.center.lon)
             elif zone.points:
-                lat = sum(p.lat for p in zone.points) / len(zone.points)
-                lon = sum(p.lon for p in zone.points) / len(zone.points)
+                if is_vicon:
+                    a = sum(p.lon for p in zone.points) / len(zone.points)  # x_m
+                    b = sum(p.lat for p in zone.points) / len(zone.points)  # y_m
+                else:
+                    a = sum(p.lat for p in zone.points) / len(zone.points)
+                    b = sum(p.lon for p in zone.points) / len(zone.points)
             else:
                 self._status_text = f"Zone has no geometry: {zone.name}"
                 logger.error("%s: %s", self.PLUGIN_ID, self._status_text)
                 return None
 
             logger.info(
-                "%s: MOVE_TO_ZONE — %s centroid (%.5f, %.5f)",
-                self.PLUGIN_ID, zone.name, lat, lon
+                "%s: MOVE_TO_ZONE — %s centroid (%.5f, %.5f) [%s]",
+                self.PLUGIN_ID, zone.name, a, b, "vicon" if is_vicon else "gps"
             )
-            return lat, lon
+            return ("local" if is_vicon else "gps"), a, b
 
         return None
 
     async def _run_on_devices(
         self, devices: list, target: tuple[float, float], context
     ) -> None:
-        """Send every device to the same target at the same time."""
+        """Send every device to the same real lat/lon target at the same time."""
         lat, lon = target
         await asyncio.gather(
             *(self._go_to_waypoint_tracked(device, lat, lon, context) for device in devices),
             return_exceptions=True,
         )
+
+    async def _run_on_devices_local(
+        self, devices: list, local_target: tuple[float, float], context
+    ) -> None:
+        """
+        Send every device to the same VICON-arena-metres target at the same
+        time — each device converts it to lat/lon itself via its own
+        local_origin (device.local_to_gps()), since there's no shared
+        real-world anchor for VICON coordinates to convert through once.
+        """
+        x_m, y_m = local_target
+        await asyncio.gather(
+            *(self._go_to_local_waypoint_tracked(device, x_m, y_m, context) for device in devices),
+            return_exceptions=True,
+        )
+
+    async def _go_to_local_waypoint_tracked(
+        self, device, x_m: float, y_m: float, context
+    ) -> bool:
+        """Convert a VICON-arena-metres target to this device's own lat/lon
+        (via its local_origin) and drive there — see _go_to_waypoint_tracked
+        for the tracked-navigation bookkeeping this delegates to."""
+        lat, lon = device.local_to_gps(x_m, y_m)
+        return await self._go_to_waypoint_tracked(device, lat, lon, context)
 
     async def _navigate_one_waypoint(
         self, device, target_lat: float, target_lon: float, context
@@ -1055,7 +1196,12 @@ class AutoNavigatePlugin(ControlPlugin):
         boustrophedon sweep path per strip (_generate_coverage_paths), and
         run every device through its own path concurrently
         (_run_coverage_path). Each device returns to the GPS position it was
-        at when this step started once its sweep is done.
+        at when this step started once its sweep is done — that capture
+        (device.get_gps_data()) is unaffected by GPS-vs-VICON, since a
+        VICON-tracked device already reports its own synthetic real lat/lon
+        (vicon_manager populates node.position); only the SWEEP waypoints
+        need special handling for a VICON-mode zone, since those come from
+        the zone's own local arena metres, not a real coordinate.
         """
         zone = context.zone_manager.get_zone(step.zone_id) if step.zone_id else None
         if not zone:
@@ -1068,7 +1214,7 @@ class AutoNavigatePlugin(ControlPlugin):
             return
 
         try:
-            paths = _generate_coverage_paths(
+            kind, paths = _generate_coverage_paths(
                 zone, len(devices), step.coverage_spacing_m, step.coverage_angle_deg
             )
         except ValueError as e:
@@ -1078,8 +1224,9 @@ class AutoNavigatePlugin(ControlPlugin):
             return
 
         logger.info(
-            "%s: AREA_COVERAGE — zone=%s spacing=%.1fm angle=%.0f° across %d device(s)",
-            self.PLUGIN_ID, zone.name, step.coverage_spacing_m, step.coverage_angle_deg, len(devices)
+            "%s: AREA_COVERAGE — zone=%s spacing=%.1fm angle=%.0f° across %d device(s) [%s]",
+            self.PLUGIN_ID, zone.name, step.coverage_spacing_m, step.coverage_angle_deg,
+            len(devices), kind
         )
 
         start_positions: dict[str, Optional[tuple[float, float]]] = {}
@@ -1089,7 +1236,7 @@ class AutoNavigatePlugin(ControlPlugin):
 
         await asyncio.gather(
             *(
-                self._run_coverage_path(device, paths[i], start_positions[device.id], context)
+                self._run_coverage_path(device, paths[i], kind, start_positions[device.id], context)
                 for i, device in enumerate(devices)
             ),
             return_exceptions=True,
@@ -1099,26 +1246,34 @@ class AutoNavigatePlugin(ControlPlugin):
         self,
         device,
         waypoints: list[tuple[float, float]],
+        kind: str,
         start_position: Optional[tuple[float, float]],
         context,
     ) -> bool:
         """
         Drive one device through its assigned AREA_COVERAGE sweep path, then
-        back to start_position (its GPS fix captured when the step began).
-        Registers/deregisters in _current_devices for the whole path (not
-        per-waypoint) so stop() and _collision_guard() treat a device
-        mid-sweep the same as one mid-single-waypoint navigation.
+        back to start_position (its GPS fix captured when the step began,
+        always real lat/lon regardless of kind). Registers/deregisters in
+        _current_devices for the whole path (not per-waypoint) so stop() and
+        _collision_guard() treat a device mid-sweep the same as one
+        mid-single-waypoint navigation.
+
+        kind=="local" means `waypoints` are in the VICON arena's own metres
+        (see _generate_coverage_paths) — converted to this device's own
+        lat/lon via device.local_to_gps() one waypoint at a time, since
+        there's no shared real-world coordinate to convert through once.
         """
         self._current_devices[device.id] = device
         try:
             if not waypoints:
                 self._device_status[device.name] = "No coverage area assigned"
 
-            for i, (lat, lon) in enumerate(waypoints):
+            for i, (a, b) in enumerate(waypoints):
                 if self._stop_requested:
                     self._device_status[device.name] = "Stopped"
                     return False
                 self._device_status[device.name] = f"Sweeping — waypoint {i + 1}/{len(waypoints)}"
+                lat, lon = device.local_to_gps(a, b) if kind == "local" else (a, b)
                 if not await self._navigate_one_waypoint(device, lat, lon, context):
                     self._device_status[device.name] = f"Coverage failed at waypoint {i + 1}/{len(waypoints)}"
                     return False

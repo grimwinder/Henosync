@@ -426,6 +426,4 @@ export interface VICONStatus {
   host: string | null;
   port: number;
   connected: boolean;
-  home_lat: number | null;
-  home_lon: number | null;
 }

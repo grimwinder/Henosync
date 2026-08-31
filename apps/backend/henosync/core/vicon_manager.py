@@ -13,7 +13,7 @@ import socket
 import time
 from datetime import datetime, timezone
 from math import cos, radians
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -40,14 +40,6 @@ class VICONManager:
         self._running = False
         self._saved_host: str | None = None
         self._saved_port: int = 801
-        # Real-world anchor for the whole VICON arena — independent of any
-        # single robot's own home_lat/home_lon (which live in per-node
-        # config) and independent of connection state, so it's kept in its
-        # own table rather than folded into vicon_connections. Used to
-        # convert VICON-mode zones/markers (drawn in raw arena metres) to
-        # real WGS84 at creation time — see zones.py/markers.py routes.
-        self._home_lat: Optional[float] = None
-        self._home_lon: Optional[float] = None
         # host → DataStream.Client
         self._clients: dict[str, Any] = {}
         # host → monotonic time of last failure (for retry backoff)
@@ -73,17 +65,10 @@ class VICONManager:
     def is_connected(self) -> bool:
         return len(self._clients) > 0
 
-    @property
-    def origin(self) -> Optional[tuple[float, float]]:
-        if self._home_lat is None or self._home_lon is None:
-            return None
-        return (self._home_lat, self._home_lon)
-
     # ── Lifecycle ───────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         await self._load_saved()
-        await self._load_origin()
         self._running = True
         self._task = asyncio.ensure_future(self._run())
         logger.info("VICON manager started")
@@ -153,23 +138,6 @@ class VICONManager:
     async def get_subject_names(self) -> list[str]:
         """Return subject names from the most recently polled frame."""
         return list(self._cached_subjects)
-
-    async def set_origin(self, lat: float, lon: float) -> None:
-        """
-        Persist the arena's real-world anchor point. Used to convert
-        VICON-mode zones/markers (drawn in raw arena metres) to real WGS84
-        when created — see zones.py/markers.py routes.
-        """
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT OR REPLACE INTO vicon_origin (id, home_lat, home_lon) "
-                "VALUES ('default', ?, ?)",
-                (lat, lon),
-            )
-            await db.commit()
-        self._home_lat = lat
-        self._home_lon = lon
-        logger.info("vicon_manager: saved arena origin -> (%.6f, %.6f)", lat, lon)
 
     # ── Main loop ──────────────────────────────────────────────────────────────
 
@@ -242,22 +210,6 @@ class VICONManager:
                         )
         except Exception as e:
             logger.warning("vicon_manager: could not load saved connection: %s", e)
-
-    async def _load_origin(self) -> None:
-        try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute(
-                    "SELECT home_lat, home_lon FROM vicon_origin WHERE id = 'default'"
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        self._home_lat, self._home_lon = row[0], row[1]
-                        logger.info(
-                            "vicon_manager: loaded arena origin -> (%.6f, %.6f)",
-                            self._home_lat, self._home_lon,
-                        )
-        except Exception as e:
-            logger.warning("vicon_manager: could not load saved origin: %s", e)
 
     async def _connect_host(self, host: str, port: int, loop) -> None:
         if not _VICON_AVAILABLE:
@@ -333,7 +285,7 @@ class VICONManager:
 
         home_lat = float(node.config.get("home_lat") or 0)
         home_lon = float(node.config.get("home_lon") or 0)
-        lat, lon = local_to_gps(x_m, y_m, home_lat, home_lon)
+        lat, lon = _local_to_gps(x_m, y_m, home_lat, home_lon)
 
         position = Position(lat=lat, lon=lon, alt=z_m, heading=yaw)
         node.position = position
@@ -389,7 +341,7 @@ def _tcp_reachable(host: str, port: int, timeout: float = 2.0) -> bool:
 
 # ── Coordinate conversion ───────────────────────────────────────────────────────
 
-def local_to_gps(
+def _local_to_gps(
     x_m: float, y_m: float, home_lat: float, home_lon: float
 ) -> tuple[float, float]:
     """Equirectangular: X=East, Y=North from arena origin. Accurate <1km."""
