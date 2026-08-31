@@ -12,7 +12,7 @@ If the device has no position fix, only the timeout applies.
 
 import asyncio
 import logging
-import math
+from math import cos, degrees, radians
 
 from henosync_sdk import (
     CapabilityRequirement,
@@ -26,17 +26,6 @@ from henosync_sdk import (
 )
 
 logger = logging.getLogger(__name__)
-
-POLL_INTERVAL_S = 0.5
-
-
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6_371_000.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(min(1.0, a)))
 
 
 class AutoNavigatePlugin(ControlPlugin):
@@ -66,6 +55,7 @@ class AutoNavigatePlugin(ControlPlugin):
         self._state: OperationState = OperationState.IDLE
         self._status_text: str = ""
         self._progress_percent: float | None = None
+        self._active_device = None
 
     async def start(self, context) -> None:
         self._state = OperationState.RUNNING
@@ -98,53 +88,53 @@ class AutoNavigatePlugin(ControlPlugin):
             )
             return
 
-        arrival_radius_m = float(self._config.get("arrival_radius_m", 2.0))
         timeout_s = float(self._config.get("timeout_s", 60.0))
 
-        self._status_text = f"Moving {device.name} → {marker.name}"
-        logger.info("AutoNavigate: %s → %s (%.6f, %.6f)", device.name, marker.name, marker.lat, marker.lon)
+        # ── Convert VICON marker coordinates to real GPS ────────
+        # VICON markers store lon=x_m, lat=y_m (raw VICON metres).
+        # node.position is real GPS (vicon_manager converts via local_origin).
+        # We must apply the same conversion so the nav controller sees matching coords.
+        if marker.map_mode == "vicon":
+            origin = device.local_origin
+            if origin is not None:
+                R = 6_371_000.0
+                gps_lat = origin.lat + degrees(marker.lat / R)
+                gps_lon = origin.lon + degrees(marker.lon / (R * cos(radians(origin.lat))))
+            else:
+                gps_lat, gps_lon = marker.lat, marker.lon
+        else:
+            gps_lat, gps_lon = marker.lat, marker.lon
 
-        # ── Send move command ──────────────────────────────────
-        result = await device.move_to(marker.lat, marker.lon, 0.0)
+        self._status_text = f"Moving {device.name} → {marker.name}"
+        logger.info("AutoNavigate: %s → %s (%.6f, %.6f)", device.name, marker.name, gps_lat, gps_lon)
+
+        self._active_device = device
+
+        # ── Send move command (timeout enforced here) ──────────
+        # cmd_move_to blocks until arrival — wrap with wait_for so the
+        # user-configured timeout actually fires.
+        try:
+            result = await asyncio.wait_for(
+                device.move_to(gps_lat, gps_lon, 0.0),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            self._status_text = f"Timed out after {timeout_s:.0f}s"
+            self._state = OperationState.FAILED
+            await context.send_alert(
+                "Auto Navigate timeout",
+                f"{device.name} did not reach {marker.name} within {timeout_s:.0f}s.",
+                EventSeverity.WARNING,
+            )
+            return
+
         if not result.success:
             self._status_text = f"Move command failed: {result.message}"
             self._state = OperationState.FAILED
             await context.send_alert("Auto Navigate failed", result.message, EventSeverity.WARNING)
             return
 
-        # ── Wait for arrival ───────────────────────────────────
-        elapsed = 0.0
-        initial_dist: float | None = None
-
-        while not self._stop_requested:
-            pos = device.position
-            if pos and pos.lat != 0.0:
-                dist = _haversine_m(pos.lat, pos.lon, marker.lat, marker.lon)
-                if initial_dist is None:
-                    initial_dist = dist or 1.0
-                self._progress_percent = max(0.0, min(100.0, (1.0 - dist / initial_dist) * 100))
-                self._status_text = f"Moving to {marker.name} — {dist:.1f} m remaining"
-
-                if dist <= arrival_radius_m:
-                    break
-            else:
-                self._status_text = f"Moving to {marker.name} — waiting for position fix"
-
-            await asyncio.sleep(POLL_INTERVAL_S)
-            elapsed += POLL_INTERVAL_S
-
-            if elapsed >= timeout_s:
-                self._status_text = f"Timed out after {timeout_s:.0f}s"
-                self._state = OperationState.FAILED
-                await context.send_alert(
-                    "Auto Navigate timeout",
-                    f"{device.name} did not reach {marker.name} within {timeout_s:.0f}s.",
-                    EventSeverity.WARNING,
-                )
-                return
-
         if self._stop_requested:
-            await device.stop()
             self._status_text = "Stopped"
         else:
             self._status_text = f"Arrived at {marker.name}"
@@ -156,6 +146,12 @@ class AutoNavigatePlugin(ControlPlugin):
     async def stop(self) -> None:
         self._stop_requested = True
         self._state = OperationState.STOPPING
+        dev = self._active_device
+        if dev:
+            try:
+                await dev.stop()
+            except Exception:
+                pass
 
     def get_status(self) -> OperationStatus:
         return OperationStatus(

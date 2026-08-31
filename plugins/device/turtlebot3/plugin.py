@@ -242,47 +242,57 @@ class TurtleBot3Plugin(ROS2Plugin):
         if x is not None and y is not None:
             if not node.local_origin:
                 return CommandResult(success=False, message="No local_origin set — cannot convert local target")
-            lat, lon = self._local_to_gps(x, y, node.local_origin.lat, node.local_origin.lon)
+            _R = 6_371_000.0
+            _lat_rad = math.radians(node.local_origin.lat)
+            lat = node.local_origin.lat + math.degrees(y / _R)
+            lon = node.local_origin.lon + math.degrees(x / (_R * math.cos(_lat_rad)))
+
+        # In local/VICON frame mode, prefer VICON yaw (world frame) over odom yaw.
+        use_vicon_heading = (x is not None and y is not None)
 
         state.stop_requested = False
-        while node.id in self._nodes and state.connected:
-            if state.stop_requested:
-                state.stop_requested = False
-                self._publish_twist(state, 0.0, 0.0)
-                return CommandResult(success=False, message="Stopped")
+        try:
+            while node.id in self._nodes and state.connected:
+                if state.stop_requested:
+                    state.stop_requested = False
+                    return CommandResult(success=False, message="Stopped")
 
-            pos = node.position
-            if pos is None:
+                pos = node.position
+                if pos is None:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                R = 6_371_000.0
+                dy = R * math.radians(lat - pos.lat)
+                dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+                distance = math.sqrt(dx * dx + dy * dy)
+
+                if distance < self.ARRIVAL_THRESHOLD_M:
+                    return CommandResult(success=True, message="Arrived")
+
+                bearing = math.atan2(dy, dx)
+                heading = (
+                    pos.heading if (use_vicon_heading and pos.heading is not None)
+                    else state.heading
+                )
+                heading_error = math.atan2(
+                    math.sin(bearing - heading),
+                    math.cos(bearing - heading),
+                )
+                linear = min(
+                    self.MAX_LINEAR_VEL,
+                    self.LINEAR_GAIN * distance * max(0.0, math.cos(heading_error)),
+                )
+                angular = max(
+                    -self.MAX_ANGULAR_VEL,
+                    min(self.MAX_ANGULAR_VEL, self.ANGULAR_GAIN * heading_error),
+                )
+                self._publish_twist(state, linear, angular)
                 await asyncio.sleep(0.1)
-                continue
 
-            R = 6_371_000.0
-            dy = R * math.radians(lat - pos.lat)
-            dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-            distance = math.sqrt(dx * dx + dy * dy)
-
-            if distance < self.ARRIVAL_THRESHOLD_M:
-                self._publish_twist(state, 0.0, 0.0)
-                return CommandResult(success=True, message="Arrived")
-
-            bearing = math.atan2(dy, dx)
-            heading_error = math.atan2(
-                math.sin(bearing - state.heading),
-                math.cos(bearing - state.heading),
-            )
-            linear = min(
-                self.MAX_LINEAR_VEL,
-                self.LINEAR_GAIN * distance * max(0.0, math.cos(heading_error)),
-            )
-            angular = max(
-                -self.MAX_ANGULAR_VEL,
-                min(self.MAX_ANGULAR_VEL, self.ANGULAR_GAIN * heading_error),
-            )
-            self._publish_twist(state, linear, angular)
-            await asyncio.sleep(0.1)
-
-        self._publish_twist(state, 0.0, 0.0)
-        return CommandResult(success=False, message="Navigation aborted")
+            return CommandResult(success=False, message="Navigation aborted")
+        finally:
+            self._publish_twist(state, 0.0, 0.0)
 
     async def cmd_stop(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)

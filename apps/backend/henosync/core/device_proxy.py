@@ -65,6 +65,10 @@ class DeviceProxy:
         return self._node.specs
 
     @property
+    def local_origin(self):
+        return self._node.local_origin
+
+    @property
     def is_online(self) -> bool:
         return self._node.status == NodeStatus.ONLINE
 
