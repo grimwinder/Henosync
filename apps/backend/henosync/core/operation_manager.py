@@ -13,6 +13,7 @@ from .device_proxy import DeviceProxy
 from .event_bus import event_bus
 from .fleet_context import FleetContext
 from .telemetry_bus import telemetry_bus
+from .marker_manager import marker_manager
 from .zone_manager import zone_manager
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,17 @@ class OperationManager:
         Returns (success, message).
         """
         if plugin_id in self._operations:
-            return False, f"Operation already running: {plugin_id}"
+            existing = self._operations[plugin_id]
+            if existing.task.done():
+                # Previous run finished but was never explicitly stopped — clean up.
+                for dev_id, pid in list(self._device_assignments.items()):
+                    if pid == plugin_id:
+                        del self._device_assignments[dev_id]
+                event_bus.unregister_plugin(plugin_id)
+                del self._operations[plugin_id]
+                logger.info("Cleaned up completed operation: %s", plugin_id)
+            else:
+                return False, f"Operation already running: {plugin_id}"
 
         plugin_class = self._registered_plugins.get(plugin_id)
         if not plugin_class:
@@ -131,6 +142,7 @@ class OperationManager:
             plugin_id=plugin_id,
             initial_devices=matched_devices,
             zone_manager=zone_manager,
+            marker_manager=marker_manager,
             event_bus=event_bus
         )
 

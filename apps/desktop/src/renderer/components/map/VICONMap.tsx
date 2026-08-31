@@ -69,8 +69,9 @@ export default function VICONMap({
   );
   const [mouseVicon, setMouseVicon] = useState<[number, number] | null>(null);
 
-  // Pan state
+  // Pan + zoom state
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1.0);
   const [isPanActive, setIsPanActive] = useState(false);
   const panStartRef = useRef<{
     clientX: number;
@@ -79,6 +80,7 @@ export default function VICONMap({
     panY: number;
   } | null>(null);
   const didPanRef = useRef(false);
+  const zoomRef = useRef(1.0); // kept in sync so wheel handler avoids stale closure
 
   const cx = VB / 2;
   const cy = VB / 2;
@@ -104,16 +106,16 @@ export default function VICONMap({
     [cx, cy, scale],
   );
 
-  // SVG units per screen pixel (accounting for preserveAspectRatio letterboxing)
+  // SVG units per screen pixel (accounting for preserveAspectRatio letterboxing + zoom)
   function getSvgPerPx(): number {
     const svg = svgRef.current;
     if (!svg) return 1;
     const rect = svg.getBoundingClientRect();
     const dim = Math.min(rect.width, rect.height);
-    return VB / Math.max(dim, 1);
+    return VB / zoomRef.current / Math.max(dim, 1);
   }
 
-  // Convert a DOM mouse event to VICON x_m, y_m (accounts for current pan)
+  // Convert a DOM mouse event to VICON x_m, y_m (accounts for pan + zoom)
   function eventToVicon(
     e: React.MouseEvent<SVGSVGElement>,
   ): [number, number] | null {
@@ -123,9 +125,40 @@ export default function VICONMap({
     const dim = Math.min(rect.width, rect.height);
     const offX = (rect.width - dim) / 2;
     const offY = (rect.height - dim) / 2;
-    const svgX = -panOffset.x + ((e.clientX - rect.left - offX) / dim) * VB;
-    const svgY = -panOffset.y + ((e.clientY - rect.top - offY) / dim) * VB;
+    const vbSize = VB / zoomRef.current;
+    const svgX = -panOffset.x + ((e.clientX - rect.left - offX) / dim) * vbSize;
+    const svgY = -panOffset.y + ((e.clientY - rect.top - offY) / dim) * vbSize;
     return [(svgX - cx) / scale, (cy - svgY) / scale];
+  }
+
+  function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
+    e.preventDefault();
+    const currentZoom = zoomRef.current;
+    const factor = Math.exp(-e.deltaY * 0.001);
+    const newZoom = Math.max(0.5, Math.min(20, currentZoom * factor));
+
+    const svg = svgRef.current;
+    if (!svg) {
+      zoomRef.current = newZoom;
+      setZoom(newZoom);
+      return;
+    }
+    const rect = svg.getBoundingClientRect();
+    const dim = Math.min(rect.width, rect.height);
+    const offX = (rect.width - dim) / 2;
+    const offY = (rect.height - dim) / 2;
+    const fx = (e.clientX - rect.left - offX) / dim;
+    const fy = (e.clientY - rect.top - offY) / dim;
+
+    // Adjust pan so the point under the cursor stays fixed
+    const vbBefore = VB / currentZoom;
+    const vbAfter = VB / newZoom;
+    zoomRef.current = newZoom;
+    setZoom(newZoom);
+    setPanOffset((prev) => ({
+      x: prev.x + fx * (vbAfter - vbBefore),
+      y: prev.y + fy * (vbAfter - vbBefore),
+    }));
   }
 
   const isDrawing =
@@ -242,7 +275,11 @@ export default function VICONMap({
   }
 
   const cursor = isDrawing ? "crosshair" : isPanActive ? "grabbing" : "grab";
-  const viewBox = `${-panOffset.x} ${-panOffset.y} ${VB} ${VB}`;
+  const vbSize = VB / zoom;
+  const viewBox = `${-panOffset.x} ${-panOffset.y} ${vbSize} ${vbSize}`;
+  // Inverse zoom factor: multiply fixed-screen-size SVG values by this so they
+  // stay the same visual size regardless of zoom level.
+  const s = 1 / zoom;
 
   return (
     <div
@@ -264,12 +301,13 @@ export default function VICONMap({
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onWheel={handleWheel}
       >
         <rect
           x={-panOffset.x}
           y={-panOffset.y}
-          width={VB}
-          height={VB}
+          width={vbSize}
+          height={vbSize}
           fill="#0D0D0D"
         />
 
@@ -294,7 +332,7 @@ export default function VICONMap({
             r={r}
             fill="none"
             stroke="#FFFFFF"
-            strokeWidth={3}
+            strokeWidth={3 * s}
           />
         ) : (
           <rect
@@ -304,12 +342,12 @@ export default function VICONMap({
             height={spaceH}
             fill="none"
             stroke="#FFFFFF"
-            strokeWidth={3}
+            strokeWidth={3 * s}
           />
         )}
 
         {/* Origin dot */}
-        <circle cx={cx} cy={cy} r={3} fill="#3A3F48" />
+        <circle cx={cx} cy={cy} r={3 * s} fill="#3A3F48" />
 
         {/* Existing zones */}
         {zones.map((zone) => {
@@ -326,7 +364,7 @@ export default function VICONMap({
                   fill={color}
                   fillOpacity={0.15}
                   stroke={color}
-                  strokeWidth={1.5}
+                  strokeWidth={1.5 * s}
                 />
               </g>
             );
@@ -341,7 +379,7 @@ export default function VICONMap({
                   fill={color}
                   fillOpacity={0.15}
                   stroke={color}
-                  strokeWidth={1.5}
+                  strokeWidth={1.5 * s}
                 />
               </g>
             );
@@ -355,21 +393,27 @@ export default function VICONMap({
           const color = MARKER_COLORS[marker.marker_type] || "#4A9EFF";
           return (
             <g key={marker.id}>
-              <circle cx={sx} cy={sy} r={5} fill={color} fillOpacity={0.9} />
               <circle
                 cx={sx}
                 cy={sy}
-                r={5}
+                r={5 * s}
+                fill={color}
+                fillOpacity={0.9}
+              />
+              <circle
+                cx={sx}
+                cy={sy}
+                r={5 * s}
                 fill="none"
                 stroke="#0D0D0D"
-                strokeWidth={1}
+                strokeWidth={1 * s}
               />
               <text
                 x={sx}
-                y={sy + 15}
+                y={sy + 15 * s}
                 textAnchor="middle"
                 fill={color}
-                fontSize={8}
+                fontSize={8 * s}
                 fontFamily="Inter, sans-serif"
                 fontWeight={600}
               >
@@ -390,8 +434,8 @@ export default function VICONMap({
                 fill="#4A9EFF"
                 fillOpacity={0.12}
                 stroke="#4A9EFF"
-                strokeWidth={1.5}
-                strokeDasharray="5 3"
+                strokeWidth={1.5 * s}
+                strokeDasharray={`${5 * s} ${3 * s}`}
               />
             )}
             <polyline
@@ -400,8 +444,8 @@ export default function VICONMap({
                 .join(" ")}
               fill="none"
               stroke="#4A9EFF"
-              strokeWidth={1.5}
-              strokeDasharray="5 3"
+              strokeWidth={1.5 * s}
+              strokeDasharray={`${5 * s} ${3 * s}`}
             />
           </>
         )}
@@ -413,10 +457,10 @@ export default function VICONMap({
                 key={i}
                 cx={sx}
                 cy={sy}
-                r={4}
+                r={4 * s}
                 fill="#4A9EFF"
                 stroke="#0D0D0D"
-                strokeWidth={1}
+                strokeWidth={1 * s}
               />
             );
           })}
@@ -432,17 +476,17 @@ export default function VICONMap({
                 fill="#4A9EFF"
                 fillOpacity={0.12}
                 stroke="#4A9EFF"
-                strokeWidth={1.5}
-                strokeDasharray="5 3"
+                strokeWidth={1.5 * s}
+                strokeDasharray={`${5 * s} ${3 * s}`}
               />
             )}
             <circle
               cx={toSvg(circleCenter[0], circleCenter[1])[0]}
               cy={toSvg(circleCenter[0], circleCenter[1])[1]}
-              r={4}
+              r={4 * s}
               fill="#4A9EFF"
               stroke="#0D0D0D"
-              strokeWidth={1}
+              strokeWidth={1 * s}
             />
           </>
         )}
@@ -453,7 +497,13 @@ export default function VICONMap({
           (() => {
             const [sx, sy] = toSvg(mouseVicon[0], mouseVicon[1]);
             return (
-              <circle cx={sx} cy={sy} r={5} fill="#4A9EFF" fillOpacity={0.6} />
+              <circle
+                cx={sx}
+                cy={sy}
+                r={5 * s}
+                fill="#4A9EFF"
+                fillOpacity={0.6}
+              />
             );
           })()}
 
@@ -464,23 +514,46 @@ export default function VICONMap({
           if (vx == null || vy == null) return [];
           const [sx, sy] = toSvg(vx, vy);
           const color = DOT_COLOR[node.status] ?? "#888888";
+          const heading = node.telemetry?.vicon_heading as number | undefined;
+          // SVG rotation: yaw=0 → right, yaw=π/2 → up on screen.
+          // SVG rotates CW; world yaw is CCW → negate.
+          const svgAngle = heading != null ? -(heading * 180) / Math.PI : null;
           return [
             <g key={node.id}>
-              <circle cx={sx} cy={sy} r={8} fill={color} />
+              <circle cx={sx} cy={sy} r={8 * s} fill={color} />
               <circle
                 cx={sx}
                 cy={sy}
-                r={8}
+                r={8 * s}
                 fill="none"
                 stroke="#0D0D0D"
-                strokeWidth={1}
+                strokeWidth={1 * s}
               />
+              {svgAngle != null && (
+                <g transform={`translate(${sx}, ${sy}) rotate(${svgAngle})`}>
+                  {/* Arrow shaft */}
+                  <line
+                    x1={0}
+                    y1={0}
+                    x2={14 * s}
+                    y2={0}
+                    stroke="rgba(255,255,255,0.9)"
+                    strokeWidth={2 * s}
+                    strokeLinecap="round"
+                  />
+                  {/* Arrowhead */}
+                  <polygon
+                    points={`${14 * s},0 ${7 * s},${-4 * s} ${7 * s},${4 * s}`}
+                    fill="rgba(255,255,255,0.9)"
+                  />
+                </g>
+              )}
               <text
                 x={sx}
-                y={sy + 19}
+                y={sy + 19 * s}
                 textAnchor="middle"
                 fill="#EFEFEF"
-                fontSize={9}
+                fontSize={9 * s}
                 fontFamily="Inter, sans-serif"
                 fontWeight={600}
               >

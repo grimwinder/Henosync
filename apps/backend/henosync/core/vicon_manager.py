@@ -300,7 +300,7 @@ class VICONManager:
             node_id=node.id,
             sequence_number=seq,
             position=position,
-            custom={"vicon_x": x_m, "vicon_y": y_m},
+            custom={"vicon_x": x_m, "vicon_y": y_m, "vicon_heading": yaw},
         )
         await telemetry_bus.publish_telemetry(frame)
 
