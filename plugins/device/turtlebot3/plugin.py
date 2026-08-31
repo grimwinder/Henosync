@@ -228,6 +228,7 @@ class TurtleBot3Plugin(ROS2Plugin):
         x: Optional[float] = None,
         y: Optional[float] = None,
         z: Optional[float] = None,
+        arrival_radius_m: Optional[float] = None,
     ) -> CommandResult:
         state = self._nodes.get(node.id)
         if not state or not state.connected:
@@ -250,7 +251,13 @@ class TurtleBot3Plugin(ROS2Plugin):
         # In local/VICON frame mode, prefer VICON yaw (world frame) over odom yaw.
         use_vicon_heading = (x is not None and y is not None)
 
+        logger.info(
+            "cmd_move_to: target GPS (%.8f, %.8f) | received x=%s y=%s | use_vicon_heading=%s",
+            lat, lon, x, y, use_vicon_heading,
+        )
+
         state.stop_requested = False
+        _tick = 0
         try:
             while node.id in self._nodes and state.connected:
                 if state.stop_requested:
@@ -267,7 +274,8 @@ class TurtleBot3Plugin(ROS2Plugin):
                 dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
                 distance = math.sqrt(dx * dx + dy * dy)
 
-                if distance < self.ARRIVAL_THRESHOLD_M:
+                threshold = arrival_radius_m if arrival_radius_m is not None else self.ARRIVAL_THRESHOLD_M
+                if distance < threshold:
                     return CommandResult(success=True, message="Arrived")
 
                 bearing = math.atan2(dy, dx)
@@ -287,6 +295,21 @@ class TurtleBot3Plugin(ROS2Plugin):
                     -self.MAX_ANGULAR_VEL,
                     min(self.MAX_ANGULAR_VEL, self.ANGULAR_GAIN * heading_error),
                 )
+
+                _tick += 1
+                if _tick % 10 == 1:
+                    logger.info(
+                        "goto | pos (%.8f, %.8f) heading=%.3f(pos) %.3f(odom) | "
+                        "target (%.8f, %.8f) | dist=%.3fm bearing=%.3f | "
+                        "err=%.3f lin=%.3f ang=%.3f",
+                        pos.lat, pos.lon,
+                        pos.heading if pos.heading is not None else float("nan"),
+                        state.heading,
+                        lat, lon,
+                        distance, bearing,
+                        heading_error, linear, angular,
+                    )
+
                 self._publish_twist(state, linear, angular)
                 await asyncio.sleep(0.1)
 

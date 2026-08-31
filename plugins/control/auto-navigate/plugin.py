@@ -89,6 +89,7 @@ class AutoNavigatePlugin(ControlPlugin):
             return
 
         timeout_s = float(self._config.get("timeout_s", 60.0))
+        arrival_radius_m = float(self._config.get("arrival_radius_m", 0.3))
 
         # ── Convert VICON marker coordinates to real GPS ────────
         # VICON markers store lon=x_m, lat=y_m (raw VICON metres).
@@ -106,7 +107,23 @@ class AutoNavigatePlugin(ControlPlugin):
             gps_lat, gps_lon = marker.lat, marker.lon
 
         self._status_text = f"Moving {device.name} → {marker.name}"
-        logger.info("AutoNavigate: %s → %s (%.6f, %.6f)", device.name, marker.name, gps_lat, gps_lon)
+        logger.info(
+            "AutoNavigate: %s → %s | marker raw (lat=%.4f lon=%.4f map_mode=%s) | "
+            "origin (lat=%.6f lon=%.6f) | target GPS (%.8f, %.8f)",
+            device.name, marker.name,
+            marker.lat, marker.lon, marker.map_mode,
+            (device.local_origin.lat if device.local_origin else 0),
+            (device.local_origin.lon if device.local_origin else 0),
+            gps_lat, gps_lon,
+        )
+        dev_pos = device.position
+        if dev_pos:
+            logger.info(
+                "AutoNavigate: device position at start GPS (%.8f, %.8f) heading=%.3f",
+                dev_pos.lat, dev_pos.lon, dev_pos.heading if dev_pos.heading is not None else float("nan"),
+            )
+        else:
+            logger.warning("AutoNavigate: device has no position at start")
 
         self._active_device = device
 
@@ -115,7 +132,7 @@ class AutoNavigatePlugin(ControlPlugin):
         # user-configured timeout actually fires.
         try:
             result = await asyncio.wait_for(
-                device.move_to(gps_lat, gps_lon, 0.0),
+                device.move_to(gps_lat, gps_lon, 0.0, arrival_radius_m=arrival_radius_m),
                 timeout=timeout_s,
             )
         except asyncio.TimeoutError:
@@ -182,8 +199,8 @@ class AutoNavigatePlugin(ControlPlugin):
                     "type": "number",
                     "label": "Arrival Radius (m)",
                     "required": False,
-                    "default": 2.0,
-                    "min": 0.5,
+                    "default": 0.3,
+                    "min": 0.05,
                     "max": 20.0,
                     "description": "Distance from target considered 'arrived'.",
                 },

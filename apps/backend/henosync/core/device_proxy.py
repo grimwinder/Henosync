@@ -119,7 +119,8 @@ class DeviceProxy:
     # ── Universal Movement Interface ───────────────────────────
 
     async def move_to(
-        self, lat: float, lon: float, alt: float = 0.0
+        self, lat: float, lon: float, alt: float = 0.0,
+        arrival_radius_m: Optional[float] = None,
     ) -> CommandResult:
         """
         Move device to a WGS84 GPS position.
@@ -141,6 +142,9 @@ class DeviceProxy:
             )
         else:
             params = {"lat": lat, "lon": lon, "alt": alt}
+
+        if arrival_radius_m is not None:
+            params["arrival_radius_m"] = arrival_radius_m
 
         envelope = CommandEnvelope(command_type=CommandType.MOVE_TO, params=params)
         return await plugin.send_command(self._node, envelope)
