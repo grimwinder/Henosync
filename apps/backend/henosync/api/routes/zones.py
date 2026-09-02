@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ...core.zone_manager import GeoPoint, ZoneType, zone_manager
@@ -15,11 +15,12 @@ class ZoneCreateRequest(BaseModel):
     center: Optional[dict] = None
     radius_m: Optional[float] = None
     color: str = "#4A9EFF"
+    map_mode: str = "gps"
 
 
 @router.get("")
-async def list_zones():
-    zones = zone_manager.get_all_zones()
+async def list_zones(mode: str = Query(default="gps")):
+    zones = zone_manager.get_all_zones(map_mode=mode)
     return {"zones": [z.model_dump() for z in zones]}
 
 
@@ -38,6 +39,7 @@ async def create_zone(body: ZoneCreateRequest):
         center=center,
         radius_m=body.radius_m,
         color=body.color,
+        map_mode=body.map_mode,
     )
     return zone.model_dump()
 

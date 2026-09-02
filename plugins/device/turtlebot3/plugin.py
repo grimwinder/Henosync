@@ -11,7 +11,7 @@ import asyncio
 import logging
 import math
 import time
-from typing import Any
+from typing import Any, Optional
 
 from henosync_sdk import (
     BatteryData,
@@ -220,7 +220,15 @@ class TurtleBot3Plugin(ROS2Plugin):
     # ── Command handlers ───────────────────────────────────────────────────────
 
     async def cmd_move_to(
-        self, node: Node, lat: float, lon: float, alt: float = 0.0
+        self,
+        node: Node,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        alt: float = 0.0,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
+        arrival_radius_m: Optional[float] = None,
     ) -> CommandResult:
         state = self._nodes.get(node.id)
         if not state or not state.connected:
@@ -229,45 +237,85 @@ class TurtleBot3Plugin(ROS2Plugin):
         if node.position is None:
             return CommandResult(success=False, message="No position fix — cannot navigate")
 
+        # coordinate_frame="local" (VICON mode) devices receive x/y/z metres instead
+        # of lat/lon/alt — convert back to WGS84 using the same home origin so the
+        # distance/bearing controller below stays identical for both modes.
+        if x is not None and y is not None:
+            if not node.local_origin:
+                return CommandResult(success=False, message="No local_origin set — cannot convert local target")
+            _R = 6_371_000.0
+            _lat_rad = math.radians(node.local_origin.lat)
+            lat = node.local_origin.lat + math.degrees(y / _R)
+            lon = node.local_origin.lon + math.degrees(x / (_R * math.cos(_lat_rad)))
+
+        # In local/VICON frame mode, prefer VICON yaw (world frame) over odom yaw.
+        use_vicon_heading = (x is not None and y is not None)
+
+        logger.info(
+            "cmd_move_to: target GPS (%.8f, %.8f) | received x=%s y=%s | use_vicon_heading=%s",
+            lat, lon, x, y, use_vicon_heading,
+        )
+
         state.stop_requested = False
-        while node.id in self._nodes and state.connected:
-            if state.stop_requested:
-                state.stop_requested = False
-                self._publish_twist(state, 0.0, 0.0)
-                return CommandResult(success=False, message="Stopped")
+        _tick = 0
+        try:
+            while node.id in self._nodes and state.connected:
+                if state.stop_requested:
+                    state.stop_requested = False
+                    return CommandResult(success=False, message="Stopped")
 
-            pos = node.position
-            if pos is None:
+                pos = node.position
+                if pos is None:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                R = 6_371_000.0
+                dy = R * math.radians(lat - pos.lat)
+                dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+                distance = math.sqrt(dx * dx + dy * dy)
+
+                threshold = arrival_radius_m if arrival_radius_m is not None else self.ARRIVAL_THRESHOLD_M
+                if distance < threshold:
+                    return CommandResult(success=True, message="Arrived")
+
+                bearing = math.atan2(dy, dx)
+                heading = (
+                    pos.heading if (use_vicon_heading and pos.heading is not None)
+                    else state.heading
+                )
+                heading_error = math.atan2(
+                    math.sin(bearing - heading),
+                    math.cos(bearing - heading),
+                )
+                linear = min(
+                    self.MAX_LINEAR_VEL,
+                    self.LINEAR_GAIN * distance * max(0.0, math.cos(heading_error)),
+                )
+                angular = max(
+                    -self.MAX_ANGULAR_VEL,
+                    min(self.MAX_ANGULAR_VEL, self.ANGULAR_GAIN * heading_error),
+                )
+
+                _tick += 1
+                if _tick % 10 == 1:
+                    logger.info(
+                        "goto | pos (%.8f, %.8f) heading=%.3f(pos) %.3f(odom) | "
+                        "target (%.8f, %.8f) | dist=%.3fm bearing=%.3f | "
+                        "err=%.3f lin=%.3f ang=%.3f",
+                        pos.lat, pos.lon,
+                        pos.heading if pos.heading is not None else float("nan"),
+                        state.heading,
+                        lat, lon,
+                        distance, bearing,
+                        heading_error, linear, angular,
+                    )
+
+                self._publish_twist(state, linear, angular)
                 await asyncio.sleep(0.1)
-                continue
 
-            R = 6_371_000.0
-            dy = R * math.radians(lat - pos.lat)
-            dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-            distance = math.sqrt(dx * dx + dy * dy)
-
-            if distance < self.ARRIVAL_THRESHOLD_M:
-                self._publish_twist(state, 0.0, 0.0)
-                return CommandResult(success=True, message="Arrived")
-
-            bearing = math.atan2(dy, dx)
-            heading_error = math.atan2(
-                math.sin(bearing - state.heading),
-                math.cos(bearing - state.heading),
-            )
-            linear = min(
-                self.MAX_LINEAR_VEL,
-                self.LINEAR_GAIN * distance * max(0.0, math.cos(heading_error)),
-            )
-            angular = max(
-                -self.MAX_ANGULAR_VEL,
-                min(self.MAX_ANGULAR_VEL, self.ANGULAR_GAIN * heading_error),
-            )
-            self._publish_twist(state, linear, angular)
-            await asyncio.sleep(0.1)
-
-        self._publish_twist(state, 0.0, 0.0)
-        return CommandResult(success=False, message="Navigation aborted")
+            return CommandResult(success=False, message="Navigation aborted")
+        finally:
+            self._publish_twist(state, 0.0, 0.0)
 
     async def cmd_stop(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)

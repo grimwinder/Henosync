@@ -279,7 +279,13 @@ export interface PluginCapabilityDef {
 }
 
 export interface PluginConfigField {
-  type: "string" | "number" | "boolean" | "select" | "device_select";
+  type:
+    | "string"
+    | "number"
+    | "boolean"
+    | "select"
+    | "device_select"
+    | "marker_select";
   label: string;
   required?: boolean;
   default?: unknown;
@@ -364,6 +370,7 @@ export interface Zone {
   created_by: string;
   active: boolean;
   color: string;
+  map_mode: string;
 }
 
 export interface ZoneCreate {
@@ -373,6 +380,7 @@ export interface ZoneCreate {
   center?: GeoPoint;
   radius_m?: number;
   color?: string;
+  map_mode?: string;
 }
 
 // ── Marker models ─────────────────────────────────────────────────────────────
@@ -391,6 +399,7 @@ export interface MapMarker {
   lat: number;
   lon: number;
   color: string;
+  map_mode: string;
 }
 
 export interface MapMarkerCreate {
@@ -399,6 +408,7 @@ export interface MapMarkerCreate {
   lat: number;
   lon: number;
   color?: string;
+  map_mode?: string;
 }
 
 // ── Health ─────────────────────────────────────────────────────────────────────

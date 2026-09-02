@@ -193,8 +193,20 @@ class MyRobotPlugin(ROS2Plugin):
     # ── Command handlers (add the ones your manifest declares) ────────────────
 
     async def cmd_move_to(
-        self, node: Node, lat: float, lon: float, alt: float = 0.0
+        self,
+        node: Node,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        alt: float = 0.0,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
     ) -> CommandResult:
+        """
+        x/y/z (local metres) are populated instead of lat/lon/alt when this
+        device's coordinate_frame is "local" (VICON mode) — DeviceProxy
+        converts the WGS84 target before dispatch. Branch on `x is not None`.
+        """
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")

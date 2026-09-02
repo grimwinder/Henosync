@@ -22,6 +22,8 @@ import { useZones } from "../hooks/useZones";
 import { useMarkers } from "../hooks/useMarkers";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useZoneStore } from "../stores/zoneStore";
+import { useUIStore } from "../stores/uiStore";
+import VICONMap from "../components/map/VICONMap";
 import type { ZoneType as ZT } from "../types";
 
 // Re-export for child components
@@ -44,6 +46,9 @@ export default function ZonesPage() {
   useZones(); // populate store on mount
   useMarkers(); // populate marker store on mount
   const hubLocation = useHubLocation();
+  const mapMode = useUIStore((s) => s.mapMode);
+  const viconSpace = useUIStore((s) => s.viconSpace);
+  const setMapMode = useUIStore((s) => s.setMapMode);
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [mapBase, setMapBase] = useState<MapBase>("standard");
@@ -454,7 +459,7 @@ export default function ZonesPage() {
         position: "relative",
       }}
     >
-      {/* Map fills full background */}
+      {/* GPS map — always mounted, never unmounted */}
       <div style={{ position: "absolute", inset: 0 }}>
         <MissionMap
           key={`${mapBase}-${mapTheme}`}
@@ -469,14 +474,96 @@ export default function ZonesPage() {
         {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 
-      {/* Map style picker — top-right (avoids overlap with center toolbar) */}
-      <MapStylePicker
-        mapBase={mapBase}
-        mapTheme={mapTheme}
-        onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
-        onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
-        position="top-right"
-      />
+      {/* VICON overlay — covers GPS map; solid background blocks GPS tiles/zones */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 2,
+          display: mapMode === "vicon" ? "block" : "none",
+          backgroundColor: "#0D0D0D",
+        }}
+      >
+        {viconSpace ? (
+          <VICONMap
+            space={viconSpace}
+            drawMode={drawMode}
+            onFinishPolygon={(pts) => {
+              setPendingShape({ type: "polygon", points: pts });
+              setDrawMode(null);
+            }}
+            onFinishCircle={(center, radiusM) => {
+              setPendingShape({ type: "circle", center, radiusM });
+              setDrawMode(null);
+            }}
+            onPlaceMarker={(x_m, y_m) => {
+              setPendingMarker({ lat: y_m, lon: x_m });
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span style={{ fontSize: "12px", color: "#555" }}>
+              Switch to GPS mode or configure VICON space on the home page.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* GPS / VICON mode toggle — always visible */}
+      <div
+        style={{
+          position: "absolute",
+          top: "12px",
+          right: "10px",
+          zIndex: 20,
+          display: "flex",
+          borderRadius: "6px",
+          border: "1px solid #2A2F38",
+          overflow: "hidden",
+          backgroundColor: "#141414",
+        }}
+      >
+        {(["gps", "vicon"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setMapMode(mode)}
+            style={{
+              padding: "0 12px",
+              height: "32px",
+              border: "none",
+              borderRight: mode === "gps" ? "1px solid #2A2F38" : "none",
+              backgroundColor: mapMode === mode ? "#4A9EFF18" : "transparent",
+              color: mapMode === mode ? "#4A9EFF" : "#8B95A3",
+              fontSize: "11px",
+              fontWeight: 600,
+              letterSpacing: "0.5px",
+              cursor: "pointer",
+              transition: "background-color 150ms, color 150ms",
+            }}
+          >
+            {mode.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Map style picker — GPS mode only */}
+      {mapMode === "gps" && (
+        <MapStylePicker
+          mapBase={mapBase}
+          mapTheme={mapTheme}
+          onChangeBase={(base) => saveAndSwitch(base, mapTheme)}
+          onChangeTheme={(theme) => saveAndSwitch(mapBase, theme)}
+          position="top-right"
+        />
+      )}
 
       {/* Floating toolbar */}
       <MapToolbar
@@ -492,8 +579,8 @@ export default function ZonesPage() {
         <ZoneListPanel />
       </div>
 
-      {/* Cursor coordinates overlay */}
-      {cursorLatLon && (
+      {/* Cursor coordinates overlay — GPS mode only */}
+      {mapMode === "gps" && cursorLatLon && (
         <div
           style={{
             position: "absolute",
@@ -515,20 +602,21 @@ export default function ZonesPage() {
         </div>
       )}
 
-      {/* Measure overlay */}
-      {map && drawMode === "measure" && (
+      {/* Measure overlay — GPS mode only */}
+      {mapMode === "gps" && map && drawMode === "measure" && (
         <MeasureOverlay map={map} onExit={() => setDrawMode(null)} />
       )}
 
-      {/* Right detail / merge panel */}
-      {drawMode === "merge" ? (
-        <MergeZonesPanel onClose={() => setDrawMode(null)} />
-      ) : (
-        <>
-          <ZoneDetailPanel />
-          <MarkerDetailPanel />
-        </>
-      )}
+      {/* Right detail / merge panel — GPS mode only */}
+      {mapMode === "gps" &&
+        (drawMode === "merge" ? (
+          <MergeZonesPanel onClose={() => setDrawMode(null)} />
+        ) : (
+          <>
+            <ZoneDetailPanel />
+            <MarkerDetailPanel />
+          </>
+        ))}
 
       {/* Zone creation modal */}
       {pendingShape && (

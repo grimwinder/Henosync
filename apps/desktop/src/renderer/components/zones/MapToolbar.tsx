@@ -530,12 +530,14 @@ interface MapToolbarProps {
   drawMode: DrawMode;
   onSetDrawMode: (mode: DrawMode) => void;
   onFlyToHub: () => void;
+  disabled?: boolean;
 }
 
 export default function MapToolbar({
   drawMode,
   onSetDrawMode,
   onFlyToHub,
+  disabled = false,
 }: MapToolbarProps) {
   const showVertexMarkers = useZoneStore((s) => s.showVertexMarkers);
   const setShowVertexMarkers = useZoneStore((s) => s.setShowVertexMarkers);
@@ -582,32 +584,37 @@ export default function MapToolbar({
       {/* Drawing tools */}
       <ToolButton
         icon={<Pentagon size={15} />}
-        label="Draw polygon zone"
+        label={disabled ? "Not available in VICON mode" : "Draw polygon zone"}
         active={drawMode === "polygon"}
+        disabled={disabled}
         onClick={() => onSetDrawMode(drawMode === "polygon" ? null : "polygon")}
       />
       <ToolButton
         icon={<Circle size={15} />}
-        label="Draw circle zone"
+        label={disabled ? "Not available in VICON mode" : "Draw circle zone"}
         active={drawMode === "circle"}
+        disabled={disabled}
         onClick={() => onSetDrawMode(drawMode === "circle" ? null : "circle")}
       />
       <ToolButton
         icon={<Combine size={15} />}
-        label="Merge zones"
+        label={disabled ? "Not available in VICON mode" : "Merge zones"}
         active={drawMode === "merge"}
+        disabled={disabled}
         onClick={() => onSetDrawMode(drawMode === "merge" ? null : "merge")}
       />
       <ToolButton
         icon={<MapPin size={15} />}
-        label="Place marker"
+        label={disabled ? "Not available in VICON mode" : "Place marker"}
         active={drawMode === "marker"}
+        disabled={disabled}
         onClick={() => onSetDrawMode(drawMode === "marker" ? null : "marker")}
       />
       <ToolButton
         icon={<Ruler size={15} />}
-        label="Measure distance"
+        label={disabled ? "Not available in VICON mode" : "Measure distance"}
         active={drawMode === "measure"}
+        disabled={disabled}
         onClick={() => onSetDrawMode(drawMode === "measure" ? null : "measure")}
       />
 

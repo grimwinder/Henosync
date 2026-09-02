@@ -201,8 +201,8 @@ export const sendOperatorInput = (
 
 // ── Zones ──────────────────────────────────────────────────────────────────────
 
-export const getZones = () =>
-  apiFetch<{ zones: Zone[] }>("/api/zones").then((r) => r.zones);
+export const getZones = (mode: string = "gps") =>
+  apiFetch<{ zones: Zone[] }>(`/api/zones?mode=${mode}`).then((r) => r.zones);
 
 export const createZone = (body: ZoneCreate) =>
   apiFetch<Zone>("/api/zones", { method: "POST", body: JSON.stringify(body) });
@@ -212,8 +212,10 @@ export const deleteZone = (id: string) =>
 
 // ── Markers ────────────────────────────────────────────────────────────────────
 
-export const getMarkers = () =>
-  apiFetch<{ markers: MapMarker[] }>("/api/markers").then((r) => r.markers);
+export const getMarkers = (mode: string = "gps") =>
+  apiFetch<{ markers: MapMarker[] }>(`/api/markers?mode=${mode}`).then(
+    (r) => r.markers,
+  );
 
 export const createMarker = (body: MapMarkerCreate) =>
   apiFetch<MapMarker>("/api/markers", {
