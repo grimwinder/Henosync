@@ -89,7 +89,8 @@ echo "  Installing backend packages..."
     websockets \
     aiofiles \
     python-multipart \
-    roslibpy
+    roslibpy \
+    cflib
 "$VENV_DIR/bin/python" -m pip install --quiet -e packages/plugin-sdk
 echo ""
 echo "  NOTE: VICON positioning requires the Vicon DataStream SDK, which ships"

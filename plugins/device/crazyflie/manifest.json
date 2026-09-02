@@ -1,0 +1,49 @@
+{
+  "id": "crazyflie",
+  "name": "Crazyflie 2.x",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Crazyflie 2.x quadrotor via cflib (Crazyradio PA USB dongle). VICON positioning. Requires WinUSB driver on Windows (install via Zadig).",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["drone"],
+  "fixed_capabilities": ["gps", "battery"],
+  "optional_capabilities": [],
+  "capabilities": [],
+  "config_schema": {
+    "uri": {
+      "type": "string",
+      "label": "Radio URI",
+      "required": true,
+      "placeholder": "radio://0/80/2M/E7E7E7E7E7",
+      "description": "Crazyflie URI. Format: radio://<dongle>/<channel>/<rate>/<address>. Default address E7E7E7E7E7 unless changed in cfclient."
+    },
+    "position_source": {
+      "type": "select",
+      "label": "Positioning Source",
+      "required": true,
+      "default": "vicon",
+      "options": [{ "label": "VICON (motion capture)", "value": "vicon" }]
+    },
+    "vicon_object_name": {
+      "type": "string",
+      "label": "VICON Object Name",
+      "required": true,
+      "placeholder": "cf1",
+      "description": "Must exactly match the rigid body name in VICON Tracker."
+    },
+    "home_lat": {
+      "type": "number",
+      "label": "Arena Origin Latitude",
+      "required": false,
+      "placeholder": "-37.9105",
+      "description": "WGS84 latitude of the VICON arena origin (X=0, Y=0)."
+    },
+    "home_lon": {
+      "type": "number",
+      "label": "Arena Origin Longitude",
+      "required": false,
+      "placeholder": "145.1362",
+      "description": "WGS84 longitude of the VICON arena origin (X=0, Y=0)."
+    }
+  }
+}
