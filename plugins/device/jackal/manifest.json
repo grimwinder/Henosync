@@ -77,22 +77,6 @@
       "description": "VICON mode only — must exactly match the object name in the VICON software.",
       "show_when": { "field": "position_source", "value": "vicon" }
     },
-    "home_lat": {
-      "type": "number",
-      "label": "Home Latitude",
-      "required": false,
-      "placeholder": "-37.9105",
-      "description": "VICON mode only — WGS84 latitude of the VICON arena origin (X=0, Y=0). Also assumed to be the origin of the Jackal's Nav2 map frame — verify this alignment before trusting Move To.",
-      "show_when": { "field": "position_source", "value": "vicon" }
-    },
-    "home_lon": {
-      "type": "number",
-      "label": "Home Longitude",
-      "required": false,
-      "placeholder": "145.1362",
-      "description": "VICON mode only — WGS84 longitude of the VICON arena origin (X=0, Y=0).",
-      "show_when": { "field": "position_source", "value": "vicon" }
-    },
     "gps_topic": {
       "type": "string",
       "label": "GPS Topic Override",
@@ -100,6 +84,13 @@
       "placeholder": "/a200_0000/sensors/gps_0/fix",
       "description": "GPS mode only. Default guess follows Clearpath's sensor naming convention — the exact topic depends on which GPS unit is attached. Verify with `ros2 topic list` on the robot.",
       "show_when": { "field": "position_source", "value": "gps" }
+    },
+    "imu_topic": {
+      "type": "string",
+      "label": "IMU Topic Override",
+      "required": false,
+      "placeholder": "/j100_0364/sensors/imu_0/data",
+      "description": "Default: sensors/imu_0/data under the namespace. Override if your Jackal uses a different IMU topic."
     },
     "camera_topic": {
       "type": "string",
@@ -114,24 +105,6 @@
       "required": false,
       "placeholder": "/a200_0000/sensors/lidar2d_0/scan",
       "description": "Only used if LIDAR capability is selected below. Verify the actual topic with `ros2 topic list` since it depends on which lidar is attached (2D sensor_msgs/LaserScan assumed)."
-    },
-    "max_linear_speed": {
-      "type": "number",
-      "label": "Max Linear Speed (m/s)",
-      "required": false,
-      "default": 1.0,
-      "min": 0.05,
-      "max": 5.0,
-      "description": "Used for manual teleop driving (arrow keys) — tune to this robot's actual safe operating limit."
-    },
-    "max_angular_speed": {
-      "type": "number",
-      "label": "Max Angular Speed (rad/s)",
-      "required": false,
-      "default": 1.0,
-      "min": 0.1,
-      "max": 5.0,
-      "description": "Used for manual teleop driving (arrow keys) — tune to this robot's actual safe operating limit."
     }
   }
 }
