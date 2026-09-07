@@ -121,6 +121,7 @@ class NodePlugin(ABC):
                 y=p.get("y"),
                 z=p.get("z"),
                 arrival_radius_m=p.get("arrival_radius_m"),
+                max_speed=p.get("max_speed"),
             )
         if envelope.command_type == CommandType.STOP:
             return await self.cmd_stop(node)
@@ -142,6 +143,7 @@ class NodePlugin(ABC):
         y: Optional[float] = None,
         z: Optional[float] = None,
         arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> CommandResult:
         """
         Override if you declare MOVE_2D or MOVE_3D capability.

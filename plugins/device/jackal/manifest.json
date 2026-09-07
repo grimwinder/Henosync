@@ -3,7 +3,7 @@
   "name": "Clearpath Jackal (ROS2)",
   "version": "0.1.0",
   "author": "Henosync Team — Monash University",
-  "description": "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack. VICON or GPS positioning. Nav2 goal_pose movement, plus manual teleop.",
+  "description": "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack. VICON or GPS positioning. Proportional velocity controller for move_to, plus manual teleop.",
   "sdk_version": ">=0.1.0",
   "node_types": ["agv"],
   "fixed_capabilities": ["gps", "battery", "imu", "move_2d"],

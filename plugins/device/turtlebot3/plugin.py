@@ -229,6 +229,7 @@ class TurtleBot3Plugin(ROS2Plugin):
         y: Optional[float] = None,
         z: Optional[float] = None,
         arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> CommandResult:
         state = self._nodes.get(node.id)
         if not state or not state.connected:
@@ -287,8 +288,9 @@ class TurtleBot3Plugin(ROS2Plugin):
                     math.sin(bearing - heading),
                     math.cos(bearing - heading),
                 )
+                speed_cap = self.MAX_LINEAR_VEL if max_speed is None else min(float(max_speed), self.MAX_LINEAR_VEL)
                 linear = min(
-                    self.MAX_LINEAR_VEL,
+                    speed_cap,
                     self.LINEAR_GAIN * distance * max(0.0, math.cos(heading_error)),
                 )
                 angular = max(

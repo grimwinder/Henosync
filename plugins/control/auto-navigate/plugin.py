@@ -90,6 +90,9 @@ class AutoNavigatePlugin(ControlPlugin):
 
         timeout_s = float(self._config.get("timeout_s", 60.0))
         arrival_radius_m = float(self._config.get("arrival_radius_m", 0.3))
+        max_speed = self._config.get("max_speed") or None
+        if max_speed is not None:
+            max_speed = float(max_speed)
 
         # ── Convert VICON marker coordinates to real GPS ────────
         # VICON markers store lon=x_m, lat=y_m (raw VICON metres).
@@ -132,7 +135,7 @@ class AutoNavigatePlugin(ControlPlugin):
         # user-configured timeout actually fires.
         try:
             result = await asyncio.wait_for(
-                device.move_to(gps_lat, gps_lon, 0.0, arrival_radius_m=arrival_radius_m),
+                device.move_to(gps_lat, gps_lon, 0.0, arrival_radius_m=arrival_radius_m, max_speed=max_speed),
                 timeout=timeout_s,
             )
         except asyncio.TimeoutError:
@@ -212,6 +215,15 @@ class AutoNavigatePlugin(ControlPlugin):
                     "min": 10,
                     "max": 600,
                     "description": "Give up and report failure after this many seconds.",
+                },
+                "max_speed": {
+                    "type": "number",
+                    "label": "Max Speed (m/s)",
+                    "required": False,
+                    "min": 0.01,
+                    "max": 2.0,
+                    "placeholder": "Device max",
+                    "description": "Cap the navigation speed. Leave blank for device maximum.",
                 },
             },
         )
