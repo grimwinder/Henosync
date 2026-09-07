@@ -251,16 +251,13 @@ class JackalPlugin(NodePlugin):
             )
 
             if position_source == "vicon":
-                home_lat = float(config.get("home_lat", 0.0))
-                home_lon = float(config.get("home_lon", 0.0))
-                if home_lat == 0.0 and home_lon == 0.0:
-                    self._nodes.pop(node.id, None)
-                    return False, "VICON mode requires home_lat and home_lon in config"
-
-                # Position is published directly by the core vicon_manager (a
-                # TCP connection to the VICON DataStream SDK, independent of
-                # rosbridge) — nothing to subscribe here.
-                node.local_origin = LocalOrigin(lat=home_lat, lon=home_lon)
+                # Position is published directly by the core vicon_manager.
+                # local_origin defaults to (0, 0) — GPS conversion will be
+                # approximate until the arena origin is configured elsewhere.
+                node.local_origin = LocalOrigin(
+                    lat=float(config.get("home_lat", 0.0)),
+                    lon=float(config.get("home_lon", 0.0)),
+                )
 
             else:
                 gps_topic_name = config.get("gps_topic") or self._topic(ns, "sensors/gps_0/fix")
@@ -281,7 +278,9 @@ class JackalPlugin(NodePlugin):
             state._subscriptions.append(battery_topic)
 
             imu_topic = roslibpy.Topic(
-                ros, self._topic(ns, "platform/imu/data"), "sensor_msgs/Imu"
+                ros,
+                config.get("imu_topic") or self._topic(ns, "sensors/imu_0/data"),
+                "sensor_msgs/Imu",
             )
             imu_topic.subscribe(lambda msg: self._on_imu(node.id, msg))
             state._subscriptions.append(imu_topic)
