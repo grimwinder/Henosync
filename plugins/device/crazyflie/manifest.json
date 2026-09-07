@@ -27,9 +27,9 @@
     "vicon_object_name": {
       "type": "string",
       "label": "VICON Object Name",
-      "required": true,
+      "required": false,
       "placeholder": "cf1",
-      "description": "Must exactly match the rigid body name in VICON Tracker."
+      "description": "Must exactly match the rigid body name in VICON Tracker. Leave blank to connect without positioning."
     },
     "home_lat": {
       "type": "number",
