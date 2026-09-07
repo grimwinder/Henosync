@@ -2,8 +2,9 @@ import { X, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNodeStore } from "../../stores/nodeStore";
 import { useRemoveNode } from "../../hooks/useNodes";
+import { useDevicePlugins } from "../../hooks/usePlugins";
 import DeviceIcon from "./DeviceIcon";
-import type { Node, NodeStatus } from "../../types";
+import type { DeviceCategory, Node, NodeStatus } from "../../types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -92,8 +93,14 @@ export default function DeviceDetailPanel({
 }: DeviceDetailPanelProps) {
   const setSelectedNode = useNodeStore((s) => s.setSelectedNode);
   const { mutate: removeNode, isPending: isRemoving } = useRemoveNode();
+  const { data: plugins = [] } = useDevicePlugins();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const category = node.specs?.category;
+
+  const manifest = plugins.find((p) => p.id === node.plugin_id);
+  const category: DeviceCategory =
+    node.specs?.category ??
+    (manifest?.node_types?.[0] as DeviceCategory | undefined) ??
+    "unknown";
 
   const t = node.telemetry as Record<string, unknown>;
   const telemetryEntries = Object.entries(t).filter(
@@ -246,7 +253,7 @@ export default function DeviceDetailPanel({
         <div style={{ padding: "14px 14px 24px" }}>
           <Section title="Identity">
             <Row label="Plugin" value={node.plugin_id} />
-            <Row label="Category" value={category ?? "—"} />
+            <Row label="Category" value={category} />
             <Row label="Last Seen" value={fmtDate(node.last_seen)} />
           </Section>
 

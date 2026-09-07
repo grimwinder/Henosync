@@ -2,6 +2,7 @@ import { useRef, useState, useMemo, useCallback } from "react";
 import { useNodeStore } from "../../stores/nodeStore";
 import { useZoneStore } from "../../stores/zoneStore";
 import { useMarkerStore } from "../../stores/markerStore";
+import { useTrailStore } from "../../stores/trailStore";
 import type { DrawMode } from "../../pages/ZonesPage";
 
 export interface VICONSpace {
@@ -59,6 +60,7 @@ export default function VICONMap({
   );
   const zones = Object.values(useZoneStore((s) => s.zones));
   const markers = Object.values(useMarkerStore((s) => s.markers));
+  const viconTrails = useTrailStore((s) => s.viconTrails);
 
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -506,6 +508,24 @@ export default function VICONMap({
               />
             );
           })()}
+
+        {/* VICON trails */}
+        {Object.entries(viconTrails).map(([nodeId, points]) => {
+          if (points.length < 2) return null;
+          const pts = points.map(([x, y]) => toSvg(x, y).join(",")).join(" ");
+          return (
+            <polyline
+              key={nodeId}
+              points={pts}
+              fill="none"
+              stroke="#4A9EFF"
+              strokeWidth={2 * s}
+              strokeOpacity={0.8}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+          );
+        })}
 
         {/* Robot dots */}
         {nodes.flatMap((node) => {

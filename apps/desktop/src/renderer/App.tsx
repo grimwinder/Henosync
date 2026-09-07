@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { wsManager } from "./lib/websocket";
 import { useHealth, useViconConnection } from "./hooks/useSystem";
+import { useTrailRecorder } from "./hooks/useTrailRecorder";
 import { useSystemStore } from "./stores/systemStore";
 import { connectVicon, disconnectVicon, getViconObjects } from "./lib/api";
 import NavMenu from "./components/nav/NavMenu";
@@ -248,6 +249,7 @@ function AppInner() {
 
   const { data: health } = useHealth();
   const { data: viconConn, refetch: refetchVicon } = useViconConnection();
+  useTrailRecorder();
   const backendConnected = useSystemStore((s) => s.backendConnected);
 
   const nodeCount = health?.nodes_total ?? 0;

@@ -28,6 +28,7 @@ import MissionMap, {
 import MapStylePicker from "../components/map/MapStylePicker";
 import HubMarker from "../components/map/HubMarker";
 import NodeMarkers from "../components/map/NodeMarkers";
+import NodeTrails from "../components/map/NodeTrails";
 import VICONMap from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useControlPlugins } from "../hooks/usePlugins";
@@ -2111,6 +2112,7 @@ export default function MissionPage() {
           onMapReady={handleMapReady}
         />
         {map && <NodeMarkers map={map} />}
+        {map && <NodeTrails map={map} />}
         {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 
