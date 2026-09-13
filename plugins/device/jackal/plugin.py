@@ -14,6 +14,14 @@ Two ways to move it:
     topic rather than calling the NavigateToPose action — roslibpy's ROS2
     action support is documented as unreliable over rosbridge, while
     goal_pose is a plain topic publish and avoids that failure mode entirely.
+    Nav2 does the actual driving, but cmd_move_to() BLOCKS until arrival —
+    after publishing the goal it polls node.position (kept live by
+    vicon_manager) against the target until within GOAL_ARRIVAL_THRESHOLD_M,
+    GOAL_TIMEOUT_S elapses, or stop is requested. Without this, a caller
+    like auto-navigate — which treats a successful move_to() as "arrived,
+    send the next waypoint" — would blow through an entire multi-waypoint
+    sweep (AREA_COVERAGE) almost instantly, since publishing a goal returns
+    success long before the robot has actually gone anywhere.
   - cmd_vel (custom command): continuous manual driving for the `teleop`
     control plugin — normalised [-1, 1] linear/angular, scaled to
     max_linear_speed/max_angular_speed and published as a plain Twist.
@@ -45,12 +53,14 @@ Topics published:
   goal_pose                            geometry_msgs/PoseStamped        (move_to — Nav2 goal)
 
 KNOWN LIMITATION: cmd_stop / get_safe_state publish zero Twist directly to
-platform/cmd_vel_unstamped. If Nav2 is actively navigating, its controller
-server may resume publishing velocity commands moments later — this does
-NOT cancel the underlying Nav2 goal (goal cancellation would need a working
+platform/cmd_vel_unstamped and set state.stop_requested, which makes an
+in-flight cmd_move_to() give up its own wait promptly. Neither actually
+cancels the underlying Nav2 goal (goal cancellation would need a working
 ROS2 action-cancel call, which has the same rosbridge reliability problem
-noted above). Verify actual stopping behaviour on the robot before relying
-on this for safety-critical stops.
+noted above) — if Nav2 is actively navigating, its controller server may
+resume publishing velocity commands moments later, chasing a goal Henosync
+has already stopped watching. Verify actual stopping behaviour on the robot
+before relying on this for safety-critical stops.
 """
 
 import asyncio
@@ -96,6 +106,11 @@ class _NodeState:
         self.ros: Optional[Any] = None
         self.cmd_vel_pub: Optional[Any] = None
         self.goal_pose_pub: Optional[Any] = None
+        # Set by cmd_stop()/get_safe_state() to interrupt an in-flight
+        # cmd_move_to() poll loop — see the KNOWN LIMITATION note up top:
+        # this makes our own wait give up promptly, it does NOT cancel the
+        # underlying Nav2 goal itself.
+        self.stop_requested: bool = False
 
         # Position — GPS mode only, written by _on_gps.
         # VICON mode: vicon_manager sets node.position directly, nothing here.
@@ -146,6 +161,15 @@ class JackalPlugin(NodePlugin):
     POSITION_STALE_TIMEOUT: float = 3.0
     # Treat connection as dead if no ROS message arrives for this long
     MESSAGE_TIMEOUT: float = 5.0
+
+    # cmd_move_to() arrival polling — see that method's docstring. Nav2 does
+    # the actual driving; we only poll node.position to know when it's done.
+    GOAL_ARRIVAL_THRESHOLD_M: float = 0.5   # a little looser than Nav2's own
+                                             # default xy_goal_tolerance (commonly
+                                             # ~0.25m), so we don't out-wait Nav2
+                                             # itself considering the goal reached
+    GOAL_POLL_PERIOD_S: float = 0.5
+    GOAL_TIMEOUT_S: float = 120.0           # matches auto-navigate's own WAYPOINT_TIMEOUT_S
 
     def __init__(self):
         super().__init__()
@@ -486,8 +510,20 @@ class JackalPlugin(NodePlugin):
         z: Optional[float] = None,
     ) -> CommandResult:
         """
-        Publishes a Nav2 goal_pose (PoseStamped) — one-shot, not a blocking
-        controller. Nav2's bt_navigator plans and drives the path itself.
+        Publishes a Nav2 goal_pose (PoseStamped), then BLOCKS — polling
+        node.position (kept live by vicon_manager) until the robot is within
+        GOAL_ARRIVAL_THRESHOLD_M of the target, GOAL_TIMEOUT_S elapses, or
+        cmd_stop()/get_safe_state() sets state.stop_requested. Nav2's own
+        bt_navigator does the actual path planning and driving; this method
+        only watches from the outside to know when it's done — unlike
+        turtlebot3's cmd_move_to(), which drives the robot itself in the same
+        loop it blocks in.
+
+        This matters for callers like auto-navigate: a move_to() that returns
+        "success" the instant the goal is *published* (the previous
+        behaviour here) gets treated as "arrived, send the next waypoint" —
+        fatal for AREA_COVERAGE's multi-waypoint sweep, since each new goal_pose
+        supersedes the last before the robot has actually driven anywhere.
 
         Only supports local-frame (VICON) targets for now: a raw WGS84 target
         can't be turned into a Nav2 "map"-frame goal without the robot's own
@@ -523,19 +559,62 @@ class JackalPlugin(NodePlugin):
             return CommandResult(success=False, message=f"Failed to publish goal: {e}")
 
         logger.info("Jackal [%s]: Nav2 goal published — local (%.2f, %.2f)", node.name, x, y)
-        return CommandResult(
-            success=True,
-            message=(
-                f"Nav2 goal sent to local ({x:.2f}, {y:.2f}). Assumes the VICON home "
-                "origin is aligned with the Jackal's Nav2 map frame — verify this if "
-                "the robot doesn't arrive at the expected position."
-            ),
-        )
+
+        # Reset any stale stop flag from a previous move before waiting on
+        # this one — mirrors turtlebot3.cmd_move_to()'s same guard.
+        state.stop_requested = False
+        origin = node.local_origin
+        elapsed = 0.0
+
+        while node.id in self._nodes and state.connected:
+            if state.stop_requested:
+                state.stop_requested = False
+                return CommandResult(
+                    success=False,
+                    message=(
+                        "Stopped — note this does not cancel the underlying Nav2 goal, "
+                        "see the KNOWN LIMITATION note in this plugin"
+                    ),
+                )
+            if elapsed >= self.GOAL_TIMEOUT_S:
+                logger.warning(
+                    "Jackal [%s]: goal timed out after %.0fs — local (%.2f, %.2f)",
+                    node.name, self.GOAL_TIMEOUT_S, x, y,
+                )
+                return CommandResult(success=False, message="Navigation timed out")
+
+            pos = node.position
+            if pos is None or origin is None:
+                await asyncio.sleep(self.GOAL_POLL_PERIOD_S)
+                elapsed += self.GOAL_POLL_PERIOD_S
+                continue
+
+            # node.position is real WGS84 (vicon_manager's synthetic
+            # conversion) — project back to local metres via the SAME
+            # origin used to build that conversion, so it compares directly
+            # against the (x, y) target already in local metres. Same
+            # equirectangular formula as cmd_return_home() below.
+            R = 6_371_000.0
+            dlat = math.radians(pos.lat - origin.lat)
+            dlon = math.radians(pos.lon - origin.lon)
+            cur_y = R * dlat
+            cur_x = R * dlon * math.cos(math.radians(origin.lat))
+
+            distance = math.hypot(x - cur_x, y - cur_y)
+            if distance <= self.GOAL_ARRIVAL_THRESHOLD_M:
+                logger.info("Jackal [%s]: arrived at local (%.2f, %.2f)", node.name, x, y)
+                return CommandResult(success=True, message="Arrived")
+
+            await asyncio.sleep(self.GOAL_POLL_PERIOD_S)
+            elapsed += self.GOAL_POLL_PERIOD_S
+
+        return CommandResult(success=False, message="Disconnected during navigation")
 
     async def cmd_stop(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
+        state.stop_requested = True
         self._publish_zero_twist(state)
         logger.info("Jackal [%s]: stop", node.name)
         return CommandResult(
@@ -612,6 +691,7 @@ class JackalPlugin(NodePlugin):
     async def get_safe_state(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)
         if state:
+            state.stop_requested = True
             self._publish_zero_twist(state)
         logger.warning("Jackal [%s]: safe state — zero velocity sent", node.name)
         return CommandResult(

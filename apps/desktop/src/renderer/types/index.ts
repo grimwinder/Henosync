@@ -279,7 +279,7 @@ export interface PluginCapabilityDef {
 }
 
 export interface PluginConfigField {
-  type: "string" | "number" | "boolean" | "select" | "device_select";
+  type: "string" | "number" | "boolean" | "select" | "device_select" | "zone_select" | "marker_select";
   label: string;
   required?: boolean;
   default?: unknown;

@@ -1,4 +1,6 @@
 import { useNodeStore } from "../../stores/nodeStore";
+import { useZoneStore } from "../../stores/zoneStore";
+import { useMarkerStore } from "../../stores/markerStore";
 import type { PluginConfigField } from "../../types";
 
 export const fieldStyle: React.CSSProperties = {
@@ -60,6 +62,74 @@ function DeviceSelectField({
   );
 }
 
+function ZoneSelectField({
+  fieldKey,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  value: unknown;
+  onChange: (k: string, v: unknown) => void;
+}) {
+  const zones = useZoneStore((s) => Object.values(s.zones));
+  return (
+    <select
+      value={value as string}
+      onChange={(e) => onChange(fieldKey, e.target.value)}
+      style={{
+        ...fieldStyle,
+        cursor: "pointer",
+        appearance: "none",
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B95A3' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "right 10px center",
+        paddingRight: "28px",
+      }}
+    >
+      <option value="">Select a zone…</option>
+      {zones.map((z) => (
+        <option key={z.id} value={z.id}>
+          {z.name} ({z.map_mode})
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function MarkerSelectField({
+  fieldKey,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  value: unknown;
+  onChange: (k: string, v: unknown) => void;
+}) {
+  const markers = useMarkerStore((s) => Object.values(s.markers));
+  return (
+    <select
+      value={value as string}
+      onChange={(e) => onChange(fieldKey, e.target.value)}
+      style={{
+        ...fieldStyle,
+        cursor: "pointer",
+        appearance: "none",
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B95A3' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "right 10px center",
+        paddingRight: "28px",
+      }}
+    >
+      <option value="">Select a marker…</option>
+      {markers.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.name} ({m.map_mode})
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function ConfigField({
   fieldKey,
   field,
@@ -82,6 +152,14 @@ export function ConfigField({
 
       {field.type === "device_select" && (
         <DeviceSelectField fieldKey={fieldKey} value={value} onChange={onChange} />
+      )}
+
+      {field.type === "zone_select" && (
+        <ZoneSelectField fieldKey={fieldKey} value={value} onChange={onChange} />
+      )}
+
+      {field.type === "marker_select" && (
+        <MarkerSelectField fieldKey={fieldKey} value={value} onChange={onChange} />
       )}
 
       {field.type === "boolean" && (

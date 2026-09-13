@@ -704,11 +704,17 @@ class AutoNavigatePlugin(ControlPlugin):
                         {"label": "Perimeter Patrol", "value": StepType.PERIMETER_PATROL},
                     ],
                 },
-                "target_id": {
-                    "type": "string",
-                    "label": "Marker or Zone ID",
-                    "required": True,
-                    "placeholder": "From the map panel",
+                "marker_id": {
+                    "type": "marker_select",
+                    "label": "Marker",
+                    "required": False,
+                    "description": "Move to Marker only",
+                },
+                "zone_id": {
+                    "type": "zone_select",
+                    "label": "Zone",
+                    "required": False,
+                    "description": "Move to Zone / Area Coverage / Perimeter Patrol only",
                 },
                 "speed_ms": {
                     "type": "number",
@@ -1337,7 +1343,6 @@ class AutoNavigatePlugin(ControlPlugin):
             logger.error("%s: unknown step_type %r", self.PLUGIN_ID, raw_type)
             return []
 
-        target_id = cfg.get("target_id", "")
         step = NavigationStep(
             step_type=step_type,
             speed_ms=float(cfg.get("speed_ms", 1.0)),
@@ -1347,8 +1352,8 @@ class AutoNavigatePlugin(ControlPlugin):
         )
 
         if step_type == StepType.MOVE_TO_MARKER:
-            step.marker_id = target_id
+            step.marker_id = cfg.get("marker_id", "")
         else:
-            step.zone_id = target_id
+            step.zone_id = cfg.get("zone_id", "")
 
         return [step]
