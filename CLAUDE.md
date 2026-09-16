@@ -525,9 +525,9 @@ Required fields: `id`, `name`, `version`, `author`, `description`, `sdk_version`
 `optional_capabilities` (optional array of `DeviceCapability` strings) — capabilities the user can toggle in the Add Device modal (e.g. attachments). Selected set is stored in `config.selected_capabilities`.
 Both are passed through to the frontend as-is from the manifest. Backend `list_plugins()` returns the full manifest dict.
 
-`config_schema` field types: `"string"`, `"number"`, `"boolean"`, `"select"`.
+`config_schema` field types: `"string"`, `"number"`, `"boolean"`, `"select"`, `"device_select"` (live node dropdown), `"marker_select"` (live map marker dropdown), `"zone_select"` (live zone dropdown — added for the `area-mission` control plugin).
 For `"select"`: include `"options": [{"label": "...", "value": "..."}]`.
-Optional per field: `required`, `default`, `min`, `max`, `placeholder`, `description`.
+Optional per field: `required`, `default`, `min`, `max`, `placeholder`, `description`, `show_when: {field, value}` (hides the field in the Mission Planner step config panel unless another field in the same schema currently equals `value` — filtering is done in `MissionPage.tsx`'s config field list, not per-field; `AddNodeModal` has its own separate `show_when` filtering for device config fields).
 
 ---
 
@@ -565,6 +565,18 @@ Manual arrow-key driving for a single ground vehicle. `REQUIRED_CAPABILITIES=[MO
 - `stop()` clears all pressed keys and sends one final `cmd_vel(0, 0)` — the operation can never be stopped mid-drive.
 - Frontend: `PluginsPage.tsx`'s `ControlPluginPanel` special-cases `plugin.id === "teleop"` to show a live drive-status chip and mount `useArrowKeyDrive()` (`renderer/hooks/useArrowKeyDrive.ts`), which binds `window` keydown/keyup listeners only while the operation is running, dedupes OS key-repeat, and — critically — releases all held keys via `sendOperatorInput()` on cleanup (stop/unmount) so the vehicle never keeps driving after the panel closes.
 - Only wired against `ue-sim` today — any other `AGV` device plugin that implements a `cmd_vel` custom command works automatically, since the control plugin has no device-specific code.
+
+### Area Mission plugin (`plugins/control/area-mission/`)
+
+Abstract mission description, MVP: operator draws/selects a zone on the existing Zones page and picks a mission style — `scan` (coverage sweep) or `patrol` (loop the boundary) — instead of hand-building a step sequence. GPS zones only (`zone.map_mode == "gps"`); VICON zones are rejected with an alert. `REQUIRED_CAPABILITIES=[MOVE_2D]`, `SUPPORTED_CATEGORIES` matches `auto-navigate` (AGV, DRONE, LEGGED, TRACKED, VTOL), `PRIORITY=5`.
+
+- Reuses the existing closed-loop `DeviceProxy.move_to()` primitive per waypoint — this plugin only generates the waypoint list, it does not implement any navigation control itself.
+- **Scan**: boustrophedon (lawnmower) sweep over the target zone's bounding box. Point-sampled, not geometrically clipped — for each row (spaced `sweep_spacing_m` apart) it scans along x at a fine step (`max(0.5, sweep_spacing_m / 5)`) and keeps the first/last point that is inside the target zone (`zone_manager.is_point_in_zone()`) and outside any `NO_GO` zone (`zone_manager.is_in_no_go_zone()`). Handles rectangles/simple convex zones well; a concave zone can produce a broken sweep since there's no multi-segment row splitting.
+- **Patrol**: walks the zone's stored polygon vertices in order (circle zones get a sampled ring, ~1 point per 3m of circumference, min 8), looped `patrol_laps` times (0 = until stopped).
+- Each waypoint move is wrapped in `asyncio.wait_for(waypoint_timeout_s)` and aborts the whole operation (alert sent, no retry) on timeout or failure — same pattern as `auto-navigate`, now applied per-waypoint instead of once. This is deliberate: a stale/lost GPS fix mid-sweep does not zero the device's velocity on its own (see jackal note below), so the plugin-level timeout is the actual safety net for a multi-waypoint outdoor mission.
+- `get_status()` reports fractional progress (`waypoint_index / total_waypoints`) except in infinite-patrol mode, where progress is intentionally left `None` rather than wrapping past 100%.
+- `zone_manager.is_point_in_zone(lat, lon, zone)` (`core/zone_manager.py`) was added as a small public wrapper around the existing private `_is_inside_zone()` so control plugins can containment-check a specific `Zone` object without duplicating ray-casting/haversine math.
+- Frontend: added `zone_select` config field type (`types/index.ts`, `MissionPage.tsx` — `ZoneSelectField`, mirrors `MarkerSelectField` exactly, reads from `useZoneStore`) and wired `show_when` filtering into the Mission Planner step config panel (previously only `AddNodeModal` respected it — `mission_type` toggles `sweep_spacing_m` vs `patrol_laps` visibility).
 
 ### Control template plugin (`plugins/control-template/`)
 
@@ -750,3 +762,7 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-09-07 | Crazyflie plugin, teleop max_speed, device error state display fix, trail visualization (trailStore/useTrailRecorder/NodeTrails/VICONMap SVG polylines), online-first device sort |
 | 2026-09-07 | auto-navigate: added max_speed config (m/s, optional); DeviceProxy.move_to() accepts and forwards max_speed; turtlebot3 cmd_move_to reads max_speed and caps at min(max_speed, MAX_LINEAR_VEL) |
 | 2026-09-07 | jackal: cmd_move_to now polls node.position after publishing Nav2 goal — blocks until within arrival_radius_m or stop requested; added stop_requested to \_NodeState; cmd_stop and get_safe_state set it to interrupt navigation |
+| 2026-09-16 | Fixed jackal disconnect() — still referenced state.goal_pose_pub, removed from \_NodeState by the 2026-09-07 velocity-controller rework but left in the unadvertise loop; every disconnect was raising AttributeError |
+| 2026-09-16 | zone_manager: added is_point_in_zone(lat, lon, zone) — public wrapper around \_is_inside_zone() so control plugins can containment-check a specific Zone without reaching into a private method or duplicating ray-casting/haversine math |
+| 2026-09-16 | Added plugins/control/area-mission/ — abstract mission description MVP: operator picks a drawn GPS zone + mission style (scan/patrol); plugin generates waypoints (boustrophedon sweep or boundary loop) and drives them via the existing DeviceProxy.move_to() primitive, no new navigation control code. Per-waypoint asyncio.wait_for timeout aborts the whole operation on a stale/lost GPS fix rather than continuing blind. Generated waypoints inside any NO_GO zone are skipped |
+| 2026-09-16 | Added zone_select config field type (types/index.ts, MissionPage.tsx ZoneSelectField) mirroring marker_select; wired show_when filtering into MissionPage's step config panel (previously only AddNodeModal respected it) so area-mission's mission_type select toggles sweep_spacing_m/patrol_laps visibility |

@@ -184,6 +184,14 @@ class ZoneManager:
 
     # ── Zone Checking ──────────────────────────────────────────
 
+    def is_point_in_zone(self, lat: float, lon: float, zone: Zone) -> bool:
+        """
+        Check if a point is inside a specific zone.
+        Used by control plugins to generate paths confined to a target zone
+        (e.g. coverage/patrol waypoint generation).
+        """
+        return self._is_inside_zone(lat, lon, zone)
+
     def is_in_no_go_zone(
         self,
         lat: float,

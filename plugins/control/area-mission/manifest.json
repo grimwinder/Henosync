@@ -1,0 +1,10 @@
+{
+  "id": "area-mission",
+  "name": "Area Mission",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Abstract mission description — draw a zone, pick a style (scan or patrol), the robot generates and drives its own waypoints. GPS zones only.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv", "drone"],
+  "capabilities": []
+}

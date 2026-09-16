@@ -423,7 +423,7 @@ class JackalPlugin(NodePlugin):
                 sub.unsubscribe()
             except Exception:
                 pass
-        for pub in (state.cmd_vel_pub, state.goal_pose_pub):
+        for pub in (state.cmd_vel_pub,):
             if pub:
                 try:
                     pub.unadvertise()
