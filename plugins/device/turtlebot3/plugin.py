@@ -207,6 +207,17 @@ class TurtleBot3Plugin(ROS2Plugin):
         y, z = q.get("y", 0.0), q.get("z", 0.0)
         return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
+    @staticmethod
+    def _local_to_gps(x: float, y: float, home_lat: float, home_lon: float) -> tuple[float, float]:
+        """Equirectangular: x=East, y=North from home origin — same formula
+        vicon_manager.py uses for this device's own live position, so a
+        VICON-frame move_to() target lands at the same real-world point
+        vicon_manager would compute for those same x/y metres."""
+        R = 6_371_000.0
+        lat = home_lat + math.degrees(y / R)
+        lon = home_lon + math.degrees(x / (R * math.cos(math.radians(home_lat))))
+        return lat, lon
+
     def _publish_twist(self, state: _NodeState, linear: float, angular: float) -> None:
         if state.cmd_vel_pub:
             self.publish(state.cmd_vel_pub, {
@@ -244,6 +255,17 @@ class TurtleBot3Plugin(ROS2Plugin):
                 return CommandResult(success=False, message="No local_origin set — cannot convert local target")
             lat, lon = self._local_to_gps(x, y, node.local_origin.lat, node.local_origin.lon)
 
+        # In VICON mode, prefer VICON's own reported heading (pos.heading,
+        # world frame — set directly by vicon_manager from the tracked
+        # rigid body's rotation) over onboard odometry. The bearing to
+        # target above is computed against node.position, which in VICON
+        # mode IS the VICON world frame — steering off odom's heading_error
+        # against that bearing only works if odom's own frame happens to be
+        # aligned with VICON's, which isn't guaranteed (drift, a different
+        # zero-heading calibration, etc.). GPS mode is unaffected — pos.heading
+        # is never populated from GPS, so this always falls back to odom there.
+        use_vicon_heading = x is not None and y is not None
+
         state.stop_requested = False
         while node.id in self._nodes and state.connected:
             if state.stop_requested:
@@ -266,9 +288,13 @@ class TurtleBot3Plugin(ROS2Plugin):
                 return CommandResult(success=True, message="Arrived")
 
             bearing = math.atan2(dy, dx)
+            heading = (
+                pos.heading if (use_vicon_heading and pos.heading is not None)
+                else state.heading
+            )
             heading_error = math.atan2(
-                math.sin(bearing - state.heading),
-                math.cos(bearing - state.heading),
+                math.sin(bearing - heading),
+                math.cos(bearing - heading),
             )
             linear = min(
                 self.MAX_LINEAR_VEL,
