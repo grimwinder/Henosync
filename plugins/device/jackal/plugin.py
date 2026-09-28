@@ -234,8 +234,8 @@ class JackalPlugin(NodePlugin):
                 # local_origin defaults to (0, 0) — GPS conversion will be
                 # approximate until the arena origin is configured elsewhere.
                 node.local_origin = LocalOrigin(
-                    lat=float(config.get("home_lat", 0.0)),
-                    lon=float(config.get("home_lon", 0.0)),
+                    lat=float(config.get("home_lat") or 0.0),
+                    lon=float(config.get("home_lon") or 0.0),
                 )
 
             else:

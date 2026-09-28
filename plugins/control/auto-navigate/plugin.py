@@ -80,7 +80,15 @@ zone's own local arena metres (no shared real-world coordinate exists to
 convert through) and only turned into lat/lon per device, one waypoint at a
 time, right before dispatch — see the GPS vs VICON targets paragraph above.
 
-PERIMETER_PATROL is still unimplemented — deferred.
+PERIMETER_PATROL walks the target zone's boundary vertices in order (a
+circle zone is approximated as a polygon, same as AREA_COVERAGE) for
+patrol_laps loops, closing the final loop back to the first vertex
+(_perimeter_vertices, _run_perimeter_path). Every assigned device patrols
+the same shared loop concurrently — there's no natural way to split a
+perimeter across devices the way AREA_COVERAGE splits a zone into bands.
+Same GPS/VICON kind-tagging as AREA_COVERAGE: a VICON-mode zone's vertices
+stay in the zone's own arena metres and are converted to lat/lon per
+device, one waypoint at a time, at dispatch.
 """
 
 import asyncio
@@ -145,6 +153,10 @@ AREA_PROFILE_X_SAMPLES = 80      # x-samples per y-slice when estimating width(y
                                   # that profile — a one-time fixed cost per step start,
                                   # independent of zone size or spacing, so no need for
                                   # MAX_COVERAGE_SAMPLES-style coarsening here
+
+# Perimeter patrol (_execute_perimeter_patrol) — independent of the above.
+MAX_PATROL_LAPS = 1000           # safety cap on step.patrol_laps, same spirit as
+                                  # mission_engine's MAX_ITERATIONS cap on LOOP steps
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -472,6 +484,25 @@ def _generate_coverage_paths(
     return "gps", paths_latlon
 
 
+def _perimeter_vertices(zone) -> tuple[str, list[tuple[float, float]]]:
+    """
+    Ordered boundary vertices for PERIMETER_PATROL — one lap's worth, in the
+    same order the zone was drawn (a circle zone is approximated as a
+    CIRCLE_APPROXIMATION_SIDES-gon, same as _zone_polygon_and_origin() /
+    _vicon_zone_polygon()). Returns (kind, vertices) with the same
+    "gps"/"local" tagging as _generate_coverage_paths(): "gps" is real
+    lat/lon, ready to use as-is; "local" is the VICON zone's raw arena
+    metres, converted to lat/lon per DEVICE at dispatch time (see
+    _run_perimeter_path) since there's no shared real-world coordinate for
+    a VICON arena.
+    """
+    if getattr(zone, "map_mode", "gps") == "vicon":
+        return "local", _vicon_zone_polygon(zone)
+
+    polygon, origin_lat, origin_lon = _zone_polygon_and_origin(zone)
+    return "gps", [_xy_to_latlon(x, y, origin_lat, origin_lon) for x, y in polygon]
+
+
 # ── Step types ─────────────────────────────────────────────────────────────────
 
 class StepType(str, Enum):
@@ -753,6 +784,8 @@ class AutoNavigatePlugin(ControlPlugin):
                     "label": "Patrol Laps",
                     "required": False,
                     "default": 1,
+                    "min": 1,
+                    "max": 1000,
                     "description": "Number of boundary loops — Perimeter Patrol only",
                 },
                 "arrival_radius_m": {
@@ -823,8 +856,11 @@ class AutoNavigatePlugin(ControlPlugin):
         so each device converts it via its own local_origin at dispatch time;
         see _resolve_target()). AREA_COVERAGE resolves one zone, splits it
         into a per-device path (see _execute_area_coverage), and runs every
-        device on its own path concurrently. PERIMETER_PATROL remains an
-        unimplemented per-device stub.
+        device on its own path concurrently. PERIMETER_PATROL resolves one
+        zone's boundary and runs every device around the same shared loop
+        concurrently (see _execute_perimeter_patrol) — there's no natural way
+        to split a perimeter across devices the way AREA_COVERAGE splits a
+        zone into bands, so it follows the shared-target pattern instead.
         """
         if step.step_type in (StepType.MOVE_TO_MARKER, StepType.MOVE_TO_ZONE):
             resolved = self._resolve_target(step, context)
@@ -850,8 +886,7 @@ class AutoNavigatePlugin(ControlPlugin):
         elif step.step_type == StepType.AREA_COVERAGE:
             await self._execute_area_coverage(step, context)
         elif step.step_type == StepType.PERIMETER_PATROL:
-            for device in context.devices:
-                await self._execute_perimeter_patrol(step, device, context)
+            await self._execute_perimeter_patrol(step, context)
 
     def _resolve_target(
         self, step: NavigationStep, context
@@ -1379,22 +1414,108 @@ class AutoNavigatePlugin(ControlPlugin):
             self._collision_paused.discard(device.id)
             self._device_target.pop(device.id, None)
 
-    async def _execute_perimeter_patrol(self, step: NavigationStep, device, context) -> None:
+    async def _execute_perimeter_patrol(self, step: NavigationStep, context) -> None:
         """
-        Follow the boundary of a zone for a set number of laps.
+        Follow the boundary of the target zone for step.patrol_laps loops.
+        Every assigned device walks the same shared boundary loop
+        concurrently (asyncio.gather in _run_perimeter_path) — there's no
+        natural way to split a perimeter across devices the way
+        AREA_COVERAGE splits a zone into bands, so multiple devices just
+        patrol the same loop at once (the _collision_guard() separation
+        check still applies, same as everywhere else).
+        """
+        zone = context.zone_manager.get_zone(step.zone_id) if step.zone_id else None
+        if not zone:
+            self._status_text = f"Zone not found: {step.zone_id}"
+            logger.error("%s: %s", self.PLUGIN_ID, self._status_text)
+            return
 
-        TODO:
-        - Look up zone polygon via context.zone_manager
-        - Extract ordered boundary vertices
-        - For each lap: send device.move_to() for each vertex in sequence
-        - Check self._stop_requested between waypoints
-        """
+        devices = list(context.devices)
+        if not devices:
+            return
+
+        try:
+            kind, vertices = _perimeter_vertices(zone)
+        except ValueError as e:
+            self._status_text = f"Perimeter planning failed: {e}"
+            logger.error("%s: %s", self.PLUGIN_ID, self._status_text)
+            await context.send_alert("Perimeter planning failed", str(e), EventSeverity.WARNING)
+            return
+
+        laps = min(MAX_PATROL_LAPS, max(1, step.patrol_laps))
         logger.info(
-            "%s: PERIMETER_PATROL — zone=%s laps=%d speed=%.1f m/s",
-            self.PLUGIN_ID, step.zone_id, step.patrol_laps, step.speed_ms
+            "%s: PERIMETER_PATROL — zone=%s laps=%d across %d device(s) [%s]",
+            self.PLUGIN_ID, zone.name, laps, len(devices), kind
         )
-        # TODO: implement
-        await asyncio.sleep(0)
+
+        await asyncio.gather(
+            *(
+                self._run_perimeter_path(
+                    device, vertices, kind, laps, context,
+                    step.arrival_radius_m, step.max_speed,
+                )
+                for device in devices
+            ),
+            return_exceptions=True,
+        )
+
+    async def _run_perimeter_path(
+        self,
+        device,
+        vertices: list[tuple[float, float]],
+        kind: str,
+        laps: int,
+        context,
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
+    ) -> bool:
+        """
+        Drive one device around the zone boundary `laps` times, closing the
+        final loop back to the first vertex (consecutive laps already chain
+        naturally — the last vertex of one lap IS the first waypoint of the
+        next — but the very last lap needs an explicit waypoint back to
+        vertices[0] to close it). Registers in _current_devices for the
+        whole patrol (not per-waypoint), same as _run_coverage_path, so
+        stop() and _collision_guard() treat a device mid-patrol the same as
+        one mid-single-waypoint navigation.
+
+        kind=="local" means `vertices` are in the VICON zone's own arena
+        metres (see _perimeter_vertices) — converted to this device's own
+        lat/lon via device.local_to_gps() one waypoint at a time, since
+        there's no shared real-world coordinate to convert through once.
+        """
+        self._current_devices[device.id] = device
+        try:
+            if len(vertices) < 2:
+                self._device_status[device.name] = "Zone has no boundary to patrol"
+                return False
+
+            waypoints = vertices * laps + [vertices[0]]
+            total = len(waypoints)
+            for i, (a, b) in enumerate(waypoints):
+                if self._stop_requested:
+                    self._device_status[device.name] = "Stopped"
+                    return False
+                lap_num = min(laps, i // len(vertices) + 1)
+                self._device_status[device.name] = (
+                    f"Patrolling — lap {lap_num}/{laps}, waypoint {i + 1}/{total}"
+                )
+                lat, lon = device.local_to_gps(a, b) if kind == "local" else (a, b)
+                if not await self._navigate_one_waypoint(
+                    device, lat, lon, context, arrival_radius_m, max_speed
+                ):
+                    self._device_status[device.name] = f"Patrol failed at waypoint {i + 1}/{total}"
+                    return False
+
+            self._device_status[device.name] = f"Complete — patrolled {laps} lap(s)"
+            return True
+        except asyncio.CancelledError:
+            self._device_status[device.name] = "Stopped"
+            raise
+        finally:
+            self._current_devices.pop(device.id, None)
+            self._collision_paused.discard(device.id)
+            self._device_target.pop(device.id, None)
 
     # ── Config parsing ─────────────────────────────────────────────────────────
 
