@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useNodeStore } from "../../stores/nodeStore";
 import { useNodes } from "../../hooks/useNodes";
+import { useDevicePlugins } from "../../hooks/usePlugins";
 import AddNodeModal from "./AddNodeModal";
 import DeviceIcon from "./DeviceIcon";
 import type {
@@ -120,13 +121,29 @@ function CapabilityBadge({
 
 // ── Device card ────────────────────────────────────────────────────────────────
 
-function DeviceCard({ node }: { node: Node }) {
+function DeviceCard({
+  node,
+  plugins,
+}: {
+  node: Node;
+  plugins: import("../../types").PluginManifest[];
+}) {
   const selectedNodeId = useNodeStore((s) => s.selectedNodeId);
   const setSelectedNode = useNodeStore((s) => s.setSelectedNode);
   const selected = selectedNodeId === node.id;
 
-  const category = node.specs?.category ?? "unknown";
-  const capabilities = node.specs?.capabilities ?? [];
+  const manifest = plugins.find((p) => p.id === node.plugin_id);
+
+  const category: DeviceCategory =
+    node.specs?.category ??
+    (manifest?.node_types?.[0] as DeviceCategory | undefined) ??
+    "unknown";
+  const capabilities =
+    node.specs?.capabilities ??
+    manifest?.fixed_capabilities?.map((c: DeviceCapability) => ({
+      capability: c,
+    })) ??
+    [];
   const statusColor = STATUS_COLOR[node.status];
   const shortId = node.id.slice(0, 6).toUpperCase();
 
@@ -247,8 +264,9 @@ function DeviceCard({ node }: { node: Node }) {
           </span>
         </div>
 
-        {/* Battery bar */}
-        {node.battery_percent !== null &&
+        {/* Battery bar — hidden in error state */}
+        {node.status !== "error" &&
+          node.battery_percent !== null &&
           node.battery_percent !== undefined && (
             <div
               style={{
@@ -310,10 +328,21 @@ interface DevicePanelProps {
 export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // Keep the list fresh from the API
   useNodes();
+  const { data: plugins = [] } = useDevicePlugins();
 
-  const nodes = useNodeStore((s) => Object.values(s.nodes));
+  const STATUS_ORDER: Record<NodeStatus, number> = {
+    online: 0,
+    degraded: 1,
+    connecting: 2,
+    offline: 3,
+    error: 4,
+  };
+  const nodes = useNodeStore((s) =>
+    Object.values(s.nodes).sort(
+      (a, b) => (STATUS_ORDER[a.status] ?? 5) - (STATUS_ORDER[b.status] ?? 5),
+    ),
+  );
   const online = nodes.filter((n) => n.status === "online").length;
 
   return (
@@ -410,7 +439,9 @@ export default function DevicePanel({ readOnly = false }: DevicePanelProps) {
               Click <strong style={{ color: "#4A9EFF" }}>+</strong> to add one.
             </div>
           ) : (
-            nodes.map((node) => <DeviceCard key={node.id} node={node} />)
+            nodes.map((node) => (
+              <DeviceCard key={node.id} node={node} plugins={plugins} />
+            ))
           )}
         </div>
       </div>

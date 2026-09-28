@@ -14,6 +14,7 @@ from .event_bus import event_bus
 from .fleet_context import FleetContext
 from .marker_manager import marker_manager
 from .telemetry_bus import telemetry_bus
+from .marker_manager import marker_manager
 from .zone_manager import zone_manager
 
 logger = logging.getLogger(__name__)

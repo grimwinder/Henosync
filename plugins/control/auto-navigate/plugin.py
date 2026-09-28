@@ -492,6 +492,8 @@ class NavigationStep:
 
     # Common parameters
     speed_ms: float = 1.0             # travel speed in m/s
+    arrival_radius_m: Optional[float] = None  # None = device's own default
+    max_speed: Optional[float] = None         # None = device's own maximum
 
     # AREA_COVERAGE parameters
     coverage_spacing_m: float = 5.0   # distance between sweep lanes in metres
@@ -554,6 +556,12 @@ class AutoNavigatePlugin(ControlPlugin):
         # _go_to_local_waypoint_tracked) is set at a time.
         self._current_target: Optional[tuple[float, float]] = None
         self._current_local_target: Optional[tuple[float, float]] = None
+        # Active step's speed/arrival tuning, so on_device_joined() (a device
+        # recruited mid-step) sends the newcomer with the same tuning as
+        # everyone already navigating — set alongside _current_target /
+        # _current_local_target in _execute_step().
+        self._current_arrival_radius_m: Optional[float] = None
+        self._current_max_speed: Optional[float] = None
         # FleetContext, stashed here (the base class declares self._context
         # but operation_manager never actually populates it) so
         # on_device_joined() — which isn't passed a context — can still
@@ -747,6 +755,24 @@ class AutoNavigatePlugin(ControlPlugin):
                     "default": 1,
                     "description": "Number of boundary loops — Perimeter Patrol only",
                 },
+                "arrival_radius_m": {
+                    "type": "number",
+                    "label": "Arrival Radius (m)",
+                    "required": False,
+                    "min": 0.05,
+                    "max": 20.0,
+                    "placeholder": "Device default",
+                    "description": "Distance from target considered 'arrived'. Leave blank for the device's own default.",
+                },
+                "max_speed": {
+                    "type": "number",
+                    "label": "Max Speed (m/s)",
+                    "required": False,
+                    "min": 0.01,
+                    "max": 2.0,
+                    "placeholder": "Device max",
+                    "description": "Cap the navigation speed. Leave blank for device maximum.",
+                },
             },
         )
 
@@ -766,10 +792,16 @@ class AutoNavigatePlugin(ControlPlugin):
             return
         if self._current_target is not None:
             lat, lon = self._current_target
-            asyncio.create_task(self._go_to_waypoint_tracked(device, lat, lon, self._context))
+            asyncio.create_task(self._go_to_waypoint_tracked(
+                device, lat, lon, self._context,
+                self._current_arrival_radius_m, self._current_max_speed,
+            ))
         elif self._current_local_target is not None:
             x_m, y_m = self._current_local_target
-            asyncio.create_task(self._go_to_local_waypoint_tracked(device, x_m, y_m, self._context))
+            asyncio.create_task(self._go_to_local_waypoint_tracked(
+                device, x_m, y_m, self._context,
+                self._current_arrival_radius_m, self._current_max_speed,
+            ))
 
     async def on_device_left(self, device) -> None:
         logger.warning("%s: device lost — %s", self.PLUGIN_ID, device.name)
@@ -799,14 +831,22 @@ class AutoNavigatePlugin(ControlPlugin):
             if resolved is None:
                 return
             kind, a, b = resolved
+            self._current_arrival_radius_m = step.arrival_radius_m
+            self._current_max_speed = step.max_speed
             if kind == "gps":
                 self._current_target = (a, b)
                 self._current_local_target = None
-                await self._run_on_devices(list(context.devices), (a, b), context)
+                await self._run_on_devices(
+                    list(context.devices), (a, b), context,
+                    step.arrival_radius_m, step.max_speed,
+                )
             else:
                 self._current_target = None
                 self._current_local_target = (a, b)
-                await self._run_on_devices_local(list(context.devices), (a, b), context)
+                await self._run_on_devices_local(
+                    list(context.devices), (a, b), context,
+                    step.arrival_radius_m, step.max_speed,
+                )
         elif step.step_type == StepType.AREA_COVERAGE:
             await self._execute_area_coverage(step, context)
         elif step.step_type == StepType.PERIMETER_PATROL:
@@ -876,17 +916,22 @@ class AutoNavigatePlugin(ControlPlugin):
         return None
 
     async def _run_on_devices(
-        self, devices: list, target: tuple[float, float], context
+        self, devices: list, target: tuple[float, float], context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
     ) -> None:
         """Send every device to the same real lat/lon target at the same time."""
         lat, lon = target
         await asyncio.gather(
-            *(self._go_to_waypoint_tracked(device, lat, lon, context) for device in devices),
+            *(
+                self._go_to_waypoint_tracked(device, lat, lon, context, arrival_radius_m, max_speed)
+                for device in devices
+            ),
             return_exceptions=True,
         )
 
     async def _run_on_devices_local(
-        self, devices: list, local_target: tuple[float, float], context
+        self, devices: list, local_target: tuple[float, float], context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
     ) -> None:
         """
         Send every device to the same VICON-arena-metres target at the same
@@ -896,21 +941,26 @@ class AutoNavigatePlugin(ControlPlugin):
         """
         x_m, y_m = local_target
         await asyncio.gather(
-            *(self._go_to_local_waypoint_tracked(device, x_m, y_m, context) for device in devices),
+            *(
+                self._go_to_local_waypoint_tracked(device, x_m, y_m, context, arrival_radius_m, max_speed)
+                for device in devices
+            ),
             return_exceptions=True,
         )
 
     async def _go_to_local_waypoint_tracked(
-        self, device, x_m: float, y_m: float, context
+        self, device, x_m: float, y_m: float, context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
     ) -> bool:
         """Convert a VICON-arena-metres target to this device's own lat/lon
         (via its local_origin) and drive there — see _go_to_waypoint_tracked
         for the tracked-navigation bookkeeping this delegates to."""
         lat, lon = device.local_to_gps(x_m, y_m)
-        return await self._go_to_waypoint_tracked(device, lat, lon, context)
+        return await self._go_to_waypoint_tracked(device, lat, lon, context, arrival_radius_m, max_speed)
 
     async def _navigate_one_waypoint(
-        self, device, target_lat: float, target_lon: float, context
+        self, device, target_lat: float, target_lon: float, context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
     ) -> bool:
         """
         Drive to a single waypoint, honoring _collision_guard()'s pause/
@@ -939,7 +989,9 @@ class AutoNavigatePlugin(ControlPlugin):
             if self._stop_requested:
                 return False
 
-            result = await self._go_to_waypoint(device, target_lat, target_lon, context)
+            result = await self._go_to_waypoint(
+                device, target_lat, target_lon, context, arrival_radius_m, max_speed
+            )
             if result:
                 return True
             if device.id in self._collision_paused:
@@ -948,7 +1000,8 @@ class AutoNavigatePlugin(ControlPlugin):
         return False
 
     async def _go_to_waypoint_tracked(
-        self, device, target_lat: float, target_lon: float, context
+        self, device, target_lat: float, target_lon: float, context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
     ) -> bool:
         """
         Wraps _navigate_one_waypoint() with the bookkeeping concurrent
@@ -961,7 +1014,9 @@ class AutoNavigatePlugin(ControlPlugin):
         """
         self._current_devices[device.id] = device
         try:
-            result = await self._navigate_one_waypoint(device, target_lat, target_lon, context)
+            result = await self._navigate_one_waypoint(
+                device, target_lat, target_lon, context, arrival_radius_m, max_speed
+            )
             if result:
                 self._device_status[device.name] = "Arrived"
             return result
@@ -1061,7 +1116,8 @@ class AutoNavigatePlugin(ControlPlugin):
             await asyncio.sleep(SEPARATION_CHECK_PERIOD_S)
 
     async def _go_to_waypoint(
-        self, device, target_lat: float, target_lon: float, context
+        self, device, target_lat: float, target_lon: float, context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
     ) -> bool:
         """
         Prefer the device's own cmd_move_to() (via device.move_to()) when
@@ -1073,6 +1129,11 @@ class AutoNavigatePlugin(ControlPlugin):
         neither device.move_to() nor _navigate_to() does this on its own
         (device.move_to()'s docstring in zone_manager.py claims it does; the
         actual implementation doesn't).
+
+        arrival_radius_m/max_speed are forwarded to device.move_to() as-is
+        (None means "use the device's own default") — the _navigate_to()
+        cmd_vel fallback has no equivalent tuning, since it predates this and
+        drives at its own fixed DRIVE_LINEAR/ARRIVAL_TOLERANCE_M regardless.
         """
         no_go = context.zone_manager.is_in_no_go_zone(target_lat, target_lon)
         if no_go.inside:
@@ -1082,7 +1143,10 @@ class AutoNavigatePlugin(ControlPlugin):
             await context.send_alert("Navigation blocked", msg, EventSeverity.WARNING)
             return False
 
-        result = await device.move_to(target_lat, target_lon)
+        result = await device.move_to(
+            target_lat, target_lon,
+            arrival_radius_m=arrival_radius_m, max_speed=max_speed,
+        )
         if "not implemented" not in result.message.lower():
             # Device has a real cmd_move_to — trust its result rather than
             # driving ourselves.
@@ -1242,7 +1306,10 @@ class AutoNavigatePlugin(ControlPlugin):
 
         await asyncio.gather(
             *(
-                self._run_coverage_path(device, paths[i], kind, start_positions[device.id], context)
+                self._run_coverage_path(
+                    device, paths[i], kind, start_positions[device.id], context,
+                    step.arrival_radius_m, step.max_speed,
+                )
                 for i, device in enumerate(devices)
             ),
             return_exceptions=True,
@@ -1255,6 +1322,8 @@ class AutoNavigatePlugin(ControlPlugin):
         kind: str,
         start_position: Optional[tuple[float, float]],
         context,
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> bool:
         """
         Drive one device through its assigned AREA_COVERAGE sweep path, then
@@ -1280,7 +1349,9 @@ class AutoNavigatePlugin(ControlPlugin):
                     return False
                 self._device_status[device.name] = f"Sweeping — waypoint {i + 1}/{len(waypoints)}"
                 lat, lon = device.local_to_gps(a, b) if kind == "local" else (a, b)
-                if not await self._navigate_one_waypoint(device, lat, lon, context):
+                if not await self._navigate_one_waypoint(
+                    device, lat, lon, context, arrival_radius_m, max_speed
+                ):
                     self._device_status[device.name] = f"Coverage failed at waypoint {i + 1}/{len(waypoints)}"
                     return False
 
@@ -1293,7 +1364,9 @@ class AutoNavigatePlugin(ControlPlugin):
                 return True
 
             self._device_status[device.name] = "Returning to start"
-            ok = await self._navigate_one_waypoint(device, start_position[0], start_position[1], context)
+            ok = await self._navigate_one_waypoint(
+                device, start_position[0], start_position[1], context, arrival_radius_m, max_speed
+            )
             self._device_status[device.name] = (
                 "Complete — returned to start" if ok else "Failed to return to start"
             )
@@ -1343,12 +1416,16 @@ class AutoNavigatePlugin(ControlPlugin):
             logger.error("%s: unknown step_type %r", self.PLUGIN_ID, raw_type)
             return []
 
+        arrival_radius_m = cfg.get("arrival_radius_m")
+        max_speed = cfg.get("max_speed")
         step = NavigationStep(
             step_type=step_type,
             speed_ms=float(cfg.get("speed_ms", 1.0)),
             coverage_spacing_m=float(cfg.get("coverage_spacing_m", 5.0)),
             coverage_angle_deg=float(cfg.get("coverage_angle_deg", 0.0)),
             patrol_laps=int(cfg.get("patrol_laps", 1)),
+            arrival_radius_m=float(arrival_radius_m) if arrival_radius_m not in (None, "") else None,
+            max_speed=float(max_speed) if max_speed not in (None, "") else None,
         )
 
         if step_type == StepType.MOVE_TO_MARKER:

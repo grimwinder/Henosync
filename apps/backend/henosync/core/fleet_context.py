@@ -166,7 +166,7 @@ class FleetContext:
 
         return available
 
-    # ── Zone Management ────────────────────────────────────────
+    # ── Zone and Marker Management ─────────────────────────────
 
     @property
     def zone_manager(self) -> "ZoneManager":

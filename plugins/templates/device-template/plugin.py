@@ -201,11 +201,14 @@ class MyRobotPlugin(ROS2Plugin):
         x: Optional[float] = None,
         y: Optional[float] = None,
         z: Optional[float] = None,
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> CommandResult:
         """
         x/y/z (local metres) are populated instead of lat/lon/alt when this
         device's coordinate_frame is "local" (VICON mode) — DeviceProxy
         converts the WGS84 target before dispatch. Branch on `x is not None`.
+        arrival_radius_m and max_speed are optional operator overrides.
         """
         state = self._nodes.get(node.id)
         if not state or not state.connected:

@@ -8,59 +8,28 @@ Positioning:
     No plugin code here beyond setting node.local_origin.
   - GPS  mode:  subscribes to the onboard GPS topic via rosbridge.
 
-Two ways to move it:
+Movement (move_to):
+  Proportional velocity controller — reads node.position (VICON yaw from
+  pos.heading, or IMU yaw from state.imu.yaw in GPS mode) to steer toward
+  the GPS target. Publishes geometry_msgs/Twist to platform/cmd_vel_unstamped
+  at 10 Hz until arrival or cancellation. Works without Nav2.
 
-  - move_to: publishes geometry_msgs/PoseStamped to bt_navigator's goal_pose
-    topic rather than calling the NavigateToPose action — roslibpy's ROS2
-    action support is documented as unreliable over rosbridge, while
-    goal_pose is a plain topic publish and avoids that failure mode entirely.
-    Nav2 does the actual driving, but cmd_move_to() BLOCKS until arrival —
-    after publishing the goal it polls node.position (kept live by
-    vicon_manager) against the target until within GOAL_ARRIVAL_THRESHOLD_M,
-    GOAL_TIMEOUT_S elapses, or stop is requested. Without this, a caller
-    like auto-navigate — which treats a successful move_to() as "arrived,
-    send the next waypoint" — would blow through an entire multi-waypoint
-    sweep (AREA_COVERAGE) almost instantly, since publishing a goal returns
-    success long before the robot has actually gone anywhere.
-  - cmd_vel (custom command): continuous manual driving for the `teleop`
-    control plugin — normalised [-1, 1] linear/angular, scaled to
-    max_linear_speed/max_angular_speed and published as a plain Twist.
+Manual driving (cmd_vel custom command):
+  For the `teleop` control plugin — normalised [-1, 1] linear/angular,
+  scaled and published as a plain Twist.
 
 All roslibpy publish() calls run via reactor.callFromThread() — Twisted's
-WebSocket send is not thread-safe when called directly from the asyncio
-event loop thread (this bit turtlebot3/ue-sim; see CLAUDE.md changelog).
-
-ASSUMPTION: in VICON mode, the VICON arena origin (home_lat/home_lon) is
-assumed aligned with the Jackal's Nav2 "map" frame origin (same origin, same
-axes). If they differ, goal_pose targets will land at the wrong physical
-location — verify this alignment on the robot before trusting cmd_move_to.
+WebSocket send is not thread-safe from the asyncio event loop thread.
 
 Topics subscribed (all optionally prefixed with `namespace`, e.g. a200_0000):
-  sensors/gps_0/fix                   sensor_msgs/NavSatFix           (GPS mode — topic varies by
-                                                                        attached GPS unit, override
-                                                                        via gps_topic config)
+  sensors/gps_0/fix                   sensor_msgs/NavSatFix
   platform/odom/filtered              nav_msgs/Odometry               (speed)
   platform/bms/state                  sensor_msgs/BatteryState        (battery)
-  platform/imu/data                   sensor_msgs/Imu                 (orientation — verify via
-                                                                        `ros2 topic list`, not
-                                                                        independently confirmed)
-  sensors/lidar2d_0/scan              sensor_msgs/LaserScan            (optional — topic varies by
-                                                                        attached lidar, override
-                                                                        via lidar_topic config)
+  sensors/imu_0/data                  sensor_msgs/Imu                 (orientation)
+  sensors/lidar2d_0/scan              sensor_msgs/LaserScan           (optional)
 
 Topics published:
-  platform/cmd_vel_unstamped           geometry_msgs/Twist              (stop / safe state)
-  goal_pose                            geometry_msgs/PoseStamped        (move_to — Nav2 goal)
-
-KNOWN LIMITATION: cmd_stop / get_safe_state publish zero Twist directly to
-platform/cmd_vel_unstamped and set state.stop_requested, which makes an
-in-flight cmd_move_to() give up its own wait promptly. Neither actually
-cancels the underlying Nav2 goal (goal cancellation would need a working
-ROS2 action-cancel call, which has the same rosbridge reliability problem
-noted above) — if Nav2 is actively navigating, its controller server may
-resume publishing velocity commands moments later, chasing a goal Henosync
-has already stopped watching. Verify actual stopping behaviour on the robot
-before relying on this for safety-critical stops.
+  platform/cmd_vel_unstamped           geometry_msgs/Twist
 """
 
 import asyncio
@@ -105,12 +74,6 @@ class _NodeState:
         self.connected: bool = False
         self.ros: Optional[Any] = None
         self.cmd_vel_pub: Optional[Any] = None
-        self.goal_pose_pub: Optional[Any] = None
-        # Set by cmd_stop()/get_safe_state() to interrupt an in-flight
-        # cmd_move_to() poll loop — see the KNOWN LIMITATION note up top:
-        # this makes our own wait give up promptly, it does NOT cancel the
-        # underlying Nav2 goal itself.
-        self.stop_requested: bool = False
 
         # Position — GPS mode only, written by _on_gps.
         # VICON mode: vicon_manager sets node.position directly, nothing here.
@@ -130,6 +93,9 @@ class _NodeState:
         self.last_position_time: float = 0.0
         self.last_message_time: float = 0.0
 
+        # Set by cmd_stop/get_safe_state to interrupt an in-progress cmd_move_to
+        self.stop_requested: bool = False
+
         # Warning flags — fire once to avoid spamming the operator
         self._no_fix_warned: bool = False
         self._stale_warned: bool = False
@@ -141,35 +107,29 @@ class JackalPlugin(NodePlugin):
     """
     Clearpath Jackal UGV device plugin.
 
-    Positioning: VICON (default, handled by core vicon_manager) or GPS
-    (subscribed here) — selected in Add Device config.
-    Movement: publishes a Nav2 goal_pose (PoseStamped) for move_to; direct
-    zero-Twist to cmd_vel for stop/safe state.
+    Positioning: VICON (default, handled by core vicon_manager) or GPS.
+    Movement: proportional velocity controller publishing Twist to
+    platform/cmd_vel_unstamped — works without Nav2.
     """
 
     PLUGIN_ID = "jackal"
     PLUGIN_NAME = "Clearpath Jackal (ROS2)"
     PLUGIN_VERSION = "0.1.0"
     PLUGIN_AUTHOR = "Henosync Team — Monash University"
-    PLUGIN_DESCRIPTION = "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack, VICON/GPS positioning, Nav2 goal_pose movement"
+    PLUGIN_DESCRIPTION = "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack, VICON/GPS positioning, proportional velocity controller"
 
     TELEMETRY_RATE_HZ: float = 2.0
 
-    # Warn if no position arrives this many seconds after connecting
     POSITION_FIX_TIMEOUT: float = 10.0
-    # Warn and suppress position if updates stop for this long
     POSITION_STALE_TIMEOUT: float = 3.0
-    # Treat connection as dead if no ROS message arrives for this long
     MESSAGE_TIMEOUT: float = 5.0
 
-    # cmd_move_to() arrival polling — see that method's docstring. Nav2 does
-    # the actual driving; we only poll node.position to know when it's done.
-    GOAL_ARRIVAL_THRESHOLD_M: float = 0.5   # a little looser than Nav2's own
-                                             # default xy_goal_tolerance (commonly
-                                             # ~0.25m), so we don't out-wait Nav2
-                                             # itself considering the goal reached
-    GOAL_POLL_PERIOD_S: float = 0.5
-    GOAL_TIMEOUT_S: float = 120.0           # matches auto-navigate's own WAYPOINT_TIMEOUT_S
+    ARRIVAL_THRESHOLD_M: float = 0.5
+    MAX_LINEAR_VEL: float = 0.5
+    MAX_ANGULAR_VEL: float = 1.0
+    LINEAR_GAIN: float = 0.5
+    ANGULAR_GAIN: float = 1.5
+    ARRIVAL_POLL_S: float = 0.1
 
     def __init__(self):
         super().__init__()
@@ -252,11 +212,6 @@ class JackalPlugin(NodePlugin):
             )
             state.cmd_vel_pub.advertise()
 
-            state.goal_pose_pub = roslibpy.Topic(
-                ros, self._topic(ns, "goal_pose"), "geometry_msgs/PoseStamped"
-            )
-            state.goal_pose_pub.advertise()
-
             capabilities = [
                 CapabilitySpec(capability=DeviceCapability.GPS),
                 CapabilitySpec(capability=DeviceCapability.BATTERY),
@@ -275,16 +230,13 @@ class JackalPlugin(NodePlugin):
             )
 
             if position_source == "vicon":
-                home_lat = float(config.get("home_lat", 0.0))
-                home_lon = float(config.get("home_lon", 0.0))
-                if home_lat == 0.0 and home_lon == 0.0:
-                    self._nodes.pop(node.id, None)
-                    return False, "VICON mode requires home_lat and home_lon in config"
-
-                # Position is published directly by the core vicon_manager (a
-                # TCP connection to the VICON DataStream SDK, independent of
-                # rosbridge) — nothing to subscribe here.
-                node.local_origin = LocalOrigin(lat=home_lat, lon=home_lon)
+                # Position is published directly by the core vicon_manager.
+                # local_origin defaults to (0, 0) — GPS conversion will be
+                # approximate until the arena origin is configured elsewhere.
+                node.local_origin = LocalOrigin(
+                    lat=float(config.get("home_lat", 0.0)),
+                    lon=float(config.get("home_lon", 0.0)),
+                )
 
             else:
                 gps_topic_name = config.get("gps_topic") or self._topic(ns, "sensors/gps_0/fix")
@@ -305,7 +257,9 @@ class JackalPlugin(NodePlugin):
             state._subscriptions.append(battery_topic)
 
             imu_topic = roslibpy.Topic(
-                ros, self._topic(ns, "platform/imu/data"), "sensor_msgs/Imu"
+                ros,
+                config.get("imu_topic") or self._topic(ns, "sensors/imu_0/data"),
+                "sensor_msgs/Imu",
             )
             imu_topic.subscribe(lambda msg: self._on_imu(node.id, msg))
             state._subscriptions.append(imu_topic)
@@ -469,12 +423,11 @@ class JackalPlugin(NodePlugin):
                 sub.unsubscribe()
             except Exception:
                 pass
-        for pub in (state.cmd_vel_pub, state.goal_pose_pub):
-            if pub:
-                try:
-                    pub.unadvertise()
-                except Exception:
-                    pass
+        if state.cmd_vel_pub:
+            try:
+                state.cmd_vel_pub.unadvertise()
+            except Exception:
+                pass
         if state.ros:
             try:
                 state.ros.close()
@@ -508,107 +461,97 @@ class JackalPlugin(NodePlugin):
         x: Optional[float] = None,
         y: Optional[float] = None,
         z: Optional[float] = None,
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> CommandResult:
         """
-        Publishes a Nav2 goal_pose (PoseStamped), then BLOCKS — polling
-        node.position (kept live by vicon_manager) until the robot is within
-        GOAL_ARRIVAL_THRESHOLD_M of the target, GOAL_TIMEOUT_S elapses, or
-        cmd_stop()/get_safe_state() sets state.stop_requested. Nav2's own
-        bt_navigator does the actual path planning and driving; this method
-        only watches from the outside to know when it's done — unlike
-        turtlebot3's cmd_move_to(), which drives the robot itself in the same
-        loop it blocks in.
+        Proportional velocity controller: reads node.position and IMU heading,
+        steers toward target GPS, publishes Twist to platform/cmd_vel_unstamped.
 
-        This matters for callers like auto-navigate: a move_to() that returns
-        "success" the instant the goal is *published* (the previous
-        behaviour here) gets treated as "arrived, send the next waypoint" —
-        fatal for AREA_COVERAGE's multi-waypoint sweep, since each new goal_pose
-        supersedes the last before the robot has actually driven anywhere.
-
-        Only supports local-frame (VICON) targets for now: a raw WGS84 target
-        can't be turned into a Nav2 "map"-frame goal without the robot's own
-        GPS→map localisation (e.g. navsat_transform_node), which isn't set up
-        here. GPS-mode devices should use cmd_move_to only once that exists.
+        For VICON-mode devices (coordinate_frame="local"), DeviceProxy converts
+        the WGS84 target to local x/y metres before dispatch. This method
+        converts them back to GPS using the same local_origin for distance checks.
         """
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
-        if not state.goal_pose_pub:
-            return CommandResult(success=False, message="goal_pose topic not advertised")
+        if node.position is None:
+            return CommandResult(success=False, message="No position fix — cannot navigate")
 
-        if x is None or y is None:
-            return CommandResult(
-                success=False,
-                message=(
-                    "Jackal move_to requires a local (VICON) target — "
-                    "GPS-frame Nav2 goals are not implemented"
-                ),
-            )
-
-        try:
-            from twisted.internet import reactor as _reactor
-            msg = roslibpy.Message({
-                "header": {"frame_id": "map", "stamp": {"sec": 0, "nanosec": 0}},
-                "pose": {
-                    "position": {"x": float(x), "y": float(y), "z": float(z or 0.0)},
-                    "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-                },
-            })
-            _reactor.callFromThread(state.goal_pose_pub.publish, msg)
-        except Exception as e:
-            return CommandResult(success=False, message=f"Failed to publish goal: {e}")
-
-        logger.info("Jackal [%s]: Nav2 goal published — local (%.2f, %.2f)", node.name, x, y)
-
-        # Reset any stale stop flag from a previous move before waiting on
-        # this one — mirrors turtlebot3.cmd_move_to()'s same guard.
-        state.stop_requested = False
-        origin = node.local_origin
-        elapsed = 0.0
-
-        while node.id in self._nodes and state.connected:
-            if state.stop_requested:
-                state.stop_requested = False
-                return CommandResult(
-                    success=False,
-                    message=(
-                        "Stopped — note this does not cancel the underlying Nav2 goal, "
-                        "see the KNOWN LIMITATION note in this plugin"
-                    ),
-                )
-            if elapsed >= self.GOAL_TIMEOUT_S:
-                logger.warning(
-                    "Jackal [%s]: goal timed out after %.0fs — local (%.2f, %.2f)",
-                    node.name, self.GOAL_TIMEOUT_S, x, y,
-                )
-                return CommandResult(success=False, message="Navigation timed out")
-
-            pos = node.position
-            if pos is None or origin is None:
-                await asyncio.sleep(self.GOAL_POLL_PERIOD_S)
-                elapsed += self.GOAL_POLL_PERIOD_S
-                continue
-
-            # node.position is real WGS84 (vicon_manager's synthetic
-            # conversion) — project back to local metres via the SAME
-            # origin used to build that conversion, so it compares directly
-            # against the (x, y) target already in local metres. Same
-            # equirectangular formula as cmd_return_home() below.
+        # VICON mode: DeviceProxy dispatches x/y metres; convert back to GPS
+        use_vicon_heading = x is not None and y is not None
+        if use_vicon_heading:
+            if not node.local_origin:
+                return CommandResult(success=False, message="No local_origin set — add a home position")
             R = 6_371_000.0
-            dlat = math.radians(pos.lat - origin.lat)
-            dlon = math.radians(pos.lon - origin.lon)
-            cur_y = R * dlat
-            cur_x = R * dlon * math.cos(math.radians(origin.lat))
+            lat = node.local_origin.lat + math.degrees(y / R)
+            lon = node.local_origin.lon + math.degrees(x / (R * math.cos(math.radians(node.local_origin.lat))))
 
-            distance = math.hypot(x - cur_x, y - cur_y)
-            if distance <= self.GOAL_ARRIVAL_THRESHOLD_M:
-                logger.info("Jackal [%s]: arrived at local (%.2f, %.2f)", node.name, x, y)
-                return CommandResult(success=True, message="Arrived")
+        threshold = arrival_radius_m if arrival_radius_m is not None else self.ARRIVAL_THRESHOLD_M
+        speed_cap = min(float(max_speed), self.MAX_LINEAR_VEL) if max_speed is not None else self.MAX_LINEAR_VEL
 
-            await asyncio.sleep(self.GOAL_POLL_PERIOD_S)
-            elapsed += self.GOAL_POLL_PERIOD_S
+        logger.info(
+            "Jackal [%s]: velocity controller → target GPS (%.8f, %.8f) | threshold %.2f m | speed_cap %.2f",
+            node.name, lat, lon, threshold, speed_cap,
+        )
 
-        return CommandResult(success=False, message="Disconnected during navigation")
+        state.stop_requested = False
+        _tick = 0
+        try:
+            while node.id in self._nodes and state.connected:
+                if state.stop_requested:
+                    state.stop_requested = False
+                    return CommandResult(success=False, message="Stopped")
+
+                pos = node.position
+                if pos is None:
+                    await asyncio.sleep(self.ARRIVAL_POLL_S)
+                    continue
+
+                R = 6_371_000.0
+                dy = R * math.radians(lat - pos.lat)
+                dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+                distance = math.sqrt(dx * dx + dy * dy)
+
+                if distance < threshold:
+                    return CommandResult(success=True, message="Arrived")
+
+                bearing = math.atan2(dy, dx)
+                # VICON mode: use world-frame yaw from vicon_manager (pos.heading)
+                # GPS mode: fall back to IMU yaw
+                heading = (
+                    pos.heading
+                    if (use_vicon_heading and pos.heading is not None)
+                    else state.imu.yaw
+                )
+                heading_error = math.atan2(
+                    math.sin(bearing - heading),
+                    math.cos(bearing - heading),
+                )
+                linear = min(
+                    speed_cap,
+                    self.LINEAR_GAIN * distance * max(0.0, math.cos(heading_error)),
+                )
+                angular = max(
+                    -self.MAX_ANGULAR_VEL,
+                    min(self.MAX_ANGULAR_VEL, self.ANGULAR_GAIN * heading_error),
+                )
+
+                _tick += 1
+                if _tick % 10 == 1:
+                    logger.info(
+                        "Jackal goto | pos (%.8f, %.8f) | target (%.8f, %.8f) | "
+                        "dist=%.3fm bearing=%.3f heading=%.3f err=%.3f lin=%.3f ang=%.3f",
+                        pos.lat, pos.lon, lat, lon,
+                        distance, bearing, heading, heading_error, linear, angular,
+                    )
+
+                self._publish_twist(state, linear, angular)
+                await asyncio.sleep(self.ARRIVAL_POLL_S)
+
+            return CommandResult(success=False, message="Navigation aborted")
+        finally:
+            self._publish_zero_twist(state)
 
     async def cmd_stop(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)
@@ -617,14 +560,7 @@ class JackalPlugin(NodePlugin):
         state.stop_requested = True
         self._publish_zero_twist(state)
         logger.info("Jackal [%s]: stop", node.name)
-        return CommandResult(
-            success=True,
-            message=(
-                "Zero velocity sent. If Nav2 is actively navigating, its controller "
-                "may resume commanding velocity moments later — this does not cancel "
-                "the underlying Nav2 goal."
-            ),
-        )
+        return CommandResult(success=True, message="Stopped")
 
     async def cmd_return_home(self, node: Node) -> CommandResult:
         if not node.home_position:

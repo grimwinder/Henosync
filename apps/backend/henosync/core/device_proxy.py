@@ -65,6 +65,10 @@ class DeviceProxy:
         return self._node.specs
 
     @property
+    def local_origin(self):
+        return self._node.local_origin
+
+    @property
     def is_online(self) -> bool:
         return self._node.status == NodeStatus.ONLINE
 
@@ -115,7 +119,9 @@ class DeviceProxy:
     # ── Universal Movement Interface ───────────────────────────
 
     async def move_to(
-        self, lat: float, lon: float, alt: float = 0.0
+        self, lat: float, lon: float, alt: float = 0.0,
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> CommandResult:
         """
         Move device to a WGS84 GPS position.
@@ -149,6 +155,11 @@ class DeviceProxy:
             logger.debug(
                 f"Also converted GPS ({lat}, {lon}) to local ({x:.3f}, {y:.3f}) for {self.name}"
             )
+
+        if arrival_radius_m is not None:
+            params["arrival_radius_m"] = arrival_radius_m
+        if max_speed is not None:
+            params["max_speed"] = max_speed
 
         envelope = CommandEnvelope(command_type=CommandType.MOVE_TO, params=params)
         return await plugin.send_command(self._node, envelope)
