@@ -7,7 +7,7 @@
   "sdk_version": ">=0.1.0",
   "node_types": ["agv"],
   "fixed_capabilities": ["gps", "battery", "imu", "move_2d"],
-  "optional_capabilities": ["camera", "lidar"],
+  "optional_capabilities": ["camera", "lidar", "nav2"],
   "capabilities": [
     {
       "id": "move_to",
@@ -105,6 +105,13 @@
       "required": false,
       "placeholder": "/a200_0000/sensors/lidar2d_0/scan",
       "description": "Only used if LIDAR capability is selected below. Verify the actual topic with `ros2 topic list` since it depends on which lidar is attached (2D sensor_msgs/LaserScan assumed)."
+    },
+    "nav2_goal_topic": {
+      "type": "string",
+      "label": "Nav2 Goal Topic Override",
+      "required": false,
+      "placeholder": "/j100_0364/goal_pose",
+      "description": "Only used when Nav2 capability is selected. Defaults to /<namespace>/goal_pose (Clearpath standard). Override if your Nav2 launch uses a different topic."
     }
   }
 }

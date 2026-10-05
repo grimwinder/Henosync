@@ -242,6 +242,14 @@ class NodeRegistry:
         asyncio.create_task(self._connect_node(node))
         return node
 
+    async def disconnect_node(self, node_id: str) -> bool:
+        """Disconnect a node and set it to OFFLINE without reconnecting."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return False
+        await self._disconnect_node(node)
+        return True
+
     async def reconnect_node(self, node_id: str) -> bool:
         """Manually trigger a reconnection attempt."""
         node = self._nodes.get(node_id)
