@@ -69,6 +69,11 @@ export const updateNode = (
     body: JSON.stringify(body),
   });
 
+export const disconnectNode = (id: string) =>
+  apiFetch<{ success: boolean }>(`/api/nodes/${id}/disconnect`, {
+    method: "POST",
+  });
+
 export const reconnectNode = (id: string) =>
   apiFetch<{ success: boolean }>(`/api/nodes/${id}/reconnect`, {
     method: "POST",

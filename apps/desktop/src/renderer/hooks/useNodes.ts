@@ -5,6 +5,7 @@ import {
   getStreamUrl,
   addNode,
   removeNode,
+  disconnectNode,
   reconnectNode,
   sendCommand,
   updateNode,
@@ -62,6 +63,14 @@ export function useRemoveNode() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => removeNode(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: NODE_KEYS.all }),
+  });
+}
+
+export function useDisconnectNode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => disconnectNode(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: NODE_KEYS.all }),
   });
 }

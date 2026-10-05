@@ -30,7 +30,8 @@ export type DeviceCapability =
   | "payload"
   | "arm_tool"
   | "battery"
-  | "charging";
+  | "charging"
+  | "nav2";
 
 export type StepType =
   | "move"

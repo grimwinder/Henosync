@@ -25,6 +25,10 @@ Positioning:
 # Common SDK imports — use what you need, delete the rest
 # ──────────────────────────────────────────────────────────────────────────────
 
+import asyncio
+import math
+from typing import Optional
+
 from henosync_sdk import (
     BatteryData,
     CapabilitySpec,
@@ -71,7 +75,9 @@ class _NodeState(ROS2NodeState):
         # TODO: add your robot's own data fields:
         self.speed: float = 0.0
         self.battery_percent: float = 100.0
-        self.cmd_vel_pub = None  # store publishers here so command handlers can reach them
+        self.cmd_vel_pub = None   # publisher for velocity commands
+        self.nav2_goal_pub = None  # publisher for Nav2 goal poses (if Nav2 selected)
+        self.stop_requested: bool = False
 
 
 class MyRobotPlugin(ROS2Plugin):
@@ -101,14 +107,20 @@ class MyRobotPlugin(ROS2Plugin):
         source = config.get("position_source", "gps")
         ns = config.get("namespace", "").strip("/")
 
+        selected = set(config.get("selected_capabilities", []))
+
+        capabilities = [
+            CapabilitySpec(capability=DeviceCapability.GPS),
+            CapabilitySpec(capability=DeviceCapability.BATTERY),
+            # TODO: add capabilities your robot has:
+            # CapabilitySpec(capability=DeviceCapability.MOVE_2D),
+        ]
+        if "nav2" in selected:
+            capabilities.append(CapabilitySpec(capability=DeviceCapability.NAV2))
+
         node.specs = DeviceSpecs(
             category=DeviceCategory.AGV,        # TODO: change to your robot's category
-            capabilities=[
-                CapabilitySpec(capability=DeviceCapability.GPS),
-                CapabilitySpec(capability=DeviceCapability.BATTERY),
-                # TODO: add capabilities your robot has:
-                # CapabilitySpec(capability=DeviceCapability.MOVE_2D),
-            ],
+            capabilities=capabilities,
             coordinate_frame="local" if source == "vicon" else "gps",
         )
 
@@ -140,6 +152,15 @@ class MyRobotPlugin(ROS2Plugin):
         # state.cmd_vel_pub = self.advertise(
         #     state, f"{ns}/cmd_vel" if ns else "/cmd_vel", "geometry_msgs/Twist"
         # )
+
+        # Nav2 goal publisher — only when Nav2 capability is selected
+        # if "nav2" in selected:
+        #     nav2_topic = config.get("nav2_goal_topic") or (
+        #         f"/{ns}/move_base_simple/goal" if ns else "/move_base_simple/goal"
+        #     )
+        #     state.nav2_goal_pub = self.advertise(
+        #         state, nav2_topic, "geometry_msgs/PoseStamped"
+        #     )
 
     # ── Required: return a TelemetryFrame from current state ──────────────────
 
@@ -201,20 +222,97 @@ class MyRobotPlugin(ROS2Plugin):
         x: Optional[float] = None,
         y: Optional[float] = None,
         z: Optional[float] = None,
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
     ) -> CommandResult:
         """
         x/y/z (local metres) are populated instead of lat/lon/alt when this
         device's coordinate_frame is "local" (VICON mode) — DeviceProxy
         converts the WGS84 target before dispatch. Branch on `x is not None`.
+
+        Navigation mode is selected by the operator at device setup:
+          Nav2 selected:  publish a PoseStamped goal; Nav2 handles path planning.
+          Nav2 not selected: implement a proportional velocity controller here.
         """
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
-        # node.position is set by vicon_manager (VICON) or telemetry pipeline (GPS).
         if node.position is None:
             return CommandResult(success=False, message="No position fix — cannot navigate")
-        # TODO: send navigation command to robot
-        return CommandResult(success=True, message=f"Moving to {lat:.5f}, {lon:.5f}, alt={alt:.1f}m")
+
+        # VICON mode: DeviceProxy dispatches x/y metres instead of lat/lon.
+        # Convert back to GPS so all distance checks use the same formula.
+        use_vicon = x is not None and y is not None
+        if use_vicon:
+            if not node.local_origin:
+                return CommandResult(success=False, message="No local_origin set")
+            R = 6_371_000.0
+            lat = node.local_origin.lat + math.degrees(y / R)
+            lon = node.local_origin.lon + math.degrees(
+                x / (R * math.cos(math.radians(node.local_origin.lat)))
+            )
+
+        threshold = arrival_radius_m if arrival_radius_m is not None else 0.5
+        has_nav2 = node.specs and any(
+            cs.capability == DeviceCapability.NAV2 for cs in node.specs.capabilities
+        )
+
+        if has_nav2:
+            # ── Nav2 path ────────────────────────────────────────────────────
+            # Convert target to map-frame metres for the Nav2 goal pose.
+            # In VICON mode: x/y are already in the map frame.
+            # In GPS mode: convert using local_origin (set home_lat/home_lon in config).
+            if use_vicon:
+                goal_x, goal_y = float(x), float(y)
+            elif node.local_origin:
+                R = 6_371_000.0
+                goal_y = R * math.radians(lat - node.local_origin.lat)
+                goal_x = R * math.radians(lon - node.local_origin.lon) * math.cos(
+                    math.radians(node.local_origin.lat)
+                )
+            else:
+                pos = node.position
+                R = 6_371_000.0
+                goal_y = R * math.radians(lat - pos.lat)
+                goal_x = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+
+            # TODO: publish goal to state.nav2_goal_pub
+            # Example (roslibpy, from Twisted thread via callFromThread):
+            # msg = roslibpy.Message({
+            #     "header": {"frame_id": "map"},
+            #     "pose": {
+            #         "position": {"x": goal_x, "y": goal_y, "z": 0.0},
+            #         "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+            #     },
+            # })
+            # reactor.callFromThread(lambda: state.nav2_goal_pub.publish(msg))
+
+            # Poll node.position until arrival or stop.
+            state.stop_requested = False
+            try:
+                while node.id in self._nodes and state.connected:
+                    if state.stop_requested:
+                        state.stop_requested = False
+                        return CommandResult(success=False, message="Stopped")
+                    pos = node.position
+                    if pos is None:
+                        await asyncio.sleep(0.1)
+                        continue
+                    R = 6_371_000.0
+                    dy = R * math.radians(lat - pos.lat)
+                    dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+                    if math.sqrt(dx * dx + dy * dy) < threshold:
+                        return CommandResult(success=True, message="Arrived")
+                    await asyncio.sleep(0.1)
+                return CommandResult(success=False, message="Navigation aborted")
+            finally:
+                pass  # Nav2 keeps navigating — no zero-velocity needed
+
+        else:
+            # ── Velocity controller path ─────────────────────────────────────
+            # TODO: implement proportional controller using state.cmd_vel_pub.
+            # See the Jackal or TurtleBot3 plugin for a complete implementation.
+            return CommandResult(success=False, message="Velocity controller not implemented")
 
     async def handle_custom_command(
         self, node: Node, envelope: CommandEnvelope

@@ -50,6 +50,15 @@ async def remove_node(node_id: str):
     return {"success": True}
 
 
+@router.post("/{node_id}/disconnect")
+async def disconnect_node(node_id: str):
+    """Disconnect a node and set it OFFLINE without reconnecting."""
+    success = await node_registry.disconnect_node(node_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Node not found")
+    return {"success": True}
+
+
 @router.post("/{node_id}/reconnect")
 async def reconnect_node(node_id: str):
     """Trigger a reconnection attempt for a node."""

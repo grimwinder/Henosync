@@ -7,7 +7,7 @@
   "sdk_version": ">=0.1.0",
   "node_types": ["agv"],
   "fixed_capabilities": ["gps", "battery"],
-  "optional_capabilities": ["camera", "lidar"],
+  "optional_capabilities": ["camera", "lidar", "nav2"],
   "capabilities": [
     {
       "id": "move_to",
@@ -90,6 +90,13 @@
       "placeholder": "/gps/fix",
       "description": "ROS2 topic publishing sensor_msgs/NavSatFix. Leave blank for /gps/fix.",
       "show_when": { "field": "position_source", "value": "gps" }
+    },
+    "nav2_goal_topic": {
+      "type": "string",
+      "label": "Nav2 Goal Topic",
+      "required": false,
+      "placeholder": "/move_base_simple/goal",
+      "description": "Only used when Nav2 capability is selected. Topic for Nav2 navigation goals (geometry_msgs/PoseStamped). Leave blank to use /<namespace>/move_base_simple/goal."
     }
   }
 }

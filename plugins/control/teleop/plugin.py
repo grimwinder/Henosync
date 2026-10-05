@@ -65,13 +65,15 @@ class TeleopPlugin(ControlPlugin):
         else:
             self._device = context.devices[0]
 
+        max_speed = self._config.get("max_speed") or 1.0
+
         while not self._stop_requested:
-            self._linear = (1.0 if self._pressed["up"] else 0.0) - (
+            self._linear = ((1.0 if self._pressed["up"] else 0.0) - (
                 1.0 if self._pressed["down"] else 0.0
-            )
-            self._angular = (1.0 if self._pressed["right"] else 0.0) - (
+            )) * max_speed
+            self._angular = ((1.0 if self._pressed["right"] else 0.0) - (
                 1.0 if self._pressed["left"] else 0.0
-            )
+            )) * max_speed
             await self._device.send_command(
                 "cmd_vel", {"linear": self._linear, "angular": self._angular}
             )
@@ -108,7 +110,16 @@ class TeleopPlugin(ControlPlugin):
                     "label": "Robot",
                     "required": False,
                     "description": "Which robot to drive. Leave blank to use the first available AGV.",
-                }
+                },
+                "max_speed": {
+                    "type": "number",
+                    "label": "Max Speed (0–1)",
+                    "required": False,
+                    "min": 0.01,
+                    "max": 1.0,
+                    "placeholder": "1.0",
+                    "description": "Scale factor applied to all movement. Leave blank for full speed.",
+                },
             },
         )
 

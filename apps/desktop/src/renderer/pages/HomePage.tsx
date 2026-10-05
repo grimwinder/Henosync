@@ -21,11 +21,14 @@ import MissionMap, {
 } from "../components/map/MissionMap";
 import MapStylePicker from "../components/map/MapStylePicker";
 import NodeMarkers from "../components/map/NodeMarkers";
+import NodeTrails from "../components/map/NodeTrails";
 import HubMarker from "../components/map/HubMarker";
 import VICONMap, { type VICONSpace } from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useMissionEngineStatus } from "../hooks/useMissions";
+import { useOperations } from "../hooks/useOperations";
 import { getStreamUrl } from "../lib/api";
+import type { RunningOperation } from "../types";
 import type { Node } from "../types";
 
 // ── VICON setup modal ──────────────────────────────────────────────────────────
@@ -246,7 +249,9 @@ function VICONSetupModal({
 
 const STATUS_COLOR: Record<string, string> = {
   executing: "#3DD68C",
+  running: "#3DD68C",
   paused: "#F5A623",
+  stopping: "#F5A623",
   completed: "#4A9EFF",
   aborted: "#F05252",
   failed: "#F05252",
@@ -256,7 +261,9 @@ const STATUS_COLOR: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   executing: "RUNNING",
+  running: "RUNNING",
   paused: "PAUSED",
+  stopping: "STOPPING",
   completed: "DONE",
   aborted: "ABORTED",
   failed: "FAILED",
@@ -266,22 +273,126 @@ const STATUS_LABEL: Record<string, string> = {
 
 function StatusIcon({ status }: { status: string }) {
   const props = { size: 13, strokeWidth: 2 } as const;
-  if (status === "executing") return <Route {...props} color="#3DD68C" />;
-  if (status === "paused") return <PauseCircle {...props} color="#F5A623" />;
+  if (status === "executing" || status === "running")
+    return <Route {...props} color="#3DD68C" />;
+  if (status === "paused" || status === "stopping")
+    return <PauseCircle {...props} color="#F5A623" />;
   if (status === "completed") return <CheckCircle {...props} color="#4A9EFF" />;
   if (status === "aborted" || status === "failed")
     return <AlertCircle {...props} color="#F05252" />;
   return <Clock {...props} color="#999999" />;
 }
 
+function OperationRow({ op }: { op: RunningOperation }) {
+  const state = op.status.state;
+  const color = STATUS_COLOR[state] ?? "#999999";
+  const label = STATUS_LABEL[state] ?? state.toUpperCase();
+  const progress = op.status.progress_percent;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      {/* Name + chip */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "6px",
+        }}
+      >
+        <span
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            color: "#EFEFEF",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+        >
+          {op.operation_name}
+        </span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+            padding: "2px 6px",
+            borderRadius: "4px",
+            backgroundColor: `${color}18`,
+            border: `1px solid ${color}44`,
+            flexShrink: 0,
+          }}
+        >
+          <StatusIcon status={state} />
+          <span
+            style={{
+              fontSize: "9px",
+              fontWeight: 700,
+              color,
+              letterSpacing: "0.5px",
+            }}
+          >
+            {label}
+          </span>
+        </div>
+      </div>
+
+      {/* Status text */}
+      {op.status.status_text ? (
+        <span
+          style={{
+            fontSize: "11px",
+            color: "#888888",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {op.status.status_text}
+        </span>
+      ) : null}
+
+      {/* Progress bar */}
+      {progress !== null && progress !== undefined && (
+        <div
+          style={{
+            height: "4px",
+            borderRadius: "2px",
+            backgroundColor: "#2D2D2D",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${Math.round(progress)}%`,
+              borderRadius: "2px",
+              backgroundColor: color,
+              transition: "width 400ms ease",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MissionStatusPanel() {
   const { data: engine } = useMissionEngineStatus();
+  const { data: operations = [] } = useOperations();
 
-  const hasActiveMission = !!engine?.mission_id;
-  const status = engine?.status ?? "draft";
-  const color = STATUS_COLOR[status] ?? "#999999";
-  const label = STATUS_LABEL[status] ?? status.toUpperCase();
-  const progress =
+  const activeOps = operations.filter(
+    (op) => op.status.state === "running" || op.status.state === "stopping",
+  );
+
+  // Fallback: mission engine (not currently used by the UI, but wired for future)
+  const engineActive = !!engine?.mission_id;
+  const engineStatus = engine?.status ?? "draft";
+  const engineColor = STATUS_COLOR[engineStatus] ?? "#999999";
+  const engineLabel = STATUS_LABEL[engineStatus] ?? engineStatus.toUpperCase();
+  const engineProgress =
     engine && engine.total_steps > 0
       ? engine.current_step / engine.total_steps
       : 0;
@@ -323,30 +434,10 @@ function MissionStatusPanel() {
         >
           Mission
         </span>
-        {hasActiveMission && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "5px",
-              padding: "2px 7px",
-              borderRadius: "4px",
-              backgroundColor: `${color}18`,
-              border: `1px solid ${color}44`,
-            }}
-          >
-            <StatusIcon status={status} />
-            <span
-              style={{
-                fontSize: "9px",
-                fontWeight: 700,
-                color,
-                letterSpacing: "0.5px",
-              }}
-            >
-              {label}
-            </span>
-          </div>
+        {activeOps.length > 1 && (
+          <span style={{ fontSize: "10px", color: "#666666" }}>
+            {activeOps.length} running
+          </span>
         )}
       </div>
 
@@ -356,38 +447,60 @@ function MissionStatusPanel() {
           padding: "10px 12px",
           display: "flex",
           flexDirection: "column",
-          gap: "8px",
+          gap: "12px",
+          overflowY: "auto",
         }}
       >
-        {!hasActiveMission ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              color: "#444444",
-            }}
-          >
-            <Route size={14} strokeWidth={1.5} />
-            <span style={{ fontSize: "11px" }}>No active mission</span>
-          </div>
-        ) : (
+        {activeOps.length > 0 ? (
+          activeOps.map((op) => <OperationRow key={op.plugin_id} op={op} />)
+        ) : engineActive ? (
           <>
-            {/* Mission name */}
-            <span
+            <div
               style={{
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "#EFEFEF",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "6px",
               }}
             >
-              {engine?.mission_name ?? "Unnamed Mission"}
-            </span>
-
-            {/* Step + percentage row */}
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#EFEFEF",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flex: 1,
+                }}
+              >
+                {engine?.mission_name ?? "Unnamed Mission"}
+              </span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  padding: "2px 6px",
+                  borderRadius: "4px",
+                  backgroundColor: `${engineColor}18`,
+                  border: `1px solid ${engineColor}44`,
+                  flexShrink: 0,
+                }}
+              >
+                <StatusIcon status={engineStatus} />
+                <span
+                  style={{
+                    fontSize: "9px",
+                    fontWeight: 700,
+                    color: engineColor,
+                    letterSpacing: "0.5px",
+                  }}
+                >
+                  {engineLabel}
+                </span>
+              </div>
+            </div>
             <div
               style={{
                 display: "flex",
@@ -399,11 +512,9 @@ function MissionStatusPanel() {
                 Step {engine?.current_step ?? 0} of {engine?.total_steps ?? 0}
               </span>
               <span style={{ fontSize: "10px", color: "#666666" }}>
-                {Math.round(progress * 100)}%
+                {Math.round(engineProgress * 100)}%
               </span>
             </div>
-
-            {/* Progress bar */}
             <div
               style={{
                 height: "4px",
@@ -415,14 +526,26 @@ function MissionStatusPanel() {
               <div
                 style={{
                   height: "100%",
-                  width: `${Math.round(progress * 100)}%`,
+                  width: `${Math.round(engineProgress * 100)}%`,
                   borderRadius: "2px",
-                  backgroundColor: color,
+                  backgroundColor: engineColor,
                   transition: "width 400ms ease",
                 }}
               />
             </div>
           </>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              color: "#444444",
+            }}
+          >
+            <Route size={14} strokeWidth={1.5} />
+            <span style={{ fontSize: "11px" }}>No active mission</span>
+          </div>
         )}
       </div>
     </div>
@@ -836,6 +959,7 @@ export default function HomePage() {
           onMapReady={handleMapReady}
         />
         {map && <NodeMarkers map={map} />}
+        {map && <NodeTrails map={map} />}
         {map && <HubMarker map={map} location={hubLocation} />}
       </div>
 

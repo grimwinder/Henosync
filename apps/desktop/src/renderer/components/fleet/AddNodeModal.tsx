@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { X, Lock } from "lucide-react";
-import { useAddNode } from "../../hooks/useNodes";
+import { useAddNode, useUpdateNode } from "../../hooks/useNodes";
 import { useDevicePlugins } from "../../hooks/usePlugins";
-import type { PluginConfigField, DeviceCapability } from "../../types";
+import type { PluginConfigField, DeviceCapability, Node } from "../../types";
 
-interface AddNodeModalProps {
+interface ConfigureDeviceModalProps {
+  node?: Node;
   onClose: () => void;
 }
 
@@ -25,7 +26,7 @@ const fieldStyle: React.CSSProperties = {
 
 // ── Capability metadata ────────────────────────────────────────────────────────
 
-const CAPABILITY_LABEL: Record<DeviceCapability, string> = {
+export const CAPABILITY_LABEL: Partial<Record<DeviceCapability, string>> = {
   move_2d: "2D Motion",
   move_3d: "3D Motion",
   gps: "GPS",
@@ -40,6 +41,7 @@ const CAPABILITY_LABEL: Record<DeviceCapability, string> = {
   arm_tool: "Arm Tool",
   battery: "Battery",
   charging: "Charging",
+  nav2: "Nav2",
 };
 
 // ── Config field renderer ──────────────────────────────────────────────────────
@@ -144,13 +146,19 @@ function ConfigField({
           style={fieldStyle}
         />
       )}
+
+      {field.description && (
+        <span style={{ fontSize: "10px", color: "#666666" }}>
+          {field.description}
+        </span>
+      )}
     </div>
   );
 }
 
 // ── Capability chip ────────────────────────────────────────────────────────────
 
-function CapChip({
+export function CapChip({
   cap,
   selected,
   locked,
@@ -210,15 +218,26 @@ function initConfig(
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 
-export default function AddNodeModal({ onClose }: AddNodeModalProps) {
+export default function ConfigureDeviceModal({
+  node,
+  onClose,
+}: ConfigureDeviceModalProps) {
+  const isEditing = !!node;
   const { data: plugins = [], isLoading } = useDevicePlugins();
-  const { mutate: addNode, isPending } = useAddNode();
+  const { mutate: addNode, isPending: isAdding } = useAddNode();
+  const { mutate: updateNode, isPending: isUpdating } = useUpdateNode();
+  const isPending = isAdding || isUpdating;
 
-  const [pluginId, setPluginId] = useState("");
-  const [name, setName] = useState("");
-  const [config, setConfig] = useState<Record<string, unknown>>({});
+  const [pluginId, setPluginId] = useState(node?.plugin_id ?? "");
+  const [name, setName] = useState(node?.name ?? "");
+  const [config, setConfig] = useState<Record<string, unknown>>(
+    node?.config ?? {},
+  );
   const [selectedCaps, setSelectedCaps] = useState<Set<DeviceCapability>>(
-    new Set(),
+    () =>
+      new Set(
+        (node?.config?.selected_capabilities as DeviceCapability[]) ?? [],
+      ),
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -229,15 +248,23 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
     selectedPlugin?.optional_capabilities ?? [];
   const hasCapabilities = fixedCaps.length > 0 || optionalCaps.length > 0;
 
-  // Default to first plugin
+  // Add mode: default to first plugin once loaded
   useEffect(() => {
-    if (plugins.length > 0 && !pluginId) {
+    if (!isEditing && plugins.length > 0 && !pluginId) {
       const first = plugins[0];
       setPluginId(first.id);
       setConfig(initConfig(first.config_schema));
       setSelectedCaps(new Set(first.fixed_capabilities ?? []));
     }
-  }, [plugins, pluginId]);
+  }, [plugins, pluginId, isEditing]);
+
+  // Edit mode: once manifest loads ensure fixedCaps are always selected
+  useEffect(() => {
+    if (isEditing && fixedCaps.length > 0) {
+      setSelectedCaps((prev) => new Set([...fixedCaps, ...prev]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, selectedPlugin?.id]);
 
   function handlePluginChange(id: string) {
     setPluginId(id);
@@ -245,6 +272,10 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
     setConfig(initConfig(plugin?.config_schema));
     setSelectedCaps(new Set(plugin?.fixed_capabilities ?? []));
     setError(null);
+  }
+
+  function handleConfigChange(key: string, value: unknown) {
+    setConfig((prev) => ({ ...prev, [key]: value }));
   }
 
   function toggleCap(cap: DeviceCapability) {
@@ -256,10 +287,6 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
     });
   }
 
-  function handleConfigChange(key: string, value: unknown) {
-    setConfig((prev) => ({ ...prev, [key]: value }));
-  }
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
@@ -267,7 +294,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
       setError("Device name is required");
       return;
     }
-    if (!pluginId) {
+    if (!isEditing && !pluginId) {
       setError("Select a plugin");
       return;
     }
@@ -277,14 +304,23 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
       selected_capabilities: Array.from(selectedCaps),
     };
 
-    addNode(
-      { name: trimmed, plugin_id: pluginId, config: finalConfig },
-      {
-        onSuccess: () => onClose(),
-        onError: (err) =>
-          setError(err instanceof Error ? err.message : "Failed to add device"),
-      },
-    );
+    if (isEditing) {
+      updateNode(
+        { id: node.id, body: { name: trimmed, config: finalConfig } },
+        { onSuccess: onClose, onError: (err) => setError(String(err)) },
+      );
+    } else {
+      addNode(
+        { name: trimmed, plugin_id: pluginId, config: finalConfig },
+        {
+          onSuccess: onClose,
+          onError: (err) =>
+            setError(
+              err instanceof Error ? err.message : "Failed to add device",
+            ),
+        },
+      );
+    }
   }
 
   const schemaEntries = Object.entries(selectedPlugin?.config_schema ?? {});
@@ -299,7 +335,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        zIndex: 300,
       }}
     >
       <div
@@ -327,7 +363,7 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
           }}
         >
           <span style={{ fontSize: "13px", fontWeight: 600, color: "#EFEFEF" }}>
-            Add Device
+            Configure Device
           </span>
           <button
             onClick={onClose}
@@ -355,14 +391,24 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
             overflowY: "auto",
           }}
         >
-          {/* Plugin selector */}
+          {/* Plugin */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <label
               style={{ fontSize: "11px", color: "#999999", fontWeight: 500 }}
             >
               Plugin
             </label>
-            {isLoading ? (
+            {isEditing ? (
+              <div
+                style={{
+                  ...fieldStyle,
+                  color: "#666666",
+                  backgroundColor: "#0D0D0D",
+                }}
+              >
+                {selectedPlugin?.name ?? node.plugin_id}
+              </div>
+            ) : isLoading ? (
               <div
                 style={{ ...fieldStyle, color: "#999999", fontStyle: "italic" }}
               >
@@ -476,7 +522,6 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                 )}
               </div>
 
-              {/* Fixed capabilities */}
               {fixedCaps.length > 0 && (
                 <div
                   style={{
@@ -504,7 +549,6 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
                 </div>
               )}
 
-              {/* Optional capabilities */}
               {optionalCaps.length > 0 && (
                 <div
                   style={{
@@ -582,20 +626,33 @@ export default function AddNodeModal({ onClose }: AddNodeModalProps) {
             </button>
             <button
               type="submit"
-              disabled={isPending || !pluginId}
+              disabled={isPending || (!isEditing && !pluginId)}
               style={{
                 padding: "7px 14px",
                 borderRadius: "6px",
-                backgroundColor: isPending || !pluginId ? "#2D2D2D" : "#4A9EFF",
+                backgroundColor:
+                  isPending || (!isEditing && !pluginId)
+                    ? "#2D2D2D"
+                    : "#4A9EFF",
                 border: "none",
-                color: isPending || !pluginId ? "#999999" : "white",
+                color:
+                  isPending || (!isEditing && !pluginId) ? "#999999" : "white",
                 fontSize: "12px",
                 fontWeight: 500,
-                cursor: isPending || !pluginId ? "not-allowed" : "pointer",
+                cursor:
+                  isPending || (!isEditing && !pluginId)
+                    ? "not-allowed"
+                    : "pointer",
                 transition: "background-color 150ms",
               }}
             >
-              {isPending ? "Adding…" : "Add Device"}
+              {isPending
+                ? isEditing
+                  ? "Saving…"
+                  : "Adding…"
+                : isEditing
+                  ? "Save & Reconnect"
+                  : "Add Device"}
             </button>
           </div>
         </form>
