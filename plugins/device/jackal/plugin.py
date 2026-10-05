@@ -240,12 +240,7 @@ class JackalPlugin(NodePlugin):
 
             if position_source == "vicon":
                 # Position is published directly by the core vicon_manager.
-                # local_origin defaults to (0, 0) — GPS conversion will be
-                # approximate until the arena origin is configured elsewhere.
-                node.local_origin = LocalOrigin(
-                    lat=float(config.get("home_lat", 0.0)),
-                    lon=float(config.get("home_lon", 0.0)),
-                )
+                node.local_origin = LocalOrigin(lat=0.0, lon=0.0, alt=0.0)
 
             else:
                 gps_topic_name = config.get("gps_topic") or self._topic(ns, "sensors/gps_0/fix")
@@ -581,69 +576,99 @@ class JackalPlugin(NodePlugin):
 
         if has_nav2:
             # ── Nav2 path ────────────────────────────────────────────────────
-            # The Nav2 map frame has its origin at the odom start (wherever the
-            # robot was when Nav2 launched) and axes aligned with the robot's
-            # initial heading.  VICON and GPS coordinates are in a different
-            # frame, so we cannot use them directly as Nav2 goals.
+            # Nav2 operates in its own odom/map frame.  We convert the target
+            # from VICON/GPS space to an odom-frame goal using the current
+            # rotation delta between the two frames.  Any residual frame error
+            # means Nav2 may stop slightly short of the true target.
             #
-            # Strategy: compute the delta from the robot's current position to
-            # the target IN the source frame, rotate it into the Nav2 map frame
-            # using the difference between odom yaw and robot heading, then add
-            # it to the robot's current odom position.
-            #
-            # For VICON: robot position comes from node.position (lon=x_m, lat=y_m).
-            # For GPS: robot position is node.position (lat/lon); delta via haversine.
+            # Refinement loop: after Nav2 stops the robot (detected by odom
+            # stalling), check the VICON/GPS distance.  If still outside the
+            # arrival threshold, recompute the goal with fresh readings and
+            # resend.  This closes the loop against both frame rotation errors
+            # and odom drift accumulated during travel.
+            MAX_REFINEMENTS = 5
+            # Seconds without odom movement before we assume Nav2 declared done.
+            STALL_TIMEOUT = 2.0
+            STALL_MOVE_M = 0.02  # 2 cm counts as movement
 
-            if use_vicon:
-                # Robot's VICON position in metres — node.position.lat/lon are GPS (degrees),
-                # the raw metres live in node.telemetry from vicon_manager's custom fields.
-                rx = float(node.telemetry.get("vicon_x", 0.0))
-                ry = float(node.telemetry.get("vicon_y", 0.0))
-                dx_src = float(x) - rx
-                dy_src = float(y) - ry
-                vicon_yaw = node.position.heading if node.position.heading is not None else state.odom_yaw
-            else:
-                # Delta in GPS-derived local space (equirectangular)
-                R = 6_371_000.0
-                pos = node.position
-                dx_src = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-                dy_src = R * math.radians(lat - pos.lat)
-                vicon_yaw = pos.heading if pos.heading is not None else (state.imu.yaw if state.imu.yaw else state.odom_yaw)
-
-            # Rotate delta from source frame into Nav2 odom/map frame
-            theta = state.odom_yaw - vicon_yaw
-            dx_map = dx_src * math.cos(theta) - dy_src * math.sin(theta)
-            dy_map = dx_src * math.sin(theta) + dy_src * math.cos(theta)
-            goal_x = state.odom_x + dx_map
-            goal_y = state.odom_y + dy_map
-
-            logger.info(
-                "Jackal [%s]: Nav2 goal → map (%.3f, %.3f) | odom (%.3f, %.3f) | delta (%.3f, %.3f) | "
-                "odom_yaw=%.3f src_yaw=%.3f",
-                node.name, goal_x, goal_y, state.odom_x, state.odom_y, dx_map, dy_map,
-                state.odom_yaw, vicon_yaw,
-            )
+            ns = (node.config.get("namespace") or "").strip("/")
             if max_speed is not None:
-                ns = (node.config.get("namespace") or "").strip("/")
                 self._set_nav2_max_speed(state, ns, min(float(max_speed), self.MAX_LINEAR_VEL))
-            self._publish_nav2_goal(state, goal_x, goal_y)
 
             state.stop_requested = False
             try:
-                while node.id in self._nodes and state.connected:
-                    if state.stop_requested:
-                        state.stop_requested = False
-                        return CommandResult(success=False, message="Stopped")
-                    pos = node.position
-                    if pos is None:
+                for attempt in range(MAX_REFINEMENTS):
+                    if state.stop_requested or node.id not in self._nodes or not state.connected:
+                        break
+
+                    # Recompute goal from CURRENT position readings each attempt.
+                    if use_vicon:
+                        rx = float(node.telemetry.get("vicon_x", 0.0))
+                        ry = float(node.telemetry.get("vicon_y", 0.0))
+                        dx_src = float(x) - rx
+                        dy_src = float(y) - ry
+                        vicon_yaw = node.position.heading if node.position.heading is not None else state.odom_yaw
+                    else:
+                        R = 6_371_000.0
+                        pos = node.position
+                        dx_src = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+                        dy_src = R * math.radians(lat - pos.lat)
+                        vicon_yaw = pos.heading if pos.heading is not None else (state.imu.yaw if state.imu.yaw else state.odom_yaw)
+
+                    theta = state.odom_yaw - vicon_yaw
+                    dx_map = dx_src * math.cos(theta) - dy_src * math.sin(theta)
+                    dy_map = dx_src * math.sin(theta) + dy_src * math.cos(theta)
+                    goal_x = state.odom_x + dx_map
+                    goal_y = state.odom_y + dy_map
+
+                    logger.info(
+                        "Jackal [%s]: Nav2 attempt %d/%d → map (%.3f, %.3f) | "
+                        "delta (%.3f, %.3f) | theta=%.3f",
+                        node.name, attempt + 1, MAX_REFINEMENTS,
+                        goal_x, goal_y, dx_map, dy_map, theta,
+                    )
+                    self._publish_nav2_goal(state, goal_x, goal_y)
+
+                    # Poll: succeed on VICON/GPS arrival, refine on robot stall.
+                    last_odom_x = state.odom_x
+                    last_odom_y = state.odom_y
+                    last_move_time = time.monotonic()
+
+                    while node.id in self._nodes and state.connected:
+                        if state.stop_requested:
+                            state.stop_requested = False
+                            return CommandResult(success=False, message="Stopped")
+
+                        pos = node.position
+                        if pos is not None:
+                            R = 6_371_000.0
+                            dy = R * math.radians(lat - pos.lat)
+                            dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+                            if math.sqrt(dx * dx + dy * dy) < threshold:
+                                return CommandResult(success=True, message="Arrived")
+
+                        # Detect robot stall — Nav2 declared the goal reached
+                        # but VICON distance is still outside threshold.
+                        d_odom = math.sqrt(
+                            (state.odom_x - last_odom_x) ** 2
+                            + (state.odom_y - last_odom_y) ** 2
+                        )
+                        if d_odom > STALL_MOVE_M:
+                            last_odom_x = state.odom_x
+                            last_odom_y = state.odom_y
+                            last_move_time = time.monotonic()
+                        elif time.monotonic() - last_move_time > STALL_TIMEOUT:
+                            logger.info(
+                                "Jackal [%s]: robot stalled short of target — "
+                                "recomputing goal (attempt %d)",
+                                node.name, attempt + 1,
+                            )
+                            break  # recompute with fresh readings
+
                         await asyncio.sleep(self.ARRIVAL_POLL_S)
-                        continue
-                    R = 6_371_000.0
-                    dy = R * math.radians(lat - pos.lat)
-                    dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-                    if math.sqrt(dx * dx + dy * dy) < threshold:
-                        return CommandResult(success=True, message="Arrived")
-                    await asyncio.sleep(self.ARRIVAL_POLL_S)
+                    else:
+                        break  # node disconnected — exit refinement loop
+
                 return CommandResult(success=False, message="Navigation aborted")
             finally:
                 self._cancel_nav2_goals(state)

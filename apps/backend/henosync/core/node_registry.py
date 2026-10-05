@@ -301,8 +301,9 @@ class NodeRegistry:
                 if frame.signal_strength is not None:
                     node.signal_strength = frame.signal_strength
 
-                # Flatten to dict for REST API and legacy reads
-                node.telemetry = frame.to_values_dict()
+                # Merge into telemetry dict (not replace) so keys published by
+                # other sources (e.g. vicon_manager's vicon_x/vicon_y) persist.
+                node.telemetry.update(frame.to_values_dict())
 
                 # Store typed frame for DeviceProxy access
                 self._last_frames[node.id] = frame

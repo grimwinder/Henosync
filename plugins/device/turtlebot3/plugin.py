@@ -95,12 +95,8 @@ class TurtleBot3Plugin(ROS2Plugin):
         )
 
         if source == "vicon":
-            # Set local_origin so DeviceProxy can convert GPS targets to local coords.
             # Position is published automatically by vicon_manager — nothing more needed.
-            node.local_origin = LocalOrigin(
-                lat=float(config.get("home_lat") or 0),
-                lon=float(config.get("home_lon") or 0),
-            )
+            node.local_origin = LocalOrigin(lat=0.0, lon=0.0, alt=0.0)
         else:
             gps_topic = config.get("gps_topic") or f"{prefix}/gps/fix"
             self.subscribe(state, gps_topic, "sensor_msgs/NavSatFix",

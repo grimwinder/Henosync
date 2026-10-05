@@ -283,13 +283,21 @@ class VICONManager:
         y_m = translation[1] / 1000.0
         z_m = translation[2] / 1000.0
 
-        home_lat = float(node.config.get("home_lat") or 0)
-        home_lon = float(node.config.get("home_lon") or 0)
-        lat, lon = _local_to_gps(x_m, y_m, home_lat, home_lon)
+        lat, lon = _local_to_gps(x_m, y_m, 0.0, 0.0)
 
         position = Position(lat=lat, lon=lon, alt=z_m, heading=yaw)
         node.position = position
         node.last_seen = datetime.now(timezone.utc)
+        # Write VICON data directly to node.telemetry so the REST API returns
+        # them and cmd_move_to can read them in the backend without racing WS.
+        node.telemetry.update({
+            "vicon_x": x_m,
+            "vicon_y": y_m,
+            "vicon_heading": yaw,
+            "lat": lat,
+            "lon": lon,
+            "alt": z_m,
+        })
 
         self._fix_warned.pop(node.id, None)
 

@@ -68,22 +68,6 @@
       "description": "Must exactly match the rigid body name in VICON Tracker.",
       "show_when": { "field": "position_source", "value": "vicon" }
     },
-    "home_lat": {
-      "type": "number",
-      "label": "Arena Origin Latitude",
-      "required": false,
-      "placeholder": "-37.9105",
-      "description": "WGS84 latitude of the VICON arena origin (X=0, Y=0).",
-      "show_when": { "field": "position_source", "value": "vicon" }
-    },
-    "home_lon": {
-      "type": "number",
-      "label": "Arena Origin Longitude",
-      "required": false,
-      "placeholder": "145.1362",
-      "description": "WGS84 longitude of the VICON arena origin (X=0, Y=0).",
-      "show_when": { "field": "position_source", "value": "vicon" }
-    },
     "gps_topic": {
       "type": "string",
       "label": "GPS Topic",
