@@ -1,0 +1,10 @@
+{
+  "id": "ue-sim-area",
+  "name": "UE Sim Area",
+  "version": "0.1.0",
+  "author": "Henosync Team — Monash University",
+  "description": "Send two angles and a radius to the Unreal Engine simulator.",
+  "sdk_version": ">=0.1.0",
+  "node_types": ["agv"],
+  "capabilities": []
+}

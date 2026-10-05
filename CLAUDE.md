@@ -151,7 +151,8 @@ henosync/
 │   │   └── turtlebot3/   TurtleBot3 Burger via rosbridge — VICON or GPS positioning
 │   ├── control/          Installed control plugins (one subfolder per plugin)
 │   │   ├── auto-navigate/ Autonomous navigation — move to marker/zone, area coverage, perimeter patrol
-│   │   └── teleop/        Manual arrow-key driving for a single ground vehicle
+│   │   ├── teleop/        Manual arrow-key driving for a single ground vehicle
+│   │   └── ue-sim-area/   Sends two angles + a radius to the UE sim as a TCP JSON packet (via ue-sim set_area)
 │   └── templates/        Plugin templates — not loaded by the backend
 │       ├── device-template/  Starter device plugin template
 │       └── control-template/ Starter control plugin template
@@ -566,6 +567,12 @@ Manual arrow-key driving for a single ground vehicle. `REQUIRED_CAPABILITIES=[MO
 - Frontend: `PluginsPage.tsx`'s `ControlPluginPanel` special-cases `plugin.id === "teleop"` to show a live drive-status chip and mount `useArrowKeyDrive()` (`renderer/hooks/useArrowKeyDrive.ts`), which binds `window` keydown/keyup listeners only while the operation is running, dedupes OS key-repeat, and — critically — releases all held keys via `sendOperatorInput()` on cleanup (stop/unmount) so the vehicle never keeps driving after the panel closes.
 - Only wired against `ue-sim` today — any other `AGV` device plugin that implements a `cmd_vel` custom command works automatically, since the control plugin has no device-specific code.
 
+### UE Sim Area plugin (`plugins/control/ue-sim-area/`)
+
+Config: `node_id` (`device_select`, required), `angle_1` and `angle_2` (`number`, degrees, required, default 0), `radius` (`number`, required, default 0). One-shot: converts angles to radians, calls `device.send_command("set_area", {"angle_1", "angle_2", "radius"})`, then reports COMPLETED. `REQUIRED_CAPABILITIES=[]`, `SUPPORTED_CATEGORIES=[AGV]`.
+
+ue-sim side: `handle_custom_command` handles `set_area` → opens a TCP connection to `node.config["host"]:node.config["area_port"]` (manifest field, default 7000), writes one newline-terminated JSON line `{"angle_1", "angle_2", "radius"}` (angles in radians), closes. 5 s connect/send timeout (`AREA_SEND_TIMEOUT`); connection failure returns a failed `CommandResult`. Not sent over rosbridge.
+
 ### Control template plugin (`plugins/control-template/`)
 
 Starter control plugin template. Shows `_stop_requested` loop pattern, `self._config` access, `context.devices` iteration, and optional `on_device_joined`/`on_device_left` handlers.
@@ -758,3 +765,7 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-09-28 | jackal: cmd_stop and get_safe_state now cancel active Nav2 goals via navigate_to_pose/\_action/cancel_goal service (zeros UUID = cancel all); added \_cancel_nav2_goals() helper; nav2 finally block also calls cancel so goals are cleared on arrival/abort/stop; nav2_cancel_service created in connect() when nav2 capability selected |
 | 2026-09-28 | jackal Nav2 path: max_speed now respected — calls controller_server/set_parameters (FollowPath.max_vel_x) via roslibpy service before publishing each goal; capped at MAX_LINEAR_VEL |
 | 2026-09-28 | jackal Nav2 goal frame fix: VICON/GPS coordinates are in a different frame than Nav2 map/odom; goal now computed as odom_pos + delta(target - robot_pos) rotated by (odom_yaw - source_yaw); odom x/y/yaw extracted from /platform/odom/filtered in \_on_odom; fixed VICON robot position read — node.position.lat/lon are GPS degrees (set by vicon_manager), raw metres are in node.telemetry["vicon_x"/"vicon_y"] |
+| 2026-10-05 | Added plugins/control/ue-sim-area/ — sends a selected GPS zone (circles sampled to 36-gon) to a selected device via set_area custom command; ue-sim gained set_area → geographic_msgs/GeoPath on /henosync/area; frontend gained zone_select config field type (ZoneSelectField in MissionPage, reads zoneStore) |
+| 2026-10-05 | ue-sim-area: replaced zone input with angle_1/angle_2 number inputs; ue-sim set_area now publishes std_msgs/Float64MultiArray [angle_1, angle_2] on /henosync/area; removed zone_select frontend field type (no longer used) |
+| 2026-10-05 | ue-sim-area: angle inputs entered in degrees, converted to radians before sending to the sim |
+| 2026-10-05 | ue-sim-area: added radius input; set_area now sent as a newline-terminated JSON TCP packet to the sim host on ue-sim's new area_port config field (default 7000) instead of the /henosync/area ROS topic (publisher removed) |

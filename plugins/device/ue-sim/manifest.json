@@ -32,6 +32,15 @@
       "default": 9090,
       "min": 1,
       "max": 65535
+    },
+    "area_port": {
+      "type": "number",
+      "label": "Area Packet Port (TCP)",
+      "required": false,
+      "default": 7000,
+      "min": 1,
+      "max": 65535,
+      "description": "TCP port on the sim host that receives UE Sim Area JSON packets"
     }
   }
 }

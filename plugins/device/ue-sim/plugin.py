@@ -7,6 +7,8 @@ Milestone 2b ✓: Camera feed via web_video_server.
 Milestone 3 (next): IMU heading.
 """
 
+import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 GPS_TOPIC     = "/airsim_node/SUV1/global_gps"   # sensor_msgs/NavSatFix
 STATE_TOPIC   = "/airsim_node/SUV1/car_state"    # airsim_ros_pkgs/CarState
 CAR_CMD_TOPIC = "/airsim_node/SUV1/car_cmd"      # airsim_ros_pkgs/CarControls
+AREA_PORT_DEFAULT = 7000   # TCP port on the sim host for set_area JSON packets
+AREA_SEND_TIMEOUT = 5.0    # seconds
 
 
 class _NodeState(ROS2NodeState):
@@ -151,6 +155,8 @@ class UESimPlugin(ROS2Plugin):
     async def handle_custom_command(
         self, node: Node, envelope: CommandEnvelope
     ) -> CommandResult:
+        if envelope.command_type == "set_area":
+            return await self._set_area(node, envelope.params)
         if envelope.command_type != "cmd_vel":
             return CommandResult(success=False, message=f"Unknown command: {envelope.command_type}")
         state = self._nodes.get(node.id)
@@ -168,6 +174,27 @@ class UESimPlugin(ROS2Plugin):
             "gear_immediate": True,
         })
         return CommandResult(success=True, message="cmd_vel sent")
+
+    async def _set_area(self, node: Node, params: dict) -> CommandResult:
+        """Send angle_1, angle_2 (radians) and radius as one JSON line over TCP to the sim."""
+        host = node.config.get("host", "localhost")
+        port = int(node.config.get("area_port") or AREA_PORT_DEFAULT)
+        packet = json.dumps({
+            "angle_1": float(params.get("angle_1", 0.0)),
+            "angle_2": float(params.get("angle_2", 0.0)),
+            "radius": float(params.get("radius", 0.0)),
+        }) + "\n"
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=AREA_SEND_TIMEOUT
+            )
+            writer.write(packet.encode())
+            await asyncio.wait_for(writer.drain(), timeout=AREA_SEND_TIMEOUT)
+            writer.close()
+            await writer.wait_closed()
+        except (OSError, asyncio.TimeoutError) as e:
+            return CommandResult(success=False, message=f"TCP send to {host}:{port} failed: {e}")
+        return CommandResult(success=True, message=f"Area sent to {host}:{port}")
 
     async def get_safe_state(self, node: Node) -> CommandResult:
         state = self._nodes.get(node.id)
