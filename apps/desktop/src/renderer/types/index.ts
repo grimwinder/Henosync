@@ -286,7 +286,8 @@ export interface PluginConfigField {
     | "boolean"
     | "select"
     | "device_select"
-    | "marker_select";
+    | "marker_select"
+    | "zone_select";
   label: string;
   required?: boolean;
   default?: unknown;

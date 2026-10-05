@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNodeStore } from "../stores/nodeStore";
 import { useMarkerStore } from "../stores/markerStore";
+import { useZoneStore } from "../stores/zoneStore";
 import maplibregl from "maplibre-gl";
 import {
   Plus,
@@ -225,6 +226,54 @@ function MarkerSelectField({
   );
 }
 
+function ZoneSelectField({
+  fieldKey,
+  field,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  field: PluginConfigField;
+  value: unknown;
+  onChange: (key: string, val: unknown) => void;
+}) {
+  const zones = useZoneStore((s) => Object.values(s.zones));
+  const inputBase: React.CSSProperties = {
+    width: "100%",
+    backgroundColor: "#0D0D0D",
+    border: "1px solid #2D2D2D",
+    borderRadius: "5px",
+    color: "#EFEFEF",
+    fontSize: "11px",
+    padding: "5px 8px",
+    outline: "none",
+    boxSizing: "border-box",
+    cursor: "pointer",
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+      <span style={{ fontSize: "10px", color: "#666666" }}>{field.label}</span>
+      <select
+        value={String(value ?? "")}
+        onChange={(e) => onChange(fieldKey, e.target.value)}
+        style={inputBase}
+      >
+        <option value="">— select a zone —</option>
+        {zones.map((z) => (
+          <option key={z.id} value={z.id}>
+            {z.name} ({z.map_mode})
+          </option>
+        ))}
+      </select>
+      {field.description && (
+        <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
+          {field.description}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Config field renderer ──────────────────────────────────────────────────────
 
 function ConfigField({
@@ -287,6 +336,17 @@ function ConfigField({
   if (field.type === "marker_select") {
     return (
       <MarkerSelectField
+        fieldKey={fieldKey}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "zone_select") {
+    return (
+      <ZoneSelectField
         fieldKey={fieldKey}
         field={field}
         value={value}
@@ -1194,22 +1254,45 @@ function StepTypesSection({
   onAdd,
 }: {
   plugins: ControlPluginInfo[];
-  onAdd: (plugin: ControlPluginInfo) => void;
+  onAdd: (
+    plugin: ControlPluginInfo,
+    presetParams?: Record<string, unknown>,
+    displayName?: string,
+  ) => void;
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const query = search.toLowerCase();
 
-  // Filter: show a plugin group if the plugin name, step display name, or
-  // description contains the query. With the current model (one step per
-  // plugin) this effectively filters the whole group at once.
+  // For a plugin with a step_type select, expand into one virtual entry per
+  // option so each step type is individually clickable.
+  type StepEntry = {
+    label: string;
+    presetParams: Record<string, unknown>;
+  };
+  function getStepEntries(p: ControlPluginInfo): StepEntry[] {
+    const stepTypeField = p.ui.config_schema?.["step_type"];
+    if (
+      stepTypeField?.type === "select" &&
+      Array.isArray(stepTypeField.options) &&
+      stepTypeField.options.length > 0
+    ) {
+      return stepTypeField.options.map((opt) => ({
+        label: opt.label,
+        presetParams: { step_type: opt.value },
+      }));
+    }
+    return [{ label: p.ui.display_name, presetParams: {} }];
+  }
+
   const visible = query
     ? plugins.filter(
         (p) =>
           p.name.toLowerCase().includes(query) ||
           p.ui.display_name.toLowerCase().includes(query) ||
-          p.ui.description?.toLowerCase().includes(query),
+          p.ui.description?.toLowerCase().includes(query) ||
+          getStepEntries(p).some((e) => e.label.toLowerCase().includes(query)),
       )
     : plugins;
 
@@ -1393,68 +1476,66 @@ function StepTypesSection({
                   </span>
                 </button>
 
-                {/* Step type rows — one per plugin for now, but structured for
-                    future multi-step-per-plugin support */}
-                {!isCollapsed && (
-                  <button
-                    onClick={() => onAdd(p)}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      padding: "7px 10px 7px 20px",
-                      backgroundColor: "transparent",
-                      border: "none",
-                      borderBottom: "1px solid #1C1C1C",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      transition: "background-color 100ms",
-                    }}
-                    onMouseEnter={(e) => {
-                      (
-                        e.currentTarget as HTMLButtonElement
-                      ).style.backgroundColor = "#191919";
-                    }}
-                    onMouseLeave={(e) => {
-                      (
-                        e.currentTarget as HTMLButtonElement
-                      ).style.backgroundColor = "transparent";
-                    }}
-                  >
-                    {/* Add icon */}
-                    <div
+                {!isCollapsed &&
+                  getStepEntries(p).map((entry) => (
+                    <button
+                      key={entry.label}
+                      onClick={() => onAdd(p, entry.presetParams, entry.label)}
                       style={{
-                        width: "18px",
-                        height: "18px",
-                        borderRadius: "4px",
-                        backgroundColor: "#A78BFA18",
-                        border: "1px solid #A78BFA44",
+                        width: "100%",
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
+                        gap: "8px",
+                        padding: "7px 10px 7px 20px",
+                        backgroundColor: "transparent",
+                        border: "none",
+                        borderBottom: "1px solid #1C1C1C",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        transition: "background-color 100ms",
+                      }}
+                      onMouseEnter={(e) => {
+                        (
+                          e.currentTarget as HTMLButtonElement
+                        ).style.backgroundColor = "#191919";
+                      }}
+                      onMouseLeave={(e) => {
+                        (
+                          e.currentTarget as HTMLButtonElement
+                        ).style.backgroundColor = "transparent";
                       }}
                     >
-                      <Plus size={10} color="#A78BFA" />
-                    </div>
-                    {/* Step name */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
-                          fontSize: "11px",
-                          fontWeight: 600,
-                          color: "#EFEFEF",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
+                          width: "18px",
+                          height: "18px",
+                          borderRadius: "4px",
+                          backgroundColor: "#A78BFA18",
+                          border: "1px solid #A78BFA44",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
                         }}
                       >
-                        {p.ui.display_name}
+                        <Plus size={10} color="#A78BFA" />
                       </div>
-                    </div>
-                  </button>
-                )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            color: "#EFEFEF",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {entry.label}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
               </div>
             );
           })
@@ -1477,7 +1558,11 @@ function BottomPanel({
   plugins: ControlPluginInfo[];
   blocks: MissionBlock[];
   selectedId: string | null;
-  onAddBlock: (plugin: ControlPluginInfo) => void;
+  onAddBlock: (
+    plugin: ControlPluginInfo,
+    presetParams?: Record<string, unknown>,
+    displayName?: string,
+  ) => void;
   onUpdateBlock: (instanceId: string, params: Record<string, unknown>) => void;
   onRenameBlock: (instanceId: string, label: string) => void;
 }) {
@@ -1485,9 +1570,12 @@ function BottomPanel({
   const selectedPlugin = selectedBlock
     ? (plugins.find((p) => p.id === selectedBlock.pluginId) ?? null)
     : null;
-  const hasFields = selectedBlock
-    ? Object.keys(selectedBlock.configSchema).length > 0
-    : false;
+  const visibleSchemaEntries = selectedBlock
+    ? Object.entries(selectedBlock.configSchema).filter(
+        ([k]) => k !== "step_type",
+      )
+    : [];
+  const hasFields = visibleSchemaEntries.length > 0;
 
   function setParam(key: string, val: unknown) {
     if (!selectedBlock) return;
@@ -1648,17 +1736,15 @@ function BottomPanel({
                     gap: "12px",
                   }}
                 >
-                  {Object.entries(selectedBlock.configSchema).map(
-                    ([key, field]) => (
-                      <ConfigField
-                        key={key}
-                        fieldKey={key}
-                        field={field}
-                        value={selectedBlock.params[key]}
-                        onChange={setParam}
-                      />
-                    ),
-                  )}
+                  {visibleSchemaEntries.map(([key, field]) => (
+                    <ConfigField
+                      key={key}
+                      fieldKey={key}
+                      field={field}
+                      value={selectedBlock.params[key]}
+                      onChange={setParam}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div
@@ -2026,7 +2112,11 @@ export default function MissionPage() {
     setMapTheme(theme);
   }
 
-  function addBlock(plugin: ControlPluginInfo) {
+  function addBlock(
+    plugin: ControlPluginInfo,
+    presetParams?: Record<string, unknown>,
+    displayName?: string,
+  ) {
     const id = `${plugin.id}-${Date.now()}`;
     setBlocks((prev) => {
       const stepNum = prev.length + 1;
@@ -2036,9 +2126,12 @@ export default function MissionPage() {
           instanceId: id,
           pluginId: plugin.id,
           label: `Step ${stepNum}`,
-          displayName: plugin.ui.display_name,
+          displayName: displayName ?? plugin.ui.display_name,
           configSchema: plugin.ui.config_schema ?? {},
-          params: defaultParams(plugin.ui.config_schema ?? {}),
+          params: {
+            ...defaultParams(plugin.ui.config_schema ?? {}),
+            ...presetParams,
+          },
         },
       ];
     });
