@@ -481,7 +481,11 @@ export default function ConfigureDeviceModal({
             .filter(
               ([, field]) =>
                 !field.show_when ||
-                config[field.show_when.field] === field.show_when.value,
+                (field.show_when.values != null
+                  ? field.show_when.values.includes(
+                      config[field.show_when.field],
+                    )
+                  : config[field.show_when.field] === field.show_when.value),
             )
             .map(([key, field]) => (
               <ConfigField

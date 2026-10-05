@@ -94,6 +94,7 @@ device, one waypoint at a time, at dispatch.
 import asyncio
 import logging
 import math
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -131,7 +132,8 @@ SLOWDOWN_RADIUS_M = 3.0          # start slowing down within this radius of targ
 CONTROL_PERIOD_S = 0.5           # how often to recompute and resend cmd_vel
 DRIVE_LINEAR = 0.6               # normalized forward speed while well-aligned with the target
 PROBE_LINEAR = 0.3               # normalized speed while establishing initial heading
-WAYPOINT_TIMEOUT_S = 120.0       # give up on a single waypoint after this long
+WAYPOINT_STUCK_TIMEOUT_S = 30.0  # abort a waypoint if stuck (no meaningful movement) for this long
+STUCK_MOVE_THRESHOLD_M = 0.5     # minimum movement to be considered "making progress"
 OBSTACLE_BLOCKED_TIMEOUT_S = 15.0  # give up if an obstacle doesn't clear within this long
 
 # Inter-robot collision guard (see _collision_guard()) — independent of the
@@ -522,7 +524,6 @@ class NavigationStep:
     zone_id:   Optional[str] = None   # MOVE_TO_ZONE, AREA_COVERAGE, PERIMETER_PATROL
 
     # Common parameters
-    speed_ms: float = 1.0             # travel speed in m/s
     arrival_radius_m: Optional[float] = None  # None = device's own default
     max_speed: Optional[float] = None         # None = device's own maximum
 
@@ -747,28 +748,24 @@ class AutoNavigatePlugin(ControlPlugin):
                     "type": "marker_select",
                     "label": "Marker",
                     "required": False,
-                    "description": "Move to Marker only",
+                    "show_when": {"field": "step_type", "value": StepType.MOVE_TO_MARKER},
                 },
                 "zone_id": {
                     "type": "zone_select",
                     "label": "Zone",
                     "required": False,
-                    "description": "Move to Zone / Area Coverage / Perimeter Patrol only",
-                },
-                "speed_ms": {
-                    "type": "number",
-                    "label": "Speed (m/s)",
-                    "required": False,
-                    "default": 1.0,
-                    "min": 0.1,
-                    "max": 10.0,
+                    "show_when": {"field": "step_type", "values": [
+                        StepType.MOVE_TO_ZONE,
+                        StepType.AREA_COVERAGE,
+                        StepType.PERIMETER_PATROL,
+                    ]},
                 },
                 "coverage_spacing_m": {
                     "type": "number",
                     "label": "Coverage Spacing (m)",
                     "required": False,
                     "default": 5.0,
-                    "description": "Distance between sweep lanes — Area Coverage only",
+                    "show_when": {"field": "step_type", "value": StepType.AREA_COVERAGE},
                 },
                 "coverage_angle_deg": {
                     "type": "number",
@@ -777,7 +774,7 @@ class AutoNavigatePlugin(ControlPlugin):
                     "default": 0.0,
                     "min": 0,
                     "max": 359,
-                    "description": "Sweep line direction, 0=east 90=north — Area Coverage only",
+                    "show_when": {"field": "step_type", "value": StepType.AREA_COVERAGE},
                 },
                 "patrol_laps": {
                     "type": "number",
@@ -786,7 +783,7 @@ class AutoNavigatePlugin(ControlPlugin):
                     "default": 1,
                     "min": 1,
                     "max": 1000,
-                    "description": "Number of boundary loops — Perimeter Patrol only",
+                    "show_when": {"field": "step_type", "value": StepType.PERIMETER_PATROL},
                 },
                 "arrival_radius_m": {
                     "type": "number",
@@ -795,7 +792,11 @@ class AutoNavigatePlugin(ControlPlugin):
                     "min": 0.05,
                     "max": 20.0,
                     "placeholder": "Device default",
-                    "description": "Distance from target considered 'arrived'. Leave blank for the device's own default.",
+                    "description": "Distance from target considered 'arrived'.",
+                    "show_when": {"field": "step_type", "values": [
+                        StepType.MOVE_TO_MARKER,
+                        StepType.MOVE_TO_ZONE,
+                    ]},
                 },
                 "max_speed": {
                     "type": "number",
@@ -1203,26 +1204,61 @@ class AutoNavigatePlugin(ControlPlugin):
         estimated from GPS course-over-ground (bearing between consecutive
         fixes while moving), since this predates any device plugin reporting
         real heading. Fallback path only — see _go_to_waypoint(). Returns
-        True on arrival, False on timeout or missing GPS.
+        True on arrival, False on stuck-timeout or missing GPS.
+
+        Timeout is progress-based, not wall-clock: the countdown only runs
+        while the robot is stuck (hasn't moved STUCK_MOVE_THRESHOLD_M since
+        its last checkpoint). While the robot is actively navigating toward
+        the target the timer stays reset, so a long-but-progressing journey
+        never times out.
         """
 
         heading: Optional[float] = None
         heading_ref_pos: Optional[tuple[float, float]] = None
-        elapsed = 0.0
         blocked_since: Optional[float] = None
+        # Progress checkpoint — last position where the robot had moved
+        # meaningfully. Initialised on first GPS fix.
+        progress_lat: Optional[float] = None
+        progress_lon: Optional[float] = None
+        # Wall-clock time since the robot was last at the progress checkpoint.
+        # None = robot is moving (timer not running).
+        stuck_since: Optional[float] = None
 
         try:
-            while not self._stop_requested and elapsed < WAYPOINT_TIMEOUT_S:
+            while not self._stop_requested:
                 gps = await device.get_gps_data()
                 if not gps:
                     await asyncio.sleep(CONTROL_PERIOD_S)
-                    elapsed += CONTROL_PERIOD_S
                     continue
 
                 distance = _haversine_m(gps.lat, gps.lon, target_lat, target_lon)
                 if distance <= ARRIVAL_TOLERANCE_M:
                     await device.send_command("cmd_vel", {"linear": 0.0, "angular": 0.0})
                     return True
+
+                # Progress tracking: update checkpoint when robot moves enough,
+                # start/continue stuck timer when it hasn't.
+                if progress_lat is None:
+                    progress_lat, progress_lon = gps.lat, gps.lon
+                    stuck_since = None
+                else:
+                    moved = _haversine_m(progress_lat, progress_lon, gps.lat, gps.lon)
+                    if moved >= STUCK_MOVE_THRESHOLD_M:
+                        progress_lat, progress_lon = gps.lat, gps.lon
+                        stuck_since = None
+                    else:
+                        if stuck_since is None:
+                            stuck_since = time.monotonic()
+                        elif time.monotonic() - stuck_since >= WAYPOINT_STUCK_TIMEOUT_S:
+                            await device.send_command("cmd_vel", {"linear": 0.0, "angular": 0.0})
+                            self._device_status[device.name] = (
+                                f"Navigation timed out — stuck {distance:.1f} m from target"
+                            )
+                            logger.warning(
+                                "%s: %s: %s", self.PLUGIN_ID, device.name,
+                                self._device_status[device.name]
+                            )
+                            return False
 
                 if (
                     heading_ref_pos is None
@@ -1260,7 +1296,7 @@ class AutoNavigatePlugin(ControlPlugin):
 
                 if not result.success and result.data.get("reason") == "obstacle":
                     if blocked_since is None:
-                        blocked_since = elapsed
+                        blocked_since = time.monotonic()
                         logger.warning(
                             "%s: %s blocked by obstacle, %.1f m from target",
                             self.PLUGIN_ID, device.name, distance
@@ -1272,21 +1308,21 @@ class AutoNavigatePlugin(ControlPlugin):
                             EventSeverity.WARNING,
                         )
                     self._device_status[device.name] = f"Blocked by obstacle — {distance:.1f} m to target"
-                    if elapsed - blocked_since >= OBSTACLE_BLOCKED_TIMEOUT_S:
+                    if time.monotonic() - blocked_since >= OBSTACLE_BLOCKED_TIMEOUT_S:
                         self._device_status[device.name] = "Obstacle did not clear — navigation aborted"
                         logger.warning("%s: %s: %s", self.PLUGIN_ID, device.name, self._device_status[device.name])
                         return False
                 else:
                     blocked_since = None
-                    self._device_status[device.name] = f"{distance:.1f} m to target"
+                    stuck_text = (
+                        f" (stuck {time.monotonic() - stuck_since:.0f}s)"
+                        if stuck_since is not None else ""
+                    )
+                    self._device_status[device.name] = f"{distance:.1f} m to target{stuck_text}"
 
                 await asyncio.sleep(CONTROL_PERIOD_S)
-                elapsed += CONTROL_PERIOD_S
 
             await device.send_command("cmd_vel", {"linear": 0.0, "angular": 0.0})
-            if elapsed >= WAYPOINT_TIMEOUT_S:
-                self._device_status[device.name] = "Navigation timed out"
-                logger.warning("%s: %s: %s", self.PLUGIN_ID, device.name, self._device_status[device.name])
             return False
         except asyncio.CancelledError:
             await device.send_command("cmd_vel", {"linear": 0.0, "angular": 0.0})
@@ -1541,7 +1577,6 @@ class AutoNavigatePlugin(ControlPlugin):
         max_speed = cfg.get("max_speed")
         step = NavigationStep(
             step_type=step_type,
-            speed_ms=float(cfg.get("speed_ms", 1.0)),
             coverage_spacing_m=float(cfg.get("coverage_spacing_m", 5.0)),
             coverage_angle_deg=float(cfg.get("coverage_angle_deg", 0.0)),
             patrol_laps=int(cfg.get("patrol_laps", 1)),

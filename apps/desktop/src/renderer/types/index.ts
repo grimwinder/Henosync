@@ -296,7 +296,7 @@ export interface PluginConfigField {
   options?: Array<{ label: string; value: string | number }>;
   min?: number;
   max?: number;
-  show_when?: { field: string; value: unknown };
+  show_when?: { field: string; value?: unknown; values?: unknown[] };
 }
 
 export interface PluginManifest {

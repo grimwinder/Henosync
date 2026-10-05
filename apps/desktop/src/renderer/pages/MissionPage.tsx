@@ -4,7 +4,6 @@ import { useMarkerStore } from "../stores/markerStore";
 import { useZoneStore } from "../stores/zoneStore";
 import maplibregl from "maplibre-gl";
 import {
-  Plus,
   Trash2,
   ArrowUp,
   ArrowDown,
@@ -52,6 +51,15 @@ export interface MissionBlock {
   displayName: string; // step type name from plugin
   configSchema: Record<string, PluginConfigField>;
   params: Record<string, unknown>;
+}
+
+type LogKind = "start" | "success" | "fail" | "stop" | "system";
+
+interface LogEntry {
+  id: string;
+  time: Date;
+  message: string;
+  kind: LogKind;
 }
 
 function defaultParams(
@@ -1505,21 +1513,6 @@ function StepTypesSection({
                         ).style.backgroundColor = "transparent";
                       }}
                     >
-                      <div
-                        style={{
-                          width: "18px",
-                          height: "18px",
-                          borderRadius: "4px",
-                          backgroundColor: "#A78BFA18",
-                          border: "1px solid #A78BFA44",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Plus size={10} color="#A78BFA" />
-                      </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div
                           style={{
@@ -1571,9 +1564,15 @@ function BottomPanel({
     ? (plugins.find((p) => p.id === selectedBlock.pluginId) ?? null)
     : null;
   const visibleSchemaEntries = selectedBlock
-    ? Object.entries(selectedBlock.configSchema).filter(
-        ([k]) => k !== "step_type",
-      )
+    ? Object.entries(selectedBlock.configSchema).filter(([k, field]) => {
+        if (k === "step_type") return false;
+        const sw = field.show_when;
+        if (!sw) return true;
+        const paramVal = selectedBlock.params[sw.field];
+        return sw.values != null
+          ? sw.values.includes(paramVal)
+          : paramVal === sw.value;
+      })
     : [];
   const hasFields = visibleSchemaEntries.length > 0;
 
@@ -1781,6 +1780,100 @@ function BottomPanel({
   );
 }
 
+// ── Mission log panel — bottom slot while running / post-run ──────────────────
+
+function MissionLogPanel({ entries }: { entries: LogEntry[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [entries]);
+
+  function fmt(d: Date) {
+    return d.toLocaleTimeString("en-AU", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  }
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: `${RIGHT_W}px`,
+        height: `${BOTTOM_H}px`,
+        backgroundColor: "#141414",
+        borderTop: "1px solid #2D2D2D",
+        display: "flex",
+        flexDirection: "column",
+        zIndex: 10,
+      }}
+    >
+      <div
+        style={{
+          height: "36px",
+          padding: "0 14px",
+          backgroundColor: "#0D0D0D",
+          borderBottom: "1px solid #2D2D2D",
+          display: "flex",
+          alignItems: "center",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            fontSize: "10px",
+            fontWeight: 700,
+            letterSpacing: "0.9px",
+            color: "#666666",
+          }}
+        >
+          MISSION LOG
+        </span>
+      </div>
+
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "8px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "3px",
+        }}
+      >
+        {entries.map((e) => (
+          <div
+            key={e.id}
+            style={{ display: "flex", gap: "10px", alignItems: "baseline" }}
+          >
+            <span
+              style={{
+                color: "#3A3A3A",
+                fontSize: "11px",
+                fontVariantNumeric: "tabular-nums",
+                flexShrink: 0,
+              }}
+            >
+              {fmt(e.time)}
+            </span>
+            <span style={{ color: "#8B95A3", fontSize: "12px" }}>
+              {e.message}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Controls panel — floating top-left ────────────────────────────────────────
 
 function ControlsPanel({
@@ -1789,12 +1882,16 @@ function ControlsPanel({
   isRunning,
   onRun,
   onStop,
+  showLog,
+  onClearLog,
 }: {
   blocks: MissionBlock[];
   onClear: () => void;
   isRunning: boolean;
   onRun: () => void;
   onStop: () => void;
+  showLog: boolean;
+  onClearLog: () => void;
 }) {
   const hasBlocks = blocks.length > 0;
   return (
@@ -1815,7 +1912,40 @@ function ControlsPanel({
         transition: "border-color 200ms",
       }}
     >
-      {isRunning ? (
+      {showLog ? (
+        /* ── Log visible post-run — show Clear button only ── */
+        <button
+          onClick={onClearLog}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "6px",
+            padding: "8px",
+            borderRadius: "6px",
+            border: "1px solid #2D2D2D",
+            backgroundColor: "#141414",
+            color: "#8B95A3",
+            cursor: "pointer",
+            fontSize: "11px",
+            fontWeight: 600,
+            transition: "all 120ms",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+            (e.currentTarget as HTMLButtonElement).style.borderColor =
+              "#4A4A4A";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+            (e.currentTarget as HTMLButtonElement).style.borderColor =
+              "#2D2D2D";
+          }}
+        >
+          <X size={11} />
+          Clear Log
+        </button>
+      ) : isRunning ? (
         /* ── Running state ── */
         <>
           {/* Running indicator */}
@@ -2023,6 +2153,9 @@ export default function MissionPage() {
   const stopRequestedRef = useRef(false);
   const activeBlockRef = useRef<MissionBlock | null>(null);
 
+  // Mission log
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+
   async function startMission() {
     if (blocks.length === 0) return;
     stopRequestedRef.current = false;
@@ -2030,12 +2163,32 @@ export default function MissionPage() {
     setIsRunning(true);
     setSelectedId(null);
 
+    const total = blocks.length;
+    const addEntry = (message: string, kind: LogKind) =>
+      setLogEntries((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          time: new Date(),
+          message,
+          kind,
+        },
+      ]);
+
+    setLogEntries([]);
+    addEntry(
+      `Mission started · ${total} step${total !== 1 ? "s" : ""}`,
+      "system",
+    );
+
     for (let i = 0; i < blocks.length; i++) {
       if (stopRequestedRef.current) break;
 
       const block = blocks[i];
       setActiveStepIndex(i);
       activeBlockRef.current = block;
+      const stepStart = Date.now();
+      addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
 
       try {
         await startOperation(
@@ -2044,11 +2197,14 @@ export default function MissionPage() {
         );
       } catch (err) {
         console.error(`[Mission] Failed to start step ${i + 1}:`, err);
+        addEntry(`Step ${i + 1}/${total} — failed to start`, "fail");
         break;
       }
 
       // Poll until operation reaches a terminal state
       let done = false;
+      let finalState = "completed";
+      let lastStatusText = "";
       while (!done && !stopRequestedRef.current) {
         await new Promise<void>((r) => setTimeout(r, 500));
         try {
@@ -2058,7 +2214,9 @@ export default function MissionPage() {
             done = true;
           } else {
             const s = op.status.state as string;
+            if (op.status.status_text) lastStatusText = op.status.status_text;
             if (s === "completed" || s === "failed" || s === "idle") {
+              finalState = s;
               done = true;
             }
           }
@@ -2068,11 +2226,30 @@ export default function MissionPage() {
       }
 
       if (stopRequestedRef.current) break;
+
+      const elapsed = Math.round((Date.now() - stepStart) / 1000);
+      if (finalState === "failed") {
+        addEntry(
+          `Step ${i + 1}/${total} — ${block.displayName} failed${lastStatusText ? " · " + lastStatusText : ""}`,
+          "fail",
+        );
+      } else {
+        addEntry(
+          `Step ${i + 1}/${total} — ${block.displayName} · ${elapsed}s`,
+          "success",
+        );
+      }
     }
 
     activeBlockRef.current = null;
     setIsRunning(false);
     setActiveStepIndex(0);
+
+    if (stopRequestedRef.current) {
+      addEntry("Mission stopped", "stop");
+    } else {
+      addEntry("All steps complete", "system");
+    }
   }
 
   function stopMission() {
@@ -2292,6 +2469,8 @@ export default function MissionPage() {
         isRunning={isRunning}
         onRun={startMission}
         onStop={stopMission}
+        showLog={!isRunning && logEntries.length > 0}
+        onClearLog={() => setLogEntries([])}
       />
 
       {/* Right panel — ordered step list, full height */}
@@ -2311,8 +2490,10 @@ export default function MissionPage() {
         activeStepIndex={activeStepIndex}
       />
 
-      {/* Bottom panel — hidden while mission is running */}
-      {!isRunning && (
+      {/* Bottom panel — log while running or after run; configure otherwise */}
+      {isRunning || logEntries.length > 0 ? (
+        <MissionLogPanel entries={logEntries} />
+      ) : (
         <BottomPanel
           plugins={controlPlugins}
           blocks={blocks}
