@@ -32,6 +32,20 @@ Packet sent over TCP (ue-sim `area_port`, default 7000), one JSON line:
 {"angle_1": 0.0, "angle_2": 6.2814, "radius": 50.0, "ag_id": 1, "nag": 1, "envi_type": "Circular"}
 ```
 
+## Sim-side decoder (`sim_receiver.py`)
+
+Requested by the sim supervisor (2026-10-07). Runs on the sim machine next to
+`coverage_fns.py` — not part of Henosync and never loaded by the plugin loader.
+
+- `decode_packet(line)` → `coverage_fns.Agents` (call from the sim's own code).
+- `parse_packet(line)` → validated `Agents(...)` kwargs (no coverage_fns needed).
+- `python sim_receiver.py [--port 7000]` → listens and prints each decoded agent.
+- Rejects bad packets with a clear message: invalid JSON, missing keys,
+  radius ≤ 0, ag_id outside 1..nag, envi_type other than Circular.
+
+Tested: Henosync plugin → ue-sim `set_area` → `sim_receiver.py` with the real
+`coverage_fns.py` builds the expected `Agents` object; all bad packets rejected.
+
 ## Decisions
 
 - **No changes to `coverage_fns.py`** — everything accommodated on the Henosync side.
@@ -82,6 +96,17 @@ Packet sent over TCP (ue-sim `area_port`, default 7000), one JSON line:
    (Will's original packet only had `angle_1`, `angle_2`, `radius`)?
 3. Confirm: 0 rad direction, circle centre, radius units.
 4. Preferred way to express a whole circle (currently 0 → 359.9°).
+
+## Test plan (agreed 2026-10-07)
+
+Start with the **plain one-robot test** (ag_id=1, nag=1, whole circle 0→359.9°).
+This proves the abstraction *interface* (Henosync only sends data; the sim
+decodes it and decides what the robot does). It does not exercise
+`BilateralInteraction` — with one agent there is no neighbour to split with,
+so the algorithm's output equals its input. A stronger follow-up is to supply
+a neighbour as data (open question 1) so the algorithm visibly changes the
+robot's slice. `coverage_fns.py` only computes angles — the sim must turn the
+slice into robot motion for the test to be visible.
 
 ## Remaining work
 
