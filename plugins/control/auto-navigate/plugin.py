@@ -10,7 +10,6 @@ Arrival detection: haversine distance to target, checked every 0.5 s.
 If the device has no position fix, only the timeout applies.
 """
 
-import asyncio
 import logging
 from math import cos, degrees, radians
 
@@ -88,8 +87,6 @@ class AutoNavigatePlugin(ControlPlugin):
             )
             return
 
-        timeout_s = float(self._config.get("timeout_s", 60.0))
-        arrival_radius_m = float(self._config.get("arrival_radius_m", 0.3))
         max_speed = self._config.get("max_speed") or None
         if max_speed is not None:
             max_speed = float(max_speed)
@@ -130,23 +127,7 @@ class AutoNavigatePlugin(ControlPlugin):
 
         self._active_device = device
 
-        # ── Send move command (timeout enforced here) ──────────
-        # cmd_move_to blocks until arrival — wrap with wait_for so the
-        # user-configured timeout actually fires.
-        try:
-            result = await asyncio.wait_for(
-                device.move_to(gps_lat, gps_lon, 0.0, arrival_radius_m=arrival_radius_m, max_speed=max_speed),
-                timeout=timeout_s,
-            )
-        except asyncio.TimeoutError:
-            self._status_text = f"Timed out after {timeout_s:.0f}s"
-            self._state = OperationState.FAILED
-            await context.send_alert(
-                "Auto Navigate timeout",
-                f"{device.name} did not reach {marker.name} within {timeout_s:.0f}s.",
-                EventSeverity.WARNING,
-            )
-            return
+        result = await device.move_to(gps_lat, gps_lon, 0.0, max_speed=max_speed)
 
         if not result.success:
             self._status_text = f"Move command failed: {result.message}"
@@ -197,24 +178,6 @@ class AutoNavigatePlugin(ControlPlugin):
                     "label": "Target Marker",
                     "required": True,
                     "description": "The map marker to navigate to.",
-                },
-                "arrival_radius_m": {
-                    "type": "number",
-                    "label": "Arrival Radius (m)",
-                    "required": False,
-                    "default": 0.3,
-                    "min": 0.05,
-                    "max": 20.0,
-                    "description": "Distance from target considered 'arrived'.",
-                },
-                "timeout_s": {
-                    "type": "number",
-                    "label": "Timeout (s)",
-                    "required": False,
-                    "default": 60,
-                    "min": 10,
-                    "max": 600,
-                    "description": "Give up and report failure after this many seconds.",
                 },
                 "max_speed": {
                     "type": "number",

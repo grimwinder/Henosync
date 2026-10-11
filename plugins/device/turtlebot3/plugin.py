@@ -59,7 +59,7 @@ class TurtleBot3Plugin(ROS2Plugin):
     TELEMETRY_RATE_HZ: float = 2.0
     MESSAGE_TIMEOUT: float = 5.0
 
-    ARRIVAL_THRESHOLD_M: float = 0.30
+    ARRIVAL_THRESHOLD_M: float = 0.2
     MAX_LINEAR_VEL: float = 0.20
     MAX_ANGULAR_VEL: float = 1.50
     LINEAR_GAIN: float = 0.50
@@ -264,7 +264,7 @@ class TurtleBot3Plugin(ROS2Plugin):
             lat = node.local_origin.lat + math.degrees(y / _R)
             lon = node.local_origin.lon + math.degrees(x / (_R * math.cos(math.radians(node.local_origin.lat))))
 
-        threshold = arrival_radius_m if arrival_radius_m is not None else self.ARRIVAL_THRESHOLD_M
+        threshold = arrival_radius_m if (arrival_radius_m is not None and arrival_radius_m > 0) else self.ARRIVAL_THRESHOLD_M
         has_nav2 = node.specs and any(
             cs.capability == DeviceCapability.NAV2 for cs in node.specs.capabilities
         )
