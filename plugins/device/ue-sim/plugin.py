@@ -176,14 +176,13 @@ class UESimPlugin(ROS2Plugin):
         return CommandResult(success=True, message="cmd_vel sent")
 
     async def _set_area(self, node: Node, params: dict) -> CommandResult:
-        """Send angle_1, angle_2 (radians), radius, ag_id, nag and envi_type as one JSON line over TCP to the sim."""
+        """Send angle_1, angle_2 (radians), radius, nag and envi_type as one JSON line over TCP to the sim."""
         host = node.config.get("host", "localhost")
         port = int(node.config.get("area_port") or AREA_PORT_DEFAULT)
         packet = json.dumps({
             "angle_1": float(params.get("angle_1", 0.0)),
             "angle_2": float(params.get("angle_2", 0.0)),
             "radius": float(params.get("radius", 0.0)),
-            "ag_id": int(params.get("ag_id", 1)),
             "nag": int(params.get("nag", 1)),
             "envi_type": str(params.get("envi_type", "Circular")),
         }) + "\n"

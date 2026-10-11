@@ -1,33 +1,14 @@
 """
-UE Sim Area — send two angles and a radius to the Unreal Engine simulator.
+UE Sim Area — send two angles, a radius, and agent count to the Unreal Engine simulator.
 
-The operator picks a device (a ue-sim node) and enters angle_1 and angle_2
-in degrees, a radius, and the agent ID / agent count / environment type that
-the sim's coverage_fns.Agents constructor needs. The angles are converted to
-radians and everything is sent once via the device's "set_area" custom
-command, which the ue-sim plugin sends as a JSON line over TCP to the sim host.
+The operator picks 1–3 UE Sim devices and enters angle_1/angle_2 in degrees,
+a radius, and environment type. nag is auto-computed from the number of selected
+devices. One TCP JSON packet is sent via the first device's set_area command.
 
 Henosync only sets the mission up; all partitioning is done in the sim
 (mission abstraction). Packet keys map to coverage_fns.Agents(...):
-angle_1/angle_2 -> ang_bounds, radius -> R, ag_id/nag/envi_type 1:1.
+angle_1/angle_2 -> ang_bounds, radius -> R, nag/envi_type 1:1.
 See NOTES.md in this folder for the design discussion and open questions.
-
-Verified against the sim developer's coverage_fns.py (BilateralInteraction):
-  WORKS
-    - Single robot (ag_id=1, nag=1), Circular, calling BilateralInteraction
-      with a neighbour id + neighbour slice: merges the two slices and keeps
-      half (e.g. robot 0-60 deg + neighbour 60-180 deg -> robot 0-90 deg).
-    - 3+ agents, Circular: converges to equal slices.
-    - Wrap-around sectors (e.g. -90..90 deg is sent as [4.712, 1.571] rad).
-  DOES NOT WORK
-    - Whole circle as 0..360 deg: 360 wraps to 0 and [0, 0] is a zero-width
-      sector. Enter 0..359.9 instead.
-    - RegularPolygons: coverage_fns raises UnboundLocalError (A_self) after
-      10 interactions, so it is not offered in the dropdown.
-    - nag=2: both agents treat each other as "next" neighbour and their
-      slices collapse to [0, 0] (algorithm ring logic, not Henosync).
-    - Henosync does not send the neighbour inputs BilateralInteraction needs
-      (nbr_id, nbr_AoR) - the sim must supply them (open question).
 """
 
 import logging
@@ -66,16 +47,27 @@ class UESimAreaPlugin(ControlPlugin):
     async def start(self, context) -> None:
         self._state = OperationState.RUNNING
 
-        node_id = self._config.get("node_id", "")
-        device = next((d for d in context.devices if d.id == node_id), None)
-        if device is None:
-            await self._fail(context, f"Device {node_id!r} not available")
+        # Collect selected device IDs; nag = how many are non-empty
+        selected_ids = [
+            nid for nid in [
+                self._config.get("node_id_1", ""),
+                self._config.get("node_id_2", ""),
+                self._config.get("node_id_3", ""),
+            ] if nid
+        ]
+        nag = len(selected_ids)
+        if nag == 0:
+            await self._fail(context, "No device selected")
             return
 
-        # coverage_fns.Agents expects ang_bounds in radians normalised to [0, 2π),
-        # running counter-clockwise from angle_1 to angle_2 (angle_2 < angle_1 = wraps through 0).
-        # Whole circle: enter 0° and 359.9°, NOT 0° and 360° — 360° wraps to 0 and the
-        # algorithm reads [0, 0] as a zero-width sector.
+        # Send through the first selected device
+        device = next((d for d in context.devices if d.id == selected_ids[0]), None)
+        if device is None:
+            await self._fail(context, f"Device {selected_ids[0]!r} not available")
+            return
+
+        # coverage_fns.Agents expects ang_bounds in radians normalised to [0, 2π).
+        # Whole circle: enter 0° and 359.9°, NOT 0° and 360°.
         angle_1 = radians(float(self._config.get("angle_1", 0.0))) % (2 * pi)
         angle_2 = radians(float(self._config.get("angle_2", 0.0))) % (2 * pi)
         radius = float(self._config.get("radius") or 0.0)
@@ -83,19 +75,12 @@ class UESimAreaPlugin(ControlPlugin):
             await self._fail(context, f"Radius must be greater than 0 (got {radius})")
             return
 
-        # Remaining coverage_fns.Agents constructor inputs, entered by the operator.
-        ag_id = int(self._config.get("ag_id") or 0)
-        nag = int(self._config.get("nag") or 0)
         envi_type = self._config.get("envi_type") or "Circular"
-        if nag < 1 or not 1 <= ag_id <= nag:
-            await self._fail(context, f"Agent ID must be between 1 and the number of agents (got ID {ag_id}, {nag} agents)")
-            return
 
         result = await device.send_command("set_area", {
             "angle_1": angle_1,
             "angle_2": angle_2,
             "radius": radius,
-            "ag_id": ag_id,
             "nag": nag,
             "envi_type": envi_type,
         })
@@ -104,7 +89,7 @@ class UESimAreaPlugin(ControlPlugin):
             return
 
         self._status_text = (
-            f"Sent agent {ag_id}/{nag} ({envi_type}), angles ({angle_1:.4f}, {angle_2:.4f} rad), "
+            f"Sent {nag} agent(s) ({envi_type}), angles ({angle_1:.4f}, {angle_2:.4f} rad), "
             f"radius {radius} to {device.name}"
         )
         logger.info("UESimArea: %s", self._status_text)
@@ -127,11 +112,23 @@ class UESimAreaPlugin(ControlPlugin):
             description="Send two angles and a radius to the Unreal Engine simulator.",
             icon="map",
             config_schema={
-                "node_id": {
+                "node_id_1": {
                     "type": "device_select",
-                    "label": "Device",
+                    "label": "Device 1",
                     "required": True,
-                    "description": "The UE Sim device to send the area to.",
+                    "description": "First UE Sim device (required).",
+                },
+                "node_id_2": {
+                    "type": "device_select",
+                    "label": "Device 2",
+                    "required": False,
+                    "description": "Second UE Sim device (optional).",
+                },
+                "node_id_3": {
+                    "type": "device_select",
+                    "label": "Device 3",
+                    "required": False,
+                    "description": "Third UE Sim device (optional).",
                 },
                 "angle_1": {
                     "type": "number",
@@ -152,31 +149,13 @@ class UESimAreaPlugin(ControlPlugin):
                     "required": True,
                     "default": 50,
                     "min": 0.01,
-                    "description": "Size of the circular area in the sim. Units are assumed to be metres (AirSim/ROS convention) — unverified.",
-                },
-                "ag_id": {
-                    "type": "number",
-                    "label": "Agent ID (whole number, 1 to number of agents)",
-                    "required": True,
-                    "default": 1,
-                    "min": 1,
-                    "description": "This robot's position in the agent ring. Use 1 for single-robot testing.",
-                },
-                "nag": {
-                    "type": "number",
-                    "label": "Number of Agents (whole number, ≥ 1)",
-                    "required": True,
-                    "default": 1,
-                    "min": 1,
-                    "description": "Total robots sharing the area. Use 1 for single-robot testing.",
+                    "description": "Size of the circular area in the sim.",
                 },
                 "envi_type": {
                     "type": "select",
-                    "label": "Environment Type (shape of the mission area)",
+                    "label": "Environment Type",
                     "required": True,
                     "default": "Circular",
-                    # RegularPolygons omitted: coverage_fns NbrAgents.update_info raises
-                    # UnboundLocalError (A_self) for it after 10 interactions.
                     "options": [
                         {"label": "Circular", "value": "Circular"},
                     ],

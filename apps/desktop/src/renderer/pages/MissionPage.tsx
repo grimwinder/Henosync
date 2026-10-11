@@ -99,7 +99,9 @@ function DeviceSelectField({
         onChange={(e) => onChange(fieldKey, e.target.value)}
         style={inputBase}
       >
-        <option value="">Any available robot</option>
+        <option value="">
+          {field.required ? "Any available robot" : "None"}
+        </option>
         {nodes.map((n) => (
           <option key={n.id} value={n.id}>
             {n.name} ({n.status})
