@@ -120,13 +120,27 @@ class OperationManager:
             return False, f"Control plugin not found: {plugin_id}"
 
         # Match devices to this plugin
-        matched_devices = await self._match_devices(plugin_class)
+        requested = self._requested_device_ids(config)
+        matched_devices, problems = await self._match_devices(
+            plugin_class, requested
+        )
+
+        if problems:
+            return False, (
+                f"Cannot start {plugin_class.OPERATION_NAME}: "
+                + "; ".join(problems)
+            )
 
         if not matched_devices and plugin_class.REQUIRED_CAPABILITIES:
             return False, (
                 f"No devices available matching requirements for "
                 f"{plugin_class.PLUGIN_NAME}"
             )
+
+        # Explicitly requested devices held by a lower-priority operation are
+        # taken over — tell that operation first so it stops driving them.
+        for device in matched_devices:
+            await self._preempt_device(device.id, plugin_class.OPERATION_NAME)
 
         # Create plugin instance
         plugin_instance = plugin_class()
@@ -288,44 +302,142 @@ class OperationManager:
 
     # ── Device Management ──────────────────────────────────────
 
+    @staticmethod
+    def _requested_device_ids(config: dict[str, Any]) -> set[str]:
+        """
+        Devices the operator explicitly picked for this operation.
+
+        Convention for control plugin config: "node_id" selects one device,
+        "node_ids" selects several. Neither set means "any free matching
+        device".
+        """
+        ids: set[str] = set()
+        if config.get("node_id"):
+            ids.add(config["node_id"])
+        node_ids = config.get("node_ids") or []
+        if isinstance(node_ids, str):
+            node_ids = [node_ids]
+        ids.update(i for i in node_ids if i)
+        return ids
+
+    def _active_owner(self, device_id: str) -> Optional[str]:
+        """
+        plugin_id of the running operation that holds this device, or None.
+        Assignments left behind by an operation that already finished are
+        released here, so a completed step never blocks the next one.
+        """
+        plugin_id = self._device_assignments.get(device_id)
+        if plugin_id is None:
+            return None
+        operation = self._operations.get(plugin_id)
+        if operation is None or operation.task.done():
+            del self._device_assignments[device_id]
+            return None
+        return plugin_id
+
     async def _match_devices(
         self,
-        plugin_class: type[ControlPlugin]
-    ) -> list[DeviceProxy]:
+        plugin_class: type[ControlPlugin],
+        requested: set[str] = frozenset(),
+    ) -> tuple[list[DeviceProxy], list[str]]:
         """
-        Find all available devices matching plugin requirements.
-        Applies capability negotiation.
+        Find devices for a new operation. Applies capability negotiation.
+
+        No explicit selection: every free matching device — devices held by
+        another running operation are never taken.
+        Explicit selection: exactly the requested devices. A requested device
+        held by a lower-priority operation is matched (and preempted by the
+        caller); anything else that prevents using a requested device is
+        returned as a problem so the start fails with a clear reason.
+
+        Returns (matched devices, problems).
         """
         from .node_registry import node_registry
 
-        matched = []
+        matched: list[DeviceProxy] = []
+        problems: list[str] = []
+        online_ids: set[str] = set()
+
         for node in node_registry.get_online_nodes():
+            online_ids.add(node.id)
+            if requested and node.id not in requested:
+                continue
+
             proxy = DeviceProxy(node)
 
-            # Category filter
-            if (
-                plugin_class.SUPPORTED_CATEGORIES and
-                proxy.category not in plugin_class.SUPPORTED_CATEGORIES
-            ):
+            # Category filter + capability negotiation
+            category_ok = (
+                not plugin_class.SUPPORTED_CATEGORIES
+                or proxy.category in plugin_class.SUPPORTED_CATEGORIES
+            )
+            caps_ok = all(
+                proxy.meets_requirement(req)
+                for req in plugin_class.REQUIRED_CAPABILITIES
+                if req.required
+            )
+            if not (category_ok and caps_ok):
+                if requested:
+                    problems.append(
+                        f"{node.name} does not support "
+                        f"{plugin_class.OPERATION_NAME}"
+                    )
                 continue
 
-            # Capability negotiation
-            all_met = True
-            for req in plugin_class.REQUIRED_CAPABILITIES:
-                if req.required and not proxy.meets_requirement(req):
-                    all_met = False
-                    break
-
-            if not all_met:
-                continue
-
-            # Check not already assigned to higher priority op
-            if await self._can_assign_device(
-                node.id, plugin_class.PRIORITY
-            ):
+            owner = self._active_owner(node.id)
+            if owner is None:
                 matched.append(proxy)
+                continue
 
-        return matched
+            owner_op = self._operations[owner]
+            if requested and plugin_class.PRIORITY > owner_op.plugin.PRIORITY:
+                matched.append(proxy)
+            elif requested:
+                problems.append(
+                    f"{node.name} is in use by {owner_op.plugin.OPERATION_NAME}"
+                )
+
+        for device_id in requested - online_ids:
+            node = node_registry.get_node(device_id)
+            name = node.name if node else device_id
+            problems.append(f"{name} is not online")
+
+        return matched, problems
+
+    async def _preempt_device(self, device_id: str, new_owner_name: str) -> None:
+        """
+        Take a device away from the operation currently holding it (if any),
+        telling that operation via on_device_left() so it stops driving it.
+        """
+        owner = self._active_owner(device_id)
+        if owner is None:
+            return
+
+        operation = self._operations[owner]
+        proxy = operation.context.get_device(device_id)
+        operation.context._remove_device(device_id)
+        del self._device_assignments[device_id]
+
+        if proxy is not None:
+            try:
+                await asyncio.wait_for(
+                    operation.plugin.on_device_left(proxy), timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Plugin {owner} did not respond to device_left within 5s"
+                )
+            except Exception as e:
+                logger.error(f"Plugin {owner} on_device_left error: {e}")
+
+        name = proxy.name if proxy else device_id
+        await telemetry_bus.publish_event(
+            title="Robot Reassigned",
+            message=(
+                f"{name} moved from {operation.plugin.OPERATION_NAME} "
+                f"to {new_owner_name}"
+            ),
+            severity=EventSeverity.WARNING,
+        )
 
     async def _can_assign_device(
         self,
@@ -336,16 +448,11 @@ class OperationManager:
         Check if a device can be assigned to an operation.
         Higher priority operations win device conflicts.
         """
-        current_plugin_id = self._device_assignments.get(device_id)
+        current_plugin_id = self._active_owner(device_id)
         if not current_plugin_id:
             return True
 
-        # Check priority of current owner
-        current_op = self._operations.get(current_plugin_id)
-        if not current_op:
-            return True
-
-        current_priority = current_op.plugin.PRIORITY
+        current_priority = self._operations[current_plugin_id].plugin.PRIORITY
         return requesting_priority > current_priority
 
     async def try_recruit_device(

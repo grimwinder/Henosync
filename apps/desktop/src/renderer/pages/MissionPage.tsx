@@ -51,6 +51,17 @@ export interface MissionBlock {
   displayName: string; // step type name from plugin
   configSchema: Record<string, PluginConfigField>;
   params: Record<string, unknown>;
+  parallel?: boolean; // run at the same time as the step above
+}
+
+// Consecutive blocks joined by `parallel` form one group that runs together.
+function groupBlocks(blocks: MissionBlock[]): number[][] {
+  const groups: number[][] = [];
+  blocks.forEach((b, i) => {
+    if (b.parallel && groups.length > 0) groups[groups.length - 1].push(i);
+    else groups.push([i]);
+  });
+  return groups;
 }
 
 type LogKind = "start" | "success" | "fail" | "stop" | "system";
@@ -69,7 +80,13 @@ function defaultParams(
   for (const [key, field] of Object.entries(schema)) {
     out[key] =
       field.default ??
-      (field.type === "boolean" ? false : field.type === "number" ? 0 : "");
+      (field.type === "boolean"
+        ? false
+        : field.type === "number"
+          ? 0
+          : field.type === "device_multi_select"
+            ? []
+            : "");
   }
   return out;
 }
@@ -115,6 +132,84 @@ function DeviceSelectField({
           </option>
         ))}
       </select>
+      {field.description && (
+        <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
+          {field.description}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Multi-robot selector (checkbox list of connected devices) ──────────────────
+
+function DeviceMultiSelectField({
+  fieldKey,
+  field,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  field: PluginConfigField;
+  value: unknown;
+  onChange: (key: string, val: unknown) => void;
+}) {
+  const nodes = useNodeStore((s) => Object.values(s.nodes));
+  const selected = Array.isArray(value) ? (value as string[]) : [];
+
+  function toggle(id: string) {
+    onChange(
+      fieldKey,
+      selected.includes(id)
+        ? selected.filter((s) => s !== id)
+        : [...selected, id],
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+      <span style={{ fontSize: "10px", color: "#666666" }}>{field.label}</span>
+      <div
+        style={{
+          backgroundColor: "#0D0D0D",
+          border: "1px solid #2D2D2D",
+          borderRadius: "5px",
+          padding: "4px 8px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "3px",
+          maxHeight: "96px",
+          overflowY: "auto",
+        }}
+      >
+        {nodes.length === 0 ? (
+          <span style={{ fontSize: "11px", color: "#444444" }}>
+            No robots added
+          </span>
+        ) : (
+          nodes.map((n) => (
+            <label
+              key={n.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "11px",
+                color: "#CCCCCC",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(n.id)}
+                onChange={() => toggle(n.id)}
+                style={{ accentColor: "#A78BFA", width: "12px", height: "12px" }}
+              />
+              {n.name} ({n.status})
+            </label>
+          ))
+        )}
+      </div>
       {field.description && (
         <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
           {field.description}
@@ -333,6 +428,17 @@ function ConfigField({
   if (field.type === "device_select") {
     return (
       <DeviceSelectField
+        fieldKey={fieldKey}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "device_multi_select") {
+    return (
+      <DeviceMultiSelectField
         fieldKey={fieldKey}
         field={field}
         value={value}
@@ -812,6 +918,7 @@ function StepListPanel({
   onDeletePlan,
   isRunning,
   activeStepIndex,
+  activeStepEnd,
 }: {
   blocks: MissionBlock[];
   selectedId: string | null;
@@ -826,6 +933,7 @@ function StepListPanel({
   onDeletePlan: (id: string) => void;
   isRunning: boolean;
   activeStepIndex: number;
+  activeStepEnd: number; // last index of the group running alongside activeStepIndex
 }) {
   const [activePopup, setActivePopup] = useState<"save" | "open" | null>(null);
   const popupAnchorRef = useRef<HTMLDivElement>(null);
@@ -899,7 +1007,7 @@ function StepListPanel({
             />
           )}
           {isRunning
-            ? `STEP ${activeStepIndex + 1} / ${blocks.length}`
+            ? `STEP ${activeStepIndex + 1}${activeStepEnd > activeStepIndex ? `–${activeStepEnd + 1}` : ""} / ${blocks.length}`
             : "MISSION PLAN"}
         </span>
 
@@ -1048,9 +1156,11 @@ function StepListPanel({
           </div>
         ) : (
           blocks.map((block, i) => {
-            const isActive = isRunning && i === activeStepIndex;
+            const isActive =
+              isRunning && i >= activeStepIndex && i <= activeStepEnd;
             const isDone = isRunning && i < activeStepIndex;
-            const isPending = isRunning && i > activeStepIndex;
+            const isPending = isRunning && i > activeStepEnd;
+            const runsWithAbove = !!block.parallel && i > 0;
             const selected = !isRunning && block.instanceId === selectedId;
 
             const accentColor = isActive
@@ -1197,7 +1307,9 @@ function StepListPanel({
                         ? "● Running…"
                         : isDone
                           ? "✓ Complete"
-                          : block.displayName}
+                          : runsWithAbove
+                            ? `∥ With step ${i} · ${block.displayName}`
+                            : block.displayName}
                     </div>
                   </div>
                   {/* Reorder + delete — hidden while running */}
@@ -1547,6 +1659,7 @@ function BottomPanel({
   onAddBlock,
   onUpdateBlock,
   onRenameBlock,
+  onSetParallel,
 }: {
   plugins: ControlPluginInfo[];
   blocks: MissionBlock[];
@@ -1558,8 +1671,10 @@ function BottomPanel({
   ) => void;
   onUpdateBlock: (instanceId: string, params: Record<string, unknown>) => void;
   onRenameBlock: (instanceId: string, label: string) => void;
+  onSetParallel: (instanceId: string, parallel: boolean) => void;
 }) {
   const selectedBlock = blocks.find((b) => b.instanceId === selectedId) ?? null;
+  const selectedIndex = selectedBlock ? blocks.indexOf(selectedBlock) : -1;
   const selectedPlugin = selectedBlock
     ? (plugins.find((p) => p.id === selectedBlock.pluginId) ?? null)
     : null;
@@ -1722,6 +1837,33 @@ function BottomPanel({
                     outline: "none",
                   }}
                 />
+                {selectedIndex > 0 && (
+                  <label
+                    title="Start this step at the same time as the step above instead of after it"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "11px",
+                      color: "#999999",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!selectedBlock.parallel}
+                      onChange={(e) =>
+                        onSetParallel(selectedBlock.instanceId, e.target.checked)
+                      }
+                      style={{
+                        accentColor: "#A78BFA",
+                        width: "13px",
+                        height: "13px",
+                      }}
+                    />
+                    Run with step {selectedIndex}
+                  </label>
+                )}
               </div>
 
               {/* Plugin params */}
@@ -2150,8 +2292,9 @@ export default function MissionPage() {
   // Execution state
   const [isRunning, setIsRunning] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [activeStepEnd, setActiveStepEnd] = useState(0);
   const stopRequestedRef = useRef(false);
-  const activeBlockRef = useRef<MissionBlock | null>(null);
+  const activeBlocksRef = useRef<MissionBlock[]>([]);
 
   // Mission log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -2181,69 +2324,102 @@ export default function MissionPage() {
       "system",
     );
 
-    for (let i = 0; i < blocks.length; i++) {
+    // Steps marked "run with step above" are started together and the mission
+    // moves on once every step in the group has finished.
+    groupLoop: for (const group of groupBlocks(blocks)) {
       if (stopRequestedRef.current) break;
 
-      const block = blocks[i];
-      setActiveStepIndex(i);
-      activeBlockRef.current = block;
-      const stepStart = Date.now();
-      addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
+      const first = group[0];
+      const last = group[group.length - 1];
+      setActiveStepIndex(first);
+      setActiveStepEnd(last);
 
-      try {
-        await startOperation(
-          block.pluginId,
-          block.params as Record<string, unknown>,
-        );
-      } catch (err) {
-        console.error(`[Mission] Failed to start step ${i + 1}:`, err);
-        addEntry(`Step ${i + 1}/${total} — failed to start`, "fail");
-        break;
+      // Operations are keyed by plugin, so one step type can't run alongside itself.
+      const seen = new Map<string, number>();
+      for (const i of group) {
+        const prev = seen.get(blocks[i].pluginId);
+        if (prev !== undefined) {
+          addEntry(
+            `Steps ${prev + 1} and ${i + 1} are both ${blocks[i].displayName} — the same step type can't run at the same time as itself`,
+            "fail",
+          );
+          break groupLoop;
+        }
+        seen.set(blocks[i].pluginId, i);
       }
 
-      // Poll until operation reaches a terminal state
-      let done = false;
-      let finalState = "completed";
-      let lastStatusText = "";
-      while (!done && !stopRequestedRef.current) {
-        await new Promise<void>((r) => setTimeout(r, 500));
+      const stepStart = Date.now();
+      const started: number[] = [];
+      for (const i of group) {
+        const block = blocks[i];
+        addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
         try {
-          const ops = await getOperations();
-          const op = ops.find((o) => o.plugin_id === block.pluginId);
+          await startOperation(
+            block.pluginId,
+            block.params as Record<string, unknown>,
+          );
+          started.push(i);
+          activeBlocksRef.current = started.map((s) => blocks[s]);
+        } catch (err) {
+          console.error(`[Mission] Failed to start step ${i + 1}:`, err);
+          const reason = err instanceof Error ? ` · ${err.message}` : "";
+          addEntry(`Step ${i + 1}/${total} — failed to start${reason}`, "fail");
+          // Don't leave half a group running.
+          for (const s of started) {
+            stopOperation(blocks[s].pluginId).catch(() => {});
+          }
+          break groupLoop;
+        }
+        if (stopRequestedRef.current) break groupLoop;
+      }
+
+      // Poll until every operation in the group reaches a terminal state
+      const finished = new Map<number, { state: string; text: string }>();
+      const lastText = new Map<number, string>();
+      while (finished.size < group.length && !stopRequestedRef.current) {
+        await new Promise<void>((r) => setTimeout(r, 500));
+        let ops: Awaited<ReturnType<typeof getOperations>>;
+        try {
+          ops = await getOperations();
+        } catch {
+          break;
+        }
+        for (const i of group) {
+          if (finished.has(i)) continue;
+          const op = ops.find((o) => o.plugin_id === blocks[i].pluginId);
           if (!op) {
-            done = true;
-          } else {
-            const s = op.status.state as string;
-            if (op.status.status_text) lastStatusText = op.status.status_text;
-            if (s === "completed" || s === "failed" || s === "idle") {
-              finalState = s;
-              done = true;
+            finished.set(i, { state: "completed", text: "" });
+            continue;
+          }
+          const s = op.status.state as string;
+          if (op.status.status_text) lastText.set(i, op.status.status_text);
+          if (s === "completed" || s === "failed" || s === "idle") {
+            finished.set(i, { state: s, text: lastText.get(i) ?? "" });
+            const elapsed = Math.round((Date.now() - stepStart) / 1000);
+            const block = blocks[i];
+            if (s === "failed") {
+              const t = lastText.get(i);
+              addEntry(
+                `Step ${i + 1}/${total} — ${block.displayName} failed${t ? " · " + t : ""}`,
+                "fail",
+              );
+            } else {
+              addEntry(
+                `Step ${i + 1}/${total} — ${block.displayName} · ${elapsed}s`,
+                "success",
+              );
             }
           }
-        } catch {
-          done = true;
         }
       }
 
       if (stopRequestedRef.current) break;
-
-      const elapsed = Math.round((Date.now() - stepStart) / 1000);
-      if (finalState === "failed") {
-        addEntry(
-          `Step ${i + 1}/${total} — ${block.displayName} failed${lastStatusText ? " · " + lastStatusText : ""}`,
-          "fail",
-        );
-      } else {
-        addEntry(
-          `Step ${i + 1}/${total} — ${block.displayName} · ${elapsed}s`,
-          "success",
-        );
-      }
     }
 
-    activeBlockRef.current = null;
+    activeBlocksRef.current = [];
     setIsRunning(false);
     setActiveStepIndex(0);
+    setActiveStepEnd(0);
 
     if (stopRequestedRef.current) {
       addEntry("Mission stopped", "stop");
@@ -2254,12 +2430,12 @@ export default function MissionPage() {
 
   function stopMission() {
     stopRequestedRef.current = true;
-    const block = activeBlockRef.current;
-    if (block) {
+    for (const block of activeBlocksRef.current) {
       stopOperation(block.pluginId).catch(() => {});
     }
     setIsRunning(false);
     setActiveStepIndex(0);
+    setActiveStepEnd(0);
   }
 
   // Saved plans
@@ -2318,6 +2494,12 @@ export default function MissionPage() {
   function updateBlock(instanceId: string, params: Record<string, unknown>) {
     setBlocks((prev) =>
       prev.map((b) => (b.instanceId === instanceId ? { ...b, params } : b)),
+    );
+  }
+
+  function setBlockParallel(instanceId: string, parallel: boolean) {
+    setBlocks((prev) =>
+      prev.map((b) => (b.instanceId === instanceId ? { ...b, parallel } : b)),
     );
   }
 
@@ -2488,6 +2670,7 @@ export default function MissionPage() {
         onDeletePlan={deletePlan}
         isRunning={isRunning}
         activeStepIndex={activeStepIndex}
+        activeStepEnd={activeStepEnd}
       />
 
       {/* Bottom panel — log while running or after run; configure otherwise */}
@@ -2501,6 +2684,7 @@ export default function MissionPage() {
           onAddBlock={addBlock}
           onUpdateBlock={updateBlock}
           onRenameBlock={renameBlock}
+          onSetParallel={setBlockParallel}
         />
       )}
     </div>

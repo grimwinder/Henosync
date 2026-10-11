@@ -744,6 +744,15 @@ class AutoNavigatePlugin(ControlPlugin):
                         {"label": "Perimeter Patrol", "value": StepType.PERIMETER_PATROL},
                     ],
                 },
+                "node_ids": {
+                    "type": "device_multi_select",
+                    "label": "Robots",
+                    "required": False,
+                    "description": (
+                        "Robots to use. Leave empty to use every free robot — "
+                        "robots busy in another running step are never taken."
+                    ),
+                },
                 "marker_id": {
                     "type": "marker_select",
                     "label": "Marker",
