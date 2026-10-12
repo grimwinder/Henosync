@@ -19,8 +19,18 @@ step list. For each run you can:
 
 - **expand** it to see per-step results
 - **Export CSV**: one row per step per robot (available once the run finishes)
+- **View report**: opens the run's `report.html` in your browser
 - **Open folder**: the raw recording
 - **Delete** (click twice to confirm)
+
+Every finished run also gets a human-readable `report.html` in its folder,
+built automatically by `henosync_report.py` (also reachable from the
+**View Report** button that appears on the Mission page after a run). To build
+one combined report across many runs, run the script by hand:
+
+```
+python tools/results/henosync_report.py ~/.henosync/runs -o henosync_report.html --open
+```
 
 CSV columns: `run_id, mission, step, step_name, step_type, robot, target,
 started_at, ended_at, duration_s, outcome, final_x_m, final_y_m, target_x_m,

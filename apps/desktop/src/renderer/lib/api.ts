@@ -249,6 +249,11 @@ export const exportRun = (runId: string, path: string) =>
     body: JSON.stringify({ path }),
   });
 
+export const getRunReport = (runId: string) =>
+  apiFetch<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/report`, {
+    method: "POST",
+  });
+
 export const deleteRun = (runId: string) =>
   apiFetch<{ success: boolean }>(`/api/runs/${encodeURIComponent(runId)}`, {
     method: "DELETE",

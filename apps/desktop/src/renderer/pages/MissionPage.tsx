@@ -21,6 +21,7 @@ import {
   Check,
   CheckCircle2,
   History,
+  FileText,
 } from "lucide-react";
 import MissionMap, {
   type MapBase,
@@ -42,7 +43,7 @@ import {
   recordRunStep,
   stopRun,
 } from "../lib/api";
-import RunsDialog from "../components/mission/RunsDialog";
+import RunsDialog, { openRunReport } from "../components/mission/RunsDialog";
 import { useUIStore } from "../stores/uiStore";
 import type { ControlPluginInfo, PluginConfigField } from "../types";
 
@@ -2051,6 +2052,8 @@ function ControlsPanel({
   onStop,
   showLog,
   onClearLog,
+  onViewReport,
+  reportBusy,
 }: {
   blocks: MissionBlock[];
   onClear: () => void;
@@ -2059,6 +2062,8 @@ function ControlsPanel({
   onStop: () => void;
   showLog: boolean;
   onClearLog: () => void;
+  onViewReport: (() => void) | null;
+  reportBusy: boolean;
 }) {
   const hasBlocks = blocks.length > 0;
   return (
@@ -2080,38 +2085,64 @@ function ControlsPanel({
       }}
     >
       {showLog ? (
-        /* ── Log visible post-run — show Clear button only ── */
-        <button
-          onClick={onClearLog}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "6px",
-            padding: "8px",
-            borderRadius: "6px",
-            border: "1px solid #2D2D2D",
-            backgroundColor: "#141414",
-            color: "#8B95A3",
-            cursor: "pointer",
-            fontSize: "11px",
-            fontWeight: 600,
-            transition: "all 120ms",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
-            (e.currentTarget as HTMLButtonElement).style.borderColor =
-              "#4A4A4A";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
-            (e.currentTarget as HTMLButtonElement).style.borderColor =
-              "#2D2D2D";
-          }}
-        >
-          <X size={11} />
-          Clear Log
-        </button>
+        /* ── Log visible post-run — View Report (if recorded) + Clear ── */
+        <>
+          {onViewReport && (
+            <button
+              onClick={onViewReport}
+              disabled={reportBusy}
+              title="Open this run's report in your browser"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                padding: "8px",
+                borderRadius: "6px",
+                border: "1px solid #4A9EFF55",
+                backgroundColor: "#4A9EFF1A",
+                color: "#4A9EFF",
+                cursor: reportBusy ? "default" : "pointer",
+                fontSize: "11px",
+                fontWeight: 600,
+              }}
+            >
+              <FileText size={11} />
+              {reportBusy ? "Building report…" : "View Report"}
+            </button>
+          )}
+          <button
+            onClick={onClearLog}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #2D2D2D",
+              backgroundColor: "#141414",
+              color: "#8B95A3",
+              cursor: "pointer",
+              fontSize: "11px",
+              fontWeight: 600,
+              transition: "all 120ms",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "#4A4A4A";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "#2D2D2D";
+            }}
+          >
+            <X size={11} />
+            Clear Log
+          </button>
+        </>
       ) : isRunning ? (
         /* ── Running state ── */
         <>
@@ -2323,6 +2354,8 @@ export default function MissionPage() {
 
   // Mission log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
 
   // Run recordings — runs are named after the saved/loaded plan
   const [missionName, setMissionName] = useState("Untitled mission");
@@ -2350,6 +2383,7 @@ export default function MissionPage() {
       ]);
 
     setLogEntries([]);
+    setLastRunId(null);
     addEntry(
       `Mission started · ${total} step${total !== 1 ? "s" : ""}`,
       "system",
@@ -2541,13 +2575,33 @@ export default function MissionPage() {
           : "completed";
       try {
         await stopRun(runId, outcome);
+        setLastRunId(runId);
         addEntry(
-          "Run saved — open Runs to view results or export CSV",
+          "Run saved — View Report opens the analysis; Runs has CSV export",
           "system",
         );
       } catch (err) {
         console.error("[Mission] Failed to save run:", err);
       }
+    }
+  }
+
+  async function viewReport(runId: string) {
+    setReportBusy(true);
+    try {
+      await openRunReport(runId);
+    } catch (err) {
+      setLogEntries((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          time: new Date(),
+          message: `Report failed: ${(err as Error).message}`,
+          kind: "fail",
+        },
+      ]);
+    } finally {
+      setReportBusy(false);
     }
   }
 
@@ -2824,7 +2878,12 @@ export default function MissionPage() {
         onRun={startMission}
         onStop={stopMission}
         showLog={!isRunning && logEntries.length > 0}
-        onClearLog={() => setLogEntries([])}
+        onClearLog={() => {
+          setLogEntries([]);
+          setLastRunId(null);
+        }}
+        onViewReport={lastRunId ? () => viewReport(lastRunId) : null}
+        reportBusy={reportBusy}
       />
 
       {/* Right panel — ordered step list, full height */}

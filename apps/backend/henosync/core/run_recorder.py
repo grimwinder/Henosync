@@ -9,6 +9,8 @@ Records every mission run (one press of Run Mission) to its own folder.
         operations.jsonl   operation state changes
         steps.jsonl        step start / end reported by the Mission page
         summary.json       per-step results, written when the run stops
+        report.html        human-readable report built from the above by
+                           tools/results/henosync_report.py after the run stops
 
 The folder layout matches tools/results/ws_logger.py, so the analysis
 scripts read either. Times are epoch seconds on the backend's clock.
@@ -18,8 +20,11 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import re
 import shutil
+import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 RUNS_DIR = Path.home() / ".henosync" / "runs"
 OPERATION_POLL_S = 0.5
+REPORT_SCRIPT = Path(__file__).resolve().parents[4] / "tools" / "results" / "henosync_report.py"
+REPORT_NAME = "report.html"
+REPORT_TIMEOUT_S = 120
 
 CSV_COLUMNS = [
     "run_id", "mission", "step", "step_name", "step_type", "robot", "target",
@@ -90,6 +98,7 @@ class RunRecorder:
     def __init__(self) -> None:
         self._active: Optional[_ActiveRun] = None
         self._subscribed = False
+        self._report_tasks: dict[str, asyncio.Task] = {}
 
     @property
     def active_run_id(self) -> Optional[str]:
@@ -166,6 +175,7 @@ class RunRecorder:
         }
         (run.path / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         logger.info(f"Run recording stopped ({outcome}): {run.path}")
+        self._start_report(run.id, run.path)
         return self._describe(run.path)
 
     async def shutdown(self) -> None:
@@ -193,6 +203,19 @@ class RunRecorder:
             for row in run["results"]:
                 writer.writerow({"run_id": run["id"], "mission": run["mission"], **row})
         return dest
+
+    async def report(self, run_id: str) -> str:
+        """Path to the run's report.html, building it first if needed."""
+        path = self._run_path(run_id)
+        if self._active and self._active.id == run_id:
+            raise ValueError("Run is still in progress")
+        task = self._report_tasks.get(run_id)
+        if task:
+            await asyncio.shield(task)
+        report = path / REPORT_NAME
+        if not report.exists():
+            await _build_report(path)
+        return str(report)
 
     def delete_run(self, run_id: str) -> None:
         if self._active and self._active.id == run_id:
@@ -361,6 +384,19 @@ class RunRecorder:
                 })
         return rows
 
+    # ── Report ────────────────────────────────────────────────────
+
+    def _start_report(self, run_id: str, path: Path) -> None:
+        task = asyncio.create_task(_build_report(path))
+        self._report_tasks[run_id] = task
+
+        def done(t: asyncio.Task) -> None:
+            self._report_tasks.pop(run_id, None)
+            if not t.cancelled() and t.exception():
+                logger.warning(f"Report generation failed for {run_id}: {t.exception()}")
+
+        task.add_done_callback(done)
+
     # ── Helpers ───────────────────────────────────────────────────
 
     def _require_active(self, run_id: str) -> _ActiveRun:
@@ -404,6 +440,26 @@ class RunRecorder:
             "step_count": len(meta["steps"]),
             "results": summary["results"] if summary else [],
         }
+
+
+async def _build_report(path: Path) -> Path:
+    """Run tools/results/henosync_report.py on one run folder -> report.html."""
+    out = path / REPORT_NAME
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, str(REPORT_SCRIPT), str(path), "-o", str(out)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            timeout=REPORT_TIMEOUT_S,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Report generation timed out after {REPORT_TIMEOUT_S} s")
+    if proc.returncode != 0:
+        lines = proc.stderr.strip().splitlines()
+        raise RuntimeError(lines[-1] if lines else f"Report script exited {proc.returncode}")
+    return out
 
 
 def _read_jsonl(path: Path) -> list[dict]:
