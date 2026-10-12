@@ -46,7 +46,7 @@ class DeviceCapability(str, Enum):
     ARM_TOOL = "arm_tool"
     BATTERY = "battery"
     CHARGING = "charging"
-    NAV2 = "nav2"
+    ONBOARD_CTRL = "onboard_ctrl"
 
 
 # ── Capability Profiles ───────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import {
   Wrench,
   Battery,
   Zap,
-  Route,
+  Cpu,
 } from "lucide-react";
 import { useNodeStore } from "../../stores/nodeStore";
 import { useNodes } from "../../hooks/useNodes";
@@ -71,7 +71,7 @@ const CAPABILITY_ICON: Record<DeviceCapability, React.ReactNode> = {
   arm_tool: <Wrench size={12} />,
   battery: <Battery size={12} />,
   charging: <Zap size={12} />,
-  nav2: <Route size={12} />,
+  onboard_ctrl: <Cpu size={12} />,
 };
 
 const CAPABILITY_LABEL: Record<DeviceCapability, string> = {
@@ -89,7 +89,7 @@ const CAPABILITY_LABEL: Record<DeviceCapability, string> = {
   arm_tool: "Arm Tool",
   battery: "Battery",
   charging: "Charging",
-  nav2: "Nav2",
+  onboard_ctrl: "Onboard Ctrl",
 };
 
 // ── Capability badge ─────────────────────────────────────────────────────────────

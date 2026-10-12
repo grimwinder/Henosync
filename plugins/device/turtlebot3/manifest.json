@@ -7,7 +7,7 @@
   "sdk_version": ">=0.1.0",
   "node_types": ["agv"],
   "fixed_capabilities": ["gps", "move_2d", "battery"],
-  "optional_capabilities": ["lidar", "nav2"],
+  "optional_capabilities": ["lidar", "onboard_ctrl"],
   "capabilities": [
     {
       "id": "move_to",
@@ -76,12 +76,14 @@
       "description": "ROS2 topic publishing sensor_msgs/NavSatFix. Leave blank for /gps/fix.",
       "show_when": { "field": "position_source", "value": "gps" }
     },
-    "nav2_goal_topic": {
-      "type": "string",
-      "label": "Nav2 Goal Topic",
+    "onboard_timeout_s": {
+      "type": "number",
+      "label": "Onboard Controller Timeout (s)",
       "required": false,
-      "placeholder": "/move_base_simple/goal",
-      "description": "Only used when Nav2 capability is selected. Topic for Nav2 navigation goals (geometry_msgs/PoseStamped). Leave blank to use /<namespace>/move_base_simple/goal."
+      "default": 120,
+      "min": 5,
+      "max": 600,
+      "description": "Only used when Onboard Controller capability is selected. Maximum seconds to wait for the robot's onboard controller to report arrival before declaring timeout."
     }
   }
 }

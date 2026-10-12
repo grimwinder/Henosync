@@ -31,7 +31,7 @@ export type DeviceCapability =
   | "arm_tool"
   | "battery"
   | "charging"
-  | "nav2";
+  | "onboard_ctrl";
 
 export type StepType =
   | "move"

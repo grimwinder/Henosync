@@ -9,10 +9,12 @@ Positioning:
   - GPS  mode:  subscribes to the onboard GPS topic via rosbridge.
 
 Movement (move_to):
-  Proportional velocity controller — reads node.position (VICON yaw from
-  pos.heading, or IMU yaw from state.imu.yaw in GPS mode) to steer toward
-  the GPS target. Publishes geometry_msgs/Twist to platform/cmd_vel_unstamped
-  at 10 Hz until arrival or cancellation. Works without Nav2.
+  Two modes — selected via the optional "Onboard Controller" capability:
+    Default:         proportional velocity controller in Henosync; publishes
+                     geometry_msgs/Twist to platform/cmd_vel_unstamped at 10 Hz.
+    Onboard Ctrl:    Henosync publishes waypoint + VICON pose to the robot;
+                     henosync_controller.py on the robot runs the proportional
+                     controller locally and publishes arrived when done.
 
 Manual driving (cmd_vel custom command):
   For the `teleop` control plugin — normalised [-1, 1] linear/angular,
@@ -27,12 +29,16 @@ Topics subscribed (all optionally prefixed with `namespace`, e.g. a200_0000):
   platform/bms/state                  sensor_msgs/BatteryState        (battery)
   sensors/imu_0/data                  sensor_msgs/Imu                 (orientation)
   sensors/lidar2d_0/scan              sensor_msgs/LaserScan           (optional)
+  henosync/arrived                    std_msgs/Bool                   (onboard_ctrl only)
 
 Topics published:
   platform/cmd_vel_unstamped           geometry_msgs/Twist
+  henosync/waypoint                    std_msgs/String  JSON           (onboard_ctrl only)
+  henosync/vicon_pose                  geometry_msgs/Pose2D           (onboard_ctrl only)
 """
 
 import asyncio
+import json as _json
 import logging
 import math
 import time
@@ -74,8 +80,11 @@ class _NodeState:
         self.connected: bool = False
         self.ros: Optional[Any] = None
         self.cmd_vel_pub: Optional[Any] = None
-        self.nav2_goal_pub: Optional[Any] = None
-        self.nav2_cancel_service: Optional[Any] = None
+
+        # Onboard controller publishers/subscriber (created only when onboard_ctrl selected)
+        self.waypoint_pub: Optional[Any] = None
+        self.vicon_pose_pub: Optional[Any] = None
+        self.arrived_event: Optional[asyncio.Event] = None
 
         # Position — GPS mode only, written by _on_gps.
         # VICON mode: vicon_manager sets node.position directly, nothing here.
@@ -89,11 +98,6 @@ class _NodeState:
         self.battery_percent: float = 100.0
         self.imu: IMUData = IMUData()
         self.lidar: Optional[LidarScan] = None
-
-        # Odom pose — used to compute Nav2 goals in the robot's map frame.
-        self.odom_x: float = 0.0
-        self.odom_y: float = 0.0
-        self.odom_yaw: float = 0.0
 
         # Timing
         self.connect_time: float = time.monotonic()
@@ -115,15 +119,15 @@ class JackalPlugin(NodePlugin):
     Clearpath Jackal UGV device plugin.
 
     Positioning: VICON (default, handled by core vicon_manager) or GPS.
-    Movement: proportional velocity controller publishing Twist to
-    platform/cmd_vel_unstamped — works without Nav2.
+    Movement: proportional velocity controller (default) or onboard controller
+    (when ONBOARD_CTRL capability is selected — robot runs henosync_controller.py).
     """
 
     PLUGIN_ID = "jackal"
     PLUGIN_NAME = "Clearpath Jackal (ROS2)"
     PLUGIN_VERSION = "0.1.0"
     PLUGIN_AUTHOR = "Henosync Team — Monash University"
-    PLUGIN_DESCRIPTION = "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack, VICON/GPS positioning, proportional velocity controller"
+    PLUGIN_DESCRIPTION = "Clearpath Jackal UGV via rosbridge — ROS2 Clearpath stack, VICON/GPS positioning, proportional velocity controller or onboard controller"
 
     TELEMETRY_RATE_HZ: float = 2.0
 
@@ -229,8 +233,8 @@ class JackalPlugin(NodePlugin):
                 capabilities.append(CapabilitySpec(capability=DeviceCapability.CAMERA))
             if "lidar" in selected:
                 capabilities.append(CapabilitySpec(capability=DeviceCapability.LIDAR))
-            if "nav2" in selected:
-                capabilities.append(CapabilitySpec(capability=DeviceCapability.NAV2))
+            if "onboard_ctrl" in selected:
+                capabilities.append(CapabilitySpec(capability=DeviceCapability.ONBOARD_CTRL))
 
             node.specs = DeviceSpecs(
                 category=DeviceCategory.AGV,
@@ -276,21 +280,29 @@ class JackalPlugin(NodePlugin):
                 lidar_topic.subscribe(lambda msg: self._on_lidar(node.id, msg))
                 state._subscriptions.append(lidar_topic)
 
-            if "nav2" in selected:
-                nav2_topic = config.get("nav2_goal_topic") or self._topic(
-                    ns, "goal_pose"
+            if "onboard_ctrl" in selected:
+                # Publish waypoints and VICON pose to the robot; subscribe to arrived signal.
+                state.arrived_event = asyncio.Event()
+                _loop = asyncio.get_running_loop()
+
+                state.waypoint_pub = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/waypoint"), "std_msgs/String"
                 )
-                state.nav2_goal_pub = roslibpy.Topic(
-                    ros, nav2_topic, "geometry_msgs/PoseStamped"
+                state.waypoint_pub.advertise()
+
+                state.vicon_pose_pub = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/vicon_pose"), "geometry_msgs/Pose2D"
                 )
-                state.nav2_goal_pub.advertise()
-                # Service to cancel all active Nav2 goals (zeros UUID = cancel all).
-                nav2_cancel_topic = self._topic(
-                    ns, "navigate_to_pose/_action/cancel_goal"
+                state.vicon_pose_pub.advertise()
+
+                arrived_topic = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/arrived"), "std_msgs/Bool"
                 )
-                state.nav2_cancel_service = roslibpy.Service(
-                    ros, nav2_cancel_topic, "action_msgs/srv/CancelGoal"
+                arrived_topic.subscribe(
+                    lambda msg: _loop.call_soon_threadsafe(state.arrived_event.set)
+                    if msg.get("data", False) else None
                 )
+                state._subscriptions.append(arrived_topic)
 
             # Anchor liveness clock to connect time so a wrong namespace
             # (topics never publish) triggers DEGRADED within MESSAGE_TIMEOUT seconds.
@@ -335,16 +347,6 @@ class JackalPlugin(NodePlugin):
         state.speed = (
             msg.get("twist", {}).get("twist", {}).get("linear", {}).get("x", 0.0)
         )
-        pose = msg.get("pose", {}).get("pose", {})
-        pos = pose.get("position", {})
-        state.odom_x = float(pos.get("x", state.odom_x))
-        state.odom_y = float(pos.get("y", state.odom_y))
-        q = pose.get("orientation", {})
-        qx = float(q.get("x", 0.0))
-        qy = float(q.get("y", 0.0))
-        qz = float(q.get("z", 0.0))
-        qw = float(q.get("w", 1.0))
-        state.odom_yaw = math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
         state.last_message_time = time.monotonic()
 
     def _on_battery(self, node_id: str, msg: dict) -> None:
@@ -441,55 +443,18 @@ class JackalPlugin(NodePlugin):
     def _publish_zero_twist(self, state: _NodeState) -> None:
         self._publish_twist(state, 0.0, 0.0)
 
-    def _set_nav2_max_speed(self, state: _NodeState, ns: str, max_speed: float) -> None:
-        """Dynamically set Nav2 controller_server max_vel_x via set_parameters service."""
-        try:
-            from twisted.internet import reactor as _reactor
-            svc_name = f"/{ns}/controller_server/set_parameters" if ns else "/controller_server/set_parameters"
-            svc = roslibpy.Service(state.ros, svc_name, "rcl_interfaces/srv/SetParameters")
-            req = roslibpy.ServiceRequest({
-                "parameters": [{
-                    "name": "FollowPath.max_vel_x",
-                    "value": {"type": 3, "double_value": float(max_speed)},
-                }]
-            })
-            _reactor.callFromThread(
-                lambda: svc.call(req, lambda _: None, lambda _: None)
-            )
-            logger.info("Jackal: Nav2 max_vel_x set to %.2f m/s", max_speed)
-        except Exception as e:
-            logger.warning("Jackal: Nav2 set_parameters failed: %s", e)
-
-    def _cancel_nav2_goals(self, state: _NodeState) -> None:
-        """Cancel all active Nav2 goals via the navigate_to_pose action cancel service."""
-        if not state.nav2_cancel_service:
+    def _publish_waypoint(self, state: _NodeState, waypoint_json: str) -> None:
+        if not state.waypoint_pub:
             return
         try:
             from twisted.internet import reactor as _reactor
-            req = roslibpy.ServiceRequest(
-                {"goal_info": {"goal_id": {"uuid": [0] * 16}, "stamp": {"sec": 0, "nanosec": 0}}}
-            )
-            _reactor.callFromThread(
-                lambda: state.nav2_cancel_service.call(req, lambda _: None, lambda _: None)
-            )
+            msg = roslibpy.Message({"data": waypoint_json})
+            _reactor.callFromThread(lambda: state.waypoint_pub.publish(msg))
         except Exception as e:
-            logger.warning("Jackal: Nav2 cancel failed: %s", e)
+            logger.warning("Jackal: waypoint publish failed: %s", e)
 
-    def _publish_nav2_goal(self, state: _NodeState, x: float, y: float) -> None:
-        if not state.nav2_goal_pub:
-            return
-        try:
-            from twisted.internet import reactor as _reactor
-            msg = roslibpy.Message({
-                "header": {"frame_id": "map"},
-                "pose": {
-                    "position": {"x": float(x), "y": float(y), "z": 0.0},
-                    "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-                },
-            })
-            _reactor.callFromThread(lambda: state.nav2_goal_pub.publish(msg))
-        except Exception as e:
-            logger.warning("Jackal: nav2 goal publish failed: %s", e)
+    def _publish_stop_sentinel(self, state: _NodeState) -> None:
+        self._publish_waypoint(state, '{"stop": true}')
 
     # ── Disconnect ─────────────────────────────────────────────────────────────
 
@@ -503,7 +468,7 @@ class JackalPlugin(NodePlugin):
                 sub.unsubscribe()
             except Exception:
                 pass
-        for pub in filter(None, [state.cmd_vel_pub, state.nav2_goal_pub]):
+        for pub in filter(None, [state.cmd_vel_pub, state.waypoint_pub, state.vicon_pose_pub]):
             try:
                 pub.unadvertise()
             except Exception:
@@ -544,16 +509,6 @@ class JackalPlugin(NodePlugin):
         arrival_radius_m: Optional[float] = None,
         max_speed: Optional[float] = None,
     ) -> CommandResult:
-        """
-        Navigation mode depends on whether the operator selected the Nav2 capability:
-          Nav2 selected:  publish a PoseStamped goal to move_base_simple/goal; poll
-                          for arrival. Nav2 handles path planning and obstacle avoidance.
-          Nav2 not selected: proportional velocity controller publishing Twist directly.
-
-        For VICON-mode devices (coordinate_frame="local"), DeviceProxy converts
-        the WGS84 target to local x/y metres before dispatch; this method converts
-        them back to GPS for haversine distance checks.
-        """
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
@@ -570,112 +525,57 @@ class JackalPlugin(NodePlugin):
             lon = node.local_origin.lon + math.degrees(x / (R * math.cos(math.radians(node.local_origin.lat))))
 
         threshold = arrival_radius_m if (arrival_radius_m is not None and arrival_radius_m > 0) else self.ARRIVAL_THRESHOLD_M
-        has_nav2 = node.specs and any(
-            cs.capability == DeviceCapability.NAV2 for cs in node.specs.capabilities
+        speed_cap = min(float(max_speed), self.MAX_LINEAR_VEL) if max_speed is not None else self.MAX_LINEAR_VEL
+
+        has_onboard = (
+            use_vicon
+            and state.arrived_event is not None
+            and node.specs
+            and any(cs.capability == DeviceCapability.ONBOARD_CTRL for cs in node.specs.capabilities)
         )
 
-        if has_nav2:
-            # ── Nav2 path ────────────────────────────────────────────────────
-            # Nav2 operates in its own odom/map frame.  We convert the target
-            # from VICON/GPS space to an odom-frame goal using the current
-            # rotation delta between the two frames.  Any residual frame error
-            # means Nav2 may stop slightly short of the true target.
-            #
-            # Refinement loop: after Nav2 stops the robot (detected by odom
-            # stalling), check the VICON/GPS distance.  If still outside the
-            # arrival threshold, recompute the goal with fresh readings and
-            # resend.  This closes the loop against both frame rotation errors
-            # and odom drift accumulated during travel.
-            MAX_REFINEMENTS = 5
-            # Seconds without odom movement before we assume Nav2 declared done.
-            STALL_TIMEOUT = 2.0
-            STALL_MOVE_M = 0.02  # 2 cm counts as movement
+        if has_onboard:
+            # ── Onboard controller path ───────────────────────────────────────
+            # Publish waypoint JSON to the robot; henosync_controller.py runs
+            # the proportional controller locally and publishes arrived when done.
+            # Only supported in VICON mode (x/y are already in metres).
+            target_x = float(x)
+            target_y = float(y)
+            waypoint = _json.dumps({
+                "x": target_x,
+                "y": target_y,
+                "arrival_radius": threshold,
+                "max_speed": speed_cap,
+            })
 
-            ns = (node.config.get("namespace") or "").strip("/")
-            if max_speed is not None:
-                self._set_nav2_max_speed(state, ns, min(float(max_speed), self.MAX_LINEAR_VEL))
-
+            timeout = float(node.config.get("onboard_timeout_s", 120.0))
             state.stop_requested = False
-            try:
-                for attempt in range(MAX_REFINEMENTS):
-                    if state.stop_requested or node.id not in self._nodes or not state.connected:
-                        break
+            state.arrived_event.clear()
+            self._publish_waypoint(state, waypoint)
+            logger.info(
+                "Jackal [%s]: onboard ctrl → (%.3f, %.3f) radius=%.3f speed=%.3f timeout=%.0fs",
+                node.name, target_x, target_y, threshold, speed_cap, timeout,
+            )
 
-                    # Recompute goal from CURRENT position readings each attempt.
-                    if use_vicon:
-                        rx = float(node.telemetry.get("vicon_x", 0.0))
-                        ry = float(node.telemetry.get("vicon_y", 0.0))
-                        dx_src = float(x) - rx
-                        dy_src = float(y) - ry
-                        vicon_yaw = node.position.heading if node.position.heading is not None else state.odom_yaw
-                    else:
-                        R = 6_371_000.0
-                        pos = node.position
-                        dx_src = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-                        dy_src = R * math.radians(lat - pos.lat)
-                        vicon_yaw = pos.heading if pos.heading is not None else (state.imu.yaw if state.imu.yaw else state.odom_yaw)
-
-                    theta = state.odom_yaw - vicon_yaw
-                    dx_map = dx_src * math.cos(theta) - dy_src * math.sin(theta)
-                    dy_map = dx_src * math.sin(theta) + dy_src * math.cos(theta)
-                    goal_x = state.odom_x + dx_map
-                    goal_y = state.odom_y + dy_map
-
-                    logger.info(
-                        "Jackal [%s]: Nav2 attempt %d/%d → map (%.3f, %.3f) | "
-                        "delta (%.3f, %.3f) | theta=%.3f",
-                        node.name, attempt + 1, MAX_REFINEMENTS,
-                        goal_x, goal_y, dx_map, dy_map, theta,
-                    )
-                    self._publish_nav2_goal(state, goal_x, goal_y)
-
-                    # Poll: succeed on VICON/GPS arrival, refine on robot stall.
-                    last_odom_x = state.odom_x
-                    last_odom_y = state.odom_y
-                    last_move_time = time.monotonic()
-
-                    while node.id in self._nodes and state.connected:
-                        if state.stop_requested:
-                            state.stop_requested = False
-                            return CommandResult(success=False, message="Stopped")
-
-                        pos = node.position
-                        if pos is not None:
-                            R = 6_371_000.0
-                            dy = R * math.radians(lat - pos.lat)
-                            dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-                            if math.sqrt(dx * dx + dy * dy) < threshold:
-                                return CommandResult(success=True, message="Arrived")
-
-                        # Detect robot stall — Nav2 declared the goal reached
-                        # but VICON distance is still outside threshold.
-                        d_odom = math.sqrt(
-                            (state.odom_x - last_odom_x) ** 2
-                            + (state.odom_y - last_odom_y) ** 2
+            elapsed = 0.0
+            poll = 0.2
+            while node.id in self._nodes and not state.stop_requested:
+                try:
+                    await asyncio.wait_for(state.arrived_event.wait(), timeout=poll)
+                    logger.info("Jackal [%s]: onboard controller — arrived", node.name)
+                    return CommandResult(success=True, message="Arrived")
+                except asyncio.TimeoutError:
+                    elapsed += poll
+                    if elapsed >= timeout:
+                        self._publish_stop_sentinel(state)
+                        return CommandResult(
+                            success=False,
+                            message=f"Onboard controller timeout after {timeout:.0f}s",
                         )
-                        if d_odom > STALL_MOVE_M:
-                            last_odom_x = state.odom_x
-                            last_odom_y = state.odom_y
-                            last_move_time = time.monotonic()
-                        elif time.monotonic() - last_move_time > STALL_TIMEOUT:
-                            logger.info(
-                                "Jackal [%s]: robot stalled short of target — "
-                                "recomputing goal (attempt %d)",
-                                node.name, attempt + 1,
-                            )
-                            break  # recompute with fresh readings
-
-                        await asyncio.sleep(self.ARRIVAL_POLL_S)
-                    else:
-                        break  # node disconnected — exit refinement loop
-
-                return CommandResult(success=False, message="Navigation aborted")
-            finally:
-                self._cancel_nav2_goals(state)
+            return CommandResult(success=False, message="Stopped")
 
         else:
-            # ── Proportional velocity controller ─────────────────────────────
-            speed_cap = min(float(max_speed), self.MAX_LINEAR_VEL) if max_speed is not None else self.MAX_LINEAR_VEL
+            # ── Proportional velocity controller (default) ────────────────────
             logger.info(
                 "Jackal [%s]: velocity controller → target GPS (%.8f, %.8f) | threshold %.2f m | speed_cap %.2f",
                 node.name, lat, lon, threshold, speed_cap,
@@ -742,9 +642,8 @@ class JackalPlugin(NodePlugin):
             return CommandResult(success=False, message="Not connected")
         state.stop_requested = True
         self._publish_zero_twist(state)
-        if state.nav2_cancel_service:
-            # Cancel all active Nav2 goals — zeros UUID means "cancel all".
-            self._cancel_nav2_goals(state)
+        if state.waypoint_pub:
+            self._publish_stop_sentinel(state)
         logger.info("Jackal [%s]: stop", node.name)
         return CommandResult(success=True, message="Stopped")
 
@@ -815,21 +714,37 @@ class JackalPlugin(NodePlugin):
         if state:
             state.stop_requested = True
             self._publish_zero_twist(state)
-            if state.nav2_cancel_service:
-                self._cancel_nav2_goals(state)
-        logger.warning("Jackal [%s]: safe state — zero velocity sent, Nav2 goals cancelled", node.name)
-        return CommandResult(success=True, message="Zero velocity sent; Nav2 goals cancelled.")
+            if state.waypoint_pub:
+                self._publish_stop_sentinel(state)
+        logger.warning("Jackal [%s]: safe state — zero velocity sent", node.name)
+        return CommandResult(success=True, message="Zero velocity sent.")
 
     # ── Telemetry stream ───────────────────────────────────────────────────────
 
     async def telemetry_stream(
         self, node: Node
     ) -> AsyncGenerator[TelemetryFrame, None]:
+        # Wait one tick before publishing to vicon_pose_pub — gives rosbridge time
+        # to process the advertise message sent during connect() before the first
+        # publish arrives, avoiding "topic not yet advertised" errors.
+        await asyncio.sleep(1.0 / self.TELEMETRY_RATE_HZ)
         seq = 0
         while node.id in self._nodes:
             state = self._nodes[node.id]
             now = time.monotonic()
             position_source = node.config.get("position_source", "vicon")
+
+            # Publish VICON pose to robot when onboard controller is active
+            if state.vicon_pose_pub:
+                try:
+                    from twisted.internet import reactor as _reactor
+                    vx = float(node.telemetry.get("vicon_x", 0.0))
+                    vy = float(node.telemetry.get("vicon_y", 0.0))
+                    vtheta = float(node.telemetry.get("vicon_heading", 0.0))
+                    _pose_msg = roslibpy.Message({"x": vx, "y": vy, "theta": vtheta})
+                    _reactor.callFromThread(lambda: state.vicon_pose_pub.publish(_pose_msg))
+                except Exception:
+                    pass
 
             if position_source == "gps":
                 if (

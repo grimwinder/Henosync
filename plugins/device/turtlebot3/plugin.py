@@ -5,9 +5,19 @@ Connects via rosbridge (WebSocket to rosbridge_server).
 Positioning:
   - VICON mode: handled entirely by henosync core (vicon_manager). No code here.
   - GPS  mode:  subscribes to /gps/fix via rosbridge.
+
+Movement (move_to):
+  Two modes — selected via the optional "Onboard Controller" capability:
+    Default:         proportional velocity controller in Henosync; publishes
+                     geometry_msgs/TwistStamped to /cmd_vel at 10 Hz.
+    Onboard Ctrl:    Henosync publishes waypoint + VICON pose to the robot;
+                     henosync_controller.py on the robot runs the proportional
+                     controller locally and publishes arrived when done.
+                     Only available in VICON mode.
 """
 
 import asyncio
+import json as _json
 import logging
 import math
 import time
@@ -46,7 +56,11 @@ class _NodeState(ROS2NodeState):
         self.last_message_time: float = 0.0  # updated by odom; used by is_connected()
         self.stop_requested: bool = False
         self.cmd_vel_pub: Any = None
-        self.nav2_goal_pub: Any = None
+
+        # Onboard controller (created only when onboard_ctrl selected)
+        self.waypoint_pub: Any = None
+        self.vicon_pose_pub: Any = None
+        self.arrived_event: Optional[asyncio.Event] = None
 
 
 class TurtleBot3Plugin(ROS2Plugin):
@@ -85,8 +99,8 @@ class TurtleBot3Plugin(ROS2Plugin):
             CapabilitySpec(capability=DeviceCapability.MOVE_2D),
             CapabilitySpec(capability=DeviceCapability.BATTERY),
         ]
-        if "nav2" in selected:
-            capabilities.append(CapabilitySpec(capability=DeviceCapability.NAV2))
+        if "onboard_ctrl" in selected:
+            capabilities.append(CapabilitySpec(capability=DeviceCapability.ONBOARD_CTRL))
 
         node.specs = DeviceSpecs(
             category=DeviceCategory.AGV,
@@ -118,11 +132,26 @@ class TurtleBot3Plugin(ROS2Plugin):
             f"{prefix}/cmd_vel",
             "geometry_msgs/TwistStamped",
         )
-        if "nav2" in selected:
-            nav2_topic = config.get("nav2_goal_topic") or f"{prefix}/move_base_simple/goal"
-            state.nav2_goal_pub = self.advertise(
-                state, nav2_topic, "geometry_msgs/PoseStamped"
+
+        if "onboard_ctrl" in selected:
+            # Publish waypoints and VICON pose to the robot; subscribe to arrived signal.
+            _loop = asyncio.get_running_loop()
+            state.arrived_event = asyncio.Event()
+
+            state.waypoint_pub = self.advertise(
+                state, f"{prefix}/henosync/waypoint", "std_msgs/String"
             )
+            state.vicon_pose_pub = self.advertise(
+                state, f"{prefix}/henosync/vicon_pose", "geometry_msgs/Pose2D"
+            )
+            self.subscribe(
+                state,
+                f"{prefix}/henosync/arrived",
+                "std_msgs/Bool",
+                lambda msg: _loop.call_soon_threadsafe(state.arrived_event.set)
+                if msg.get("data", False) else None,
+            )
+
         # Start the liveness clock from connect time so a wrong namespace
         # (topics never publish) triggers DEGRADED within MESSAGE_TIMEOUT seconds.
         state.last_message_time = time.monotonic()
@@ -174,6 +203,14 @@ class TurtleBot3Plugin(ROS2Plugin):
 
     def build_telemetry(self, node: Node, state: _NodeState, seq: int) -> TelemetryFrame:
         source = node.config.get("position_source", "vicon")
+
+        # Forward VICON pose to the robot each tick when onboard controller is active
+        if state.vicon_pose_pub:
+            vx = float(node.telemetry.get("vicon_x", 0.0))
+            vy = float(node.telemetry.get("vicon_y", 0.0))
+            vtheta = float(node.telemetry.get("vicon_heading", 0.0))
+            self.publish(state.vicon_pose_pub, {"x": vx, "y": vy, "theta": vtheta})
+
         return TelemetryFrame(
             node_id=node.id,
             sequence_number=seq,
@@ -215,16 +252,6 @@ class TurtleBot3Plugin(ROS2Plugin):
         y, z = q.get("y", 0.0), q.get("z", 0.0)
         return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
-    def _publish_nav2_goal(self, state: _NodeState, x: float, y: float) -> None:
-        if state.nav2_goal_pub:
-            self.publish(state.nav2_goal_pub, {
-                "header": {"frame_id": "map"},
-                "pose": {
-                    "position": {"x": float(x), "y": float(y), "z": 0.0},
-                    "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-                },
-            })
-
     def _publish_twist(self, state: _NodeState, linear: float, angular: float) -> None:
         if state.cmd_vel_pub:
             self.publish(state.cmd_vel_pub, {
@@ -234,6 +261,13 @@ class TurtleBot3Plugin(ROS2Plugin):
                     "angular": {"x": 0.0, "y": 0.0, "z": float(angular)},
                 },
             })
+
+    def _publish_waypoint(self, state: _NodeState, waypoint_json: str) -> None:
+        if state.waypoint_pub:
+            self.publish(state.waypoint_pub, {"data": waypoint_json})
+
+    def _publish_stop_sentinel(self, state: _NodeState) -> None:
+        self._publish_waypoint(state, '{"stop": true}')
 
     # ── Command handlers ───────────────────────────────────────────────────────
 
@@ -265,55 +299,59 @@ class TurtleBot3Plugin(ROS2Plugin):
             lon = node.local_origin.lon + math.degrees(x / (_R * math.cos(math.radians(node.local_origin.lat))))
 
         threshold = arrival_radius_m if (arrival_radius_m is not None and arrival_radius_m > 0) else self.ARRIVAL_THRESHOLD_M
-        has_nav2 = node.specs and any(
-            cs.capability == DeviceCapability.NAV2 for cs in node.specs.capabilities
+        speed_cap = self.MAX_LINEAR_VEL if max_speed is None else min(float(max_speed), self.MAX_LINEAR_VEL)
+
+        has_onboard = (
+            use_vicon
+            and state.arrived_event is not None
+            and node.specs
+            and any(cs.capability == DeviceCapability.ONBOARD_CTRL for cs in node.specs.capabilities)
         )
 
         logger.info(
-            "cmd_move_to: target GPS (%.8f, %.8f) | x=%s y=%s | nav2=%s",
-            lat, lon, x, y, has_nav2,
+            "cmd_move_to: target GPS (%.8f, %.8f) | x=%s y=%s | onboard=%s",
+            lat, lon, x, y, has_onboard,
         )
 
-        if has_nav2:
-            # ── Nav2 path ────────────────────────────────────────────────────
-            if use_vicon:
-                goal_x, goal_y = float(x), float(y)
-            elif node.local_origin:
-                R = 6_371_000.0
-                goal_y = R * math.radians(lat - node.local_origin.lat)
-                goal_x = R * math.radians(lon - node.local_origin.lon) * math.cos(
-                    math.radians(node.local_origin.lat)
-                )
-            else:
-                pos = node.position
-                R = 6_371_000.0
-                goal_y = R * math.radians(lat - pos.lat)
-                goal_x = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
+        if has_onboard:
+            # ── Onboard controller path ───────────────────────────────────────
+            target_x = float(x)
+            target_y = float(y)
+            waypoint = _json.dumps({
+                "x": target_x,
+                "y": target_y,
+                "arrival_radius": threshold,
+                "max_speed": speed_cap,
+            })
 
-            self._publish_nav2_goal(state, goal_x, goal_y)
+            timeout = float(node.config.get("onboard_timeout_s", 120.0))
             state.stop_requested = False
-            try:
-                while node.id in self._nodes and state.connected:
-                    if state.stop_requested:
-                        state.stop_requested = False
-                        return CommandResult(success=False, message="Stopped")
-                    pos = node.position
-                    if pos is None:
-                        await asyncio.sleep(0.1)
-                        continue
-                    R = 6_371_000.0
-                    dy = R * math.radians(lat - pos.lat)
-                    dx = R * math.radians(lon - pos.lon) * math.cos(math.radians(pos.lat))
-                    if math.sqrt(dx * dx + dy * dy) < threshold:
-                        return CommandResult(success=True, message="Arrived")
-                    await asyncio.sleep(0.1)
-                return CommandResult(success=False, message="Navigation aborted")
-            finally:
-                pass  # Nav2 keeps navigating until a new goal arrives
+            state.arrived_event.clear()
+            self._publish_waypoint(state, waypoint)
+            logger.info(
+                "TurtleBot3 [%s]: onboard ctrl → (%.3f, %.3f) radius=%.3f speed=%.3f timeout=%.0fs",
+                node.name, target_x, target_y, threshold, speed_cap, timeout,
+            )
+
+            elapsed = 0.0
+            poll = 0.2
+            while node.id in self._nodes and not state.stop_requested:
+                try:
+                    await asyncio.wait_for(state.arrived_event.wait(), timeout=poll)
+                    logger.info("TurtleBot3 [%s]: onboard controller — arrived", node.name)
+                    return CommandResult(success=True, message="Arrived")
+                except asyncio.TimeoutError:
+                    elapsed += poll
+                    if elapsed >= timeout:
+                        self._publish_stop_sentinel(state)
+                        return CommandResult(
+                            success=False,
+                            message=f"Onboard controller timeout after {timeout:.0f}s",
+                        )
+            return CommandResult(success=False, message="Stopped")
 
         else:
             # ── Proportional velocity controller ─────────────────────────────
-            speed_cap = self.MAX_LINEAR_VEL if max_speed is None else min(float(max_speed), self.MAX_LINEAR_VEL)
             state.stop_requested = False
             _tick = 0
             try:
@@ -380,6 +418,8 @@ class TurtleBot3Plugin(ROS2Plugin):
             return CommandResult(success=False, message="Not connected")
         state.stop_requested = True
         self._publish_twist(state, 0.0, 0.0)
+        if state.waypoint_pub:
+            self._publish_stop_sentinel(state)
         return CommandResult(success=True, message="Stopped")
 
     async def cmd_return_home(self, node: Node) -> CommandResult:
@@ -419,4 +459,6 @@ class TurtleBot3Plugin(ROS2Plugin):
         if state:
             state.stop_requested = True
             self._publish_twist(state, 0.0, 0.0)
+            if state.waypoint_pub:
+                self._publish_stop_sentinel(state)
         return CommandResult(success=True, message="Stopped")

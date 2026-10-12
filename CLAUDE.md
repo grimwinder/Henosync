@@ -370,7 +370,7 @@ Key types:
 
 - `NodeStatus`: CONNECTING, ONLINE, DEGRADED, OFFLINE, ERROR
 - `DeviceCategory`: DRONE, PLANE, AGV, BOAT, ROV, ARM, LEGGED, VTOL, TRACKED, STATIC, UNKNOWN
-- `DeviceCapability`: MOVE_2D, MOVE_3D, GPS, LIDAR, CAMERA, SONAR, IMU, THERMAL, HORN, LIGHTS, PAYLOAD, ARM_TOOL, BATTERY, CHARGING
+- `DeviceCapability`: MOVE_2D, MOVE_3D, GPS, LIDAR, CAMERA, SONAR, IMU, THERMAL, HORN, LIGHTS, PAYLOAD, ARM_TOOL, BATTERY, CHARGING, ONBOARD_CTRL
 - `DeviceSpecs`: category, capabilities (list[CapabilitySpec]), physical/operational specs, coordinate_frame ("gps" or "local")
 - `Position`: lat, lon, alt, heading, accuracy — ALL positions in system are WGS84
 - `Node`: id (UUID), name, plugin_id, status, position, battery_percent, signal_strength, capabilities (list[NodeCapability]), telemetry (dict), last_seen, home_position, local_origin, config, specs
@@ -793,3 +793,4 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-10-12 | analyze_telemetry.py: added --dropout flag — reads status.jsonl for ONLINE→DEGRADED/ERROR windows, counts VICON frames and distance moved during each window (proves position pipeline stayed live during rosbridge dropout) |
 | 2026-10-12 | Added tools/results/analyze_timing.py — parallel execution timing: per-step timeline, detects overlapping steps, prints serial estimate, actual wall time and speedup ratio |
 | 2026-10-12 | Automated run reports: copied henosync_report.py into tools/results/; run_recorder builds <run>/report.html in the background after every stop_run; added POST /api/runs/{id}/report (awaits/builds, returns path); frontend getRunReport() + openRunReport(); View report button in RunsDialog and View Report button in MissionPage ControlsPanel after a recorded run |
+| 2026-10-12 | Replaced NAV2 capability with ONBOARD_CTRL ("onboard_ctrl") across SDK, jackal, turtlebot3, and frontend — Nav2 code removed; jackal and turtlebot3 now publish JSON waypoints (std_msgs/String) to /<ns>/henosync/waypoint and forward VICON pose (geometry_msgs/Pose2D) to /<ns>/henosync/vicon_pose; robot publishes std_msgs/Bool arrived signal; plugin awaits asyncio.Event with configurable onboard_timeout_s; added tools/robot/henosync_controller.py rclpy node (runs on robot, --namespace, --unstamped) |

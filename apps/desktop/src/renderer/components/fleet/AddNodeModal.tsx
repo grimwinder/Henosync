@@ -41,7 +41,7 @@ export const CAPABILITY_LABEL: Partial<Record<DeviceCapability, string>> = {
   arm_tool: "Arm Tool",
   battery: "Battery",
   charging: "Charging",
-  nav2: "Nav2",
+  onboard_ctrl: "Onboard Ctrl",
 };
 
 // ── Config field renderer ──────────────────────────────────────────────────────
