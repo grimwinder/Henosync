@@ -179,14 +179,17 @@ export const startOperation = (
   plugin_id: string,
   config: Record<string, unknown> = {},
 ) =>
-  apiFetch<{ success: boolean; message: string }>("/api/operations/start", {
-    method: "POST",
-    body: JSON.stringify({ plugin_id, config }),
-  });
+  apiFetch<{ success: boolean; message: string; operation_id: string }>(
+    "/api/operations/start",
+    {
+      method: "POST",
+      body: JSON.stringify({ plugin_id, config }),
+    },
+  );
 
-export const stopOperation = (plugin_id: string) =>
+export const stopOperation = (operation_id: string) =>
   apiFetch<{ success: boolean; message: string }>(
-    `/api/operations/${plugin_id}/stop`,
+    `/api/operations/${operation_id}/stop`,
     {
       method: "POST",
     },
@@ -244,6 +247,11 @@ export const exportRun = (runId: string, path: string) =>
   apiFetch<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/export`, {
     method: "POST",
     body: JSON.stringify({ path }),
+  });
+
+export const getRunReport = (runId: string) =>
+  apiFetch<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/report`, {
+    method: "POST",
   });
 
 export const deleteRun = (runId: string) =>

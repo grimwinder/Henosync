@@ -11,6 +11,7 @@ import asyncio
 import logging
 import socket
 import time
+from datetime import datetime, timezone
 from math import cos, radians
 from typing import Any
 
@@ -286,10 +287,7 @@ class VICONManager:
 
         position = Position(lat=lat, lon=lon, alt=z_m, heading=yaw)
         node.position = position
-        # Deliberately NOT touching node.last_seen: VICON seeing the robot says
-        # nothing about Henosync's link to it. last_seen is the failsafe
-        # heartbeat, so only the device plugin's own telemetry may refresh it —
-        # otherwise a dead rosbridge link never trips the failsafe.
+        node.last_seen = datetime.now(timezone.utc)
         # Write VICON data directly to node.telemetry so the REST API returns
         # them and cmd_move_to can read them in the backend without racing WS.
         node.telemetry.update({

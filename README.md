@@ -8,40 +8,10 @@ Open source robot fleet mission planner. Control and coordinate networks of dron
 | ----------------------------- | ------- | --------------------- |
 | [Node.js](https://nodejs.org) | 20+     |                       |
 | [pnpm](https://pnpm.io)       | 8+      | `npm install -g pnpm` |
-| [Python](https://python.org/downloads/release/python-3120/) | **3.11 or 3.12** | 3.13+ is **not** supported — see below |
+| [Python](https://python.org)  | 3.11+   |                       |
 | [Git](https://git-scm.com)    | Any     |                       |
-| [Vicon DataStream SDK](https://www.vicon.com/software/datastream-sdk/) | Any | Only needed for VICON positioning — see below |
-
-> **Python version:** use 3.11 or 3.12. The Vicon Python package (`vicon_dssdk`) and several ROS2 packages have no builds for 3.13+. You can have other Python versions installed too — the Windows setup script picks 3.12/3.11 via the `py` launcher. On Windows, tick **"Add python.exe to PATH"** and keep the **py launcher** option when installing.
 
 > **Note:** Poetry is not required. The setup scripts create a local Python virtual environment using the tools built into Python.
-
-### VICON motion capture (optional)
-
-Henosync talks to the VICON PC directly using Vicon's own Python package, `vicon_dssdk`. It is **not on PyPI** — it ships inside the Vicon DataStream SDK installer:
-
-**Windows:**
-
-1. Download the [Vicon DataStream SDK](https://www.vicon.com/software/datastream-sdk/) (e.g. `ViconDataStreamSDK_1.13.0+167154h.zip`) and extract it. The download contains Linux, Mac and Win64 zips — you only need the Windows installer:
-   ```
-   ViconDataStreamSDK_<version>\ViconDataStreamSDK_<version>_Win64\Win64\ViconDataStreamSDK_<version>_x64.msi
-   ```
-   (Extract `..._Win64.zip` first if it isn't already. Ignore the `.7z` source archives.)
-2. The installer is unsigned, so Windows may block it ("Windows protected your PC"). Either click **More info → Run anyway**, or right-click the `.msi` → **Properties** → tick **Unblock** → **OK**.
-3. Run the `.msi` and **keep the default install location** (`C:\Program Files\Vicon\DataStream SDK`) — setup only searches there unless you set `VICON_SDK_DIR`.
-4. Run (or re-run) `scripts\setup.bat` from **cmd or PowerShell** (not Git Bash). It should print:
-   ```
-   Installing VICON support...
-     Found C:\Program Files\Vicon\DataStream SDK\Win64\Python\vicon_dssdk
-     VICON support installed
-   ```
-5. If Henosync was already running, **fully close and restart it** — the backend only loads the Vicon package at startup.
-
-**Mac / Linux:** extract the SDK zip for your platform and run `VICON_SDK_DIR=/path/to/extracted/sdk ./scripts/setup.sh`.
-
-**Connecting:** click the VICON dot in the title bar and enter the VICON PC's IP (port `801`). Your machine must be on the same network as the VICON PC, and Vicon Tracker/Nexus must be running live on it. If Windows Firewall prompts, allow access on **Private** networks.
-
-Without the SDK, Henosync runs normally but the VICON indicator in the title bar never connects. If setup prints `WARNING: VICON support NOT installed`, check the SDK is installed under `C:\Program Files\Vicon` and re-run setup.
 
 ## Setup
 
@@ -68,10 +38,7 @@ The setup script:
 
 - Checks all prerequisites
 - Runs `pnpm install` for JavaScript dependencies
-- Creates `apps/backend/.venv` with Python 3.11/3.12 and installs Python packages via pip (an existing `.venv` built with the wrong Python version is recreated)
-- Installs VICON support from the Vicon DataStream SDK if it is installed
-
-Re-running setup is safe — do it after installing the Vicon SDK or if you get import errors.
+- Creates `apps/backend/.venv` and installs Python packages via pip
 
 ## Running
 

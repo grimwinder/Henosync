@@ -59,7 +59,7 @@ class TurtleBot3Plugin(ROS2Plugin):
     TELEMETRY_RATE_HZ: float = 2.0
     MESSAGE_TIMEOUT: float = 5.0
 
-    ARRIVAL_THRESHOLD_M: float = 0.2
+    ARRIVAL_THRESHOLD_M: float = 0.1
     MAX_LINEAR_VEL: float = 0.20
     MAX_ANGULAR_VEL: float = 1.50
     LINEAR_GAIN: float = 0.50

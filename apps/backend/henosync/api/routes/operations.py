@@ -23,19 +23,19 @@ class StartOperationRequest(BaseModel):
 
 @router.post("/api/operations/start")
 async def start_operation(request: StartOperationRequest):
-    """Start a control plugin operation."""
-    success, message = await operation_manager.start_operation(
+    """Start a control plugin operation. Returns operation_id."""
+    success, message, operation_id = await operation_manager.start_operation(
         request.plugin_id, request.config
     )
     if not success:
         raise HTTPException(status_code=400, detail=message)
-    return {"success": True, "message": message}
+    return {"success": True, "message": message, "operation_id": operation_id}
 
 
-@router.post("/api/operations/{plugin_id}/stop")
-async def stop_operation(plugin_id: str):
-    """Stop a running operation."""
-    success, message = await operation_manager.stop_operation(plugin_id)
+@router.post("/api/operations/{operation_id}/stop")
+async def stop_operation(operation_id: str):
+    """Stop a running operation by operation_id."""
+    success, message = await operation_manager.stop_operation(operation_id)
     if not success:
         raise HTTPException(status_code=400, detail=message)
     return {"success": True, "message": message}
@@ -54,7 +54,7 @@ class OperatorInputRequest(BaseModel):
 
 @router.post("/api/operations/{plugin_id}/input")
 async def send_operator_input(plugin_id: str, request: OperatorInputRequest):
-    """Forward operator input (e.g. keyboard) to a running operation."""
+    """Forward operator input (e.g. keyboard) to a running operation by plugin_id."""
     success, message = await operation_manager.send_operator_input(
         plugin_id, request.input_key, request.value
     )

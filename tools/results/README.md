@@ -19,8 +19,18 @@ step list. For each run you can:
 
 - **expand** it to see per-step results
 - **Export CSV**: one row per step per robot (available once the run finishes)
+- **View report**: opens the run's `report.html` in your browser
 - **Open folder**: the raw recording
 - **Delete** (click twice to confirm)
+
+Every finished run also gets a human-readable `report.html` in its folder,
+built automatically by `henosync_report.py` (also reachable from the
+**View Report** button that appears on the Mission page after a run). To build
+one combined report across many runs, run the script by hand:
+
+```
+python tools/results/henosync_report.py ~/.henosync/runs -o henosync_report.html --open
+```
 
 CSV columns: `run_id, mission, step, step_name, step_type, robot, target,
 started_at, ended_at, duration_s, outcome, final_x_m, final_y_m, target_x_m,
@@ -45,15 +55,16 @@ apps/backend/.venv/bin/python tools/results/<script>.py ...           # macOS / 
 Every `analyze_*` script takes either a run folder path or just the run id
 shown in the Runs list (looked up in `~/.henosync/runs`).
 
-| Script | What it gives you |
-|---|---|
-| `analyze_waypoints.py` | Final error, time, path efficiency and success rate for every move-to-marker step (Table II). |
-| `analyze_coverage.py` | Coverage %, deviation from the planned path, time, and minimum robot separation for a coverage step. |
-| `analyze_telemetry.py` | Update rate, jitter and dropped frames per robot, split into robot stream and VICON. |
-| `ws_logger.py` | Records a run folder for things that **aren't** missions (use case 5, and backend-to-UI delay). Start it, Ctrl+C to stop. |
-| `reconnection_trial.py` | Guided dropout trials. Writes its own CSV. |
-| `resource_monitor.py` | CPU and memory per OS and scenario. Writes its own CSV. Needs `python -m pip install psutil`. |
-| `plugin_loc.py` | Lines of code per plugin and files changed outside it (Table III). |
+| Script                  | What it gives you                                                                                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analyze_waypoints.py`  | Final error, time, path efficiency and success rate across one or more runs (pass multiple run IDs to aggregate).                                                                                                   |
+| `analyze_coverage.py`   | Coverage %, deviation from the planned path, time, and minimum robot separation for a coverage step.                                                                                                                |
+| `analyze_telemetry.py`  | Update rate, jitter and dropped frames per robot, split into robot stream and VICON. Add `--dropout` to cross-reference DEGRADED/ERROR windows with VICON position — proves the robot kept moving during a dropout. |
+| `analyze_timing.py`     | Per-step timeline from a parallel mission: serial estimate, actual wall time, and speedup ratio.                                                                                                                    |
+| `ws_logger.py`          | Records a run folder for things that **aren't** missions (use case 5, and backend-to-UI delay). Start it, Ctrl+C to stop.                                                                                           |
+| `reconnection_trial.py` | Guided dropout trials. Writes its own CSV.                                                                                                                                                                          |
+| `resource_monitor.py`   | CPU and memory per OS and scenario. Writes its own CSV. Needs `python -m pip install psutil`.                                                                                                                       |
+| `plugin_loc.py`         | Lines of code per plugin and files changed outside it (Table III).                                                                                                                                                  |
 
 Backend tests for the same claims are in `apps/backend/tests/`
 (`python -m pytest tests -v` from `apps/backend`).
@@ -65,8 +76,8 @@ auto-navigate to `Target A`, then `Target B`, then `Target A`, and so on,
 each with **Robot** set to the Jackal. Save the plan as e.g.
 "Jackal waypoints", then Run Mission.
 
-- Table II: Export CSV from the Runs list, or for summary statistics:
-  `python tools/results/analyze_waypoints.py "<run id>" --tolerance 0.3`
+- Table II: Export CSV from the Runs list, or for aggregated statistics across all repetitions:
+  `python tools/results/analyze_waypoints.py "<run1>" "<run2>" ... --tolerance 0.3`
 - Telemetry rates: `python tools/results/analyze_telemetry.py "<run id>"`
 - Backend-to-UI delay: run `ws_logger.py --out runs/telemetry_check` for a
   few minutes and analyse that folder instead. The in-app recording only
@@ -99,6 +110,11 @@ Step 2: auto-navigate, **Robot** = TurtleBot3, **Run with step 1** ticked.
 The CSV's `started_at`/`ended_at` show the overlap. It has `coverage_pct` for
 the Jackal row and `final_error_m` for the TurtleBot3 row. For both robots in
 one shared coverage step, `analyze_coverage.py` also gives the minimum separation.
+
+For the parallel speedup figure:
+`python tools/results/analyze_timing.py "<run id>"`
+This prints the per-step timeline, which steps overlapped, the serial estimate
+(sum of step durations), the actual wall time, and the speedup ratio.
 
 ## Use case 5: device types
 

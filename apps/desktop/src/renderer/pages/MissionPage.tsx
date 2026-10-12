@@ -21,6 +21,7 @@ import {
   Check,
   CheckCircle2,
   History,
+  FileText,
 } from "lucide-react";
 import MissionMap, {
   type MapBase,
@@ -42,7 +43,7 @@ import {
   recordRunStep,
   stopRun,
 } from "../lib/api";
-import RunsDialog from "../components/mission/RunsDialog";
+import RunsDialog, { openRunReport } from "../components/mission/RunsDialog";
 import { useUIStore } from "../stores/uiStore";
 import type { ControlPluginInfo, PluginConfigField } from "../types";
 
@@ -60,15 +61,22 @@ export interface MissionBlock {
   displayName: string; // step type name from plugin
   configSchema: Record<string, PluginConfigField>;
   params: Record<string, unknown>;
-  parallel?: boolean; // run at the same time as the step above
+  parallelGroupId?: string; // steps sharing an ID run concurrently
 }
 
-// Consecutive blocks joined by `parallel` form one group that runs together.
+// Group consecutive blocks that share a parallelGroupId into stages.
+// Each stage is an array of block indices that run in parallel.
 function groupBlocks(blocks: MissionBlock[]): number[][] {
   const groups: number[][] = [];
   blocks.forEach((b, i) => {
-    if (b.parallel && groups.length > 0) groups[groups.length - 1].push(i);
-    else groups.push([i]);
+    if (b.parallelGroupId && groups.length > 0) {
+      const prev = blocks[groups[groups.length - 1][0]];
+      if (prev.parallelGroupId === b.parallelGroupId) {
+        groups[groups.length - 1].push(i);
+        return;
+      }
+    }
+    groups.push([i]);
   });
   return groups;
 }
@@ -89,13 +97,7 @@ function defaultParams(
   for (const [key, field] of Object.entries(schema)) {
     out[key] =
       field.default ??
-      (field.type === "boolean"
-        ? false
-        : field.type === "number"
-          ? 0
-          : field.type === "device_multi_select"
-            ? []
-            : "");
+      (field.type === "boolean" ? false : field.type === "number" ? 0 : "");
   }
   return out;
 }
@@ -134,93 +136,13 @@ function DeviceSelectField({
         onChange={(e) => onChange(fieldKey, e.target.value)}
         style={inputBase}
       >
-        <option value="">
-          {field.required ? "Any available robot" : "None"}
-        </option>
+        <option value="">Any available robot</option>
         {nodes.map((n) => (
           <option key={n.id} value={n.id}>
             {n.name} ({n.status})
           </option>
         ))}
       </select>
-      {field.description && (
-        <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
-          {field.description}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ── Multi-robot selector (checkbox list of connected devices) ──────────────────
-
-function DeviceMultiSelectField({
-  fieldKey,
-  field,
-  value,
-  onChange,
-}: {
-  fieldKey: string;
-  field: PluginConfigField;
-  value: unknown;
-  onChange: (key: string, val: unknown) => void;
-}) {
-  const nodes = useNodeStore((s) => Object.values(s.nodes));
-  const selected = Array.isArray(value) ? (value as string[]) : [];
-
-  function toggle(id: string) {
-    onChange(
-      fieldKey,
-      selected.includes(id)
-        ? selected.filter((s) => s !== id)
-        : [...selected, id],
-    );
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-      <span style={{ fontSize: "10px", color: "#666666" }}>{field.label}</span>
-      <div
-        style={{
-          backgroundColor: "#0D0D0D",
-          border: "1px solid #2D2D2D",
-          borderRadius: "5px",
-          padding: "4px 8px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "3px",
-          maxHeight: "96px",
-          overflowY: "auto",
-        }}
-      >
-        {nodes.length === 0 ? (
-          <span style={{ fontSize: "11px", color: "#444444" }}>
-            No robots added
-          </span>
-        ) : (
-          nodes.map((n) => (
-            <label
-              key={n.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                fontSize: "11px",
-                color: "#CCCCCC",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(n.id)}
-                onChange={() => toggle(n.id)}
-                style={{ accentColor: "#A78BFA", width: "12px", height: "12px" }}
-              />
-              {n.name} ({n.status})
-            </label>
-          ))
-        )}
-      </div>
       {field.description && (
         <span style={{ fontSize: "10px", color: "#666666", lineHeight: 1.3 }}>
           {field.description}
@@ -439,17 +361,6 @@ function ConfigField({
   if (field.type === "device_select") {
     return (
       <DeviceSelectField
-        fieldKey={fieldKey}
-        field={field}
-        value={value}
-        onChange={onChange}
-      />
-    );
-  }
-
-  if (field.type === "device_multi_select") {
-    return (
-      <DeviceMultiSelectField
         fieldKey={fieldKey}
         field={field}
         value={value}
@@ -945,7 +856,7 @@ function StepListPanel({
   onDeletePlan: (id: string) => void;
   isRunning: boolean;
   activeStepIndex: number;
-  activeStepEnd: number; // last index of the group running alongside activeStepIndex
+  activeStepEnd: number;
   onShowRuns: () => void;
 }) {
   const [activePopup, setActivePopup] = useState<"save" | "open" | null>(null);
@@ -1204,8 +1115,15 @@ function StepListPanel({
               isRunning && i >= activeStepIndex && i <= activeStepEnd;
             const isDone = isRunning && i < activeStepIndex;
             const isPending = isRunning && i > activeStepEnd;
-            const runsWithAbove = !!block.parallel && i > 0;
             const selected = !isRunning && block.instanceId === selectedId;
+            const groupId = block.parallelGroupId;
+            const prevGroupId =
+              i > 0 ? blocks[i - 1].parallelGroupId : undefined;
+            const nextGroupId =
+              i < blocks.length - 1 ? blocks[i + 1].parallelGroupId : undefined;
+            const inGroup = !!groupId;
+            const isGroupStart = inGroup && groupId !== prevGroupId;
+            const isGroupEnd = inGroup && groupId !== nextGroupId;
 
             const accentColor = isActive
               ? "#3DD68C"
@@ -1253,6 +1171,13 @@ function StepListPanel({
                   flexShrink: 0,
                   opacity: isPending ? 0.45 : 1,
                   transition: "opacity 200ms",
+                  // Group bracket: purple left border
+                  borderLeft: inGroup
+                    ? "3px solid #A78BFA55"
+                    : "3px solid transparent",
+                  borderTop: isGroupStart ? "1px solid #A78BFA33" : "none",
+                  borderBottom: isGroupEnd ? "1px solid #A78BFA33" : "none",
+                  paddingLeft: inGroup ? "2px" : "0",
                 }}
               >
                 {/* Step number / done indicator — outside the card */}
@@ -1351,9 +1276,7 @@ function StepListPanel({
                         ? "● Running…"
                         : isDone
                           ? "✓ Complete"
-                          : runsWithAbove
-                            ? `∥ With step ${i} · ${block.displayName}`
-                            : block.displayName}
+                          : block.displayName}
                     </div>
                   </div>
                   {/* Reorder + delete — hidden while running */}
@@ -1703,7 +1626,8 @@ function BottomPanel({
   onAddBlock,
   onUpdateBlock,
   onRenameBlock,
-  onSetParallel,
+  onGroupWithAdjacent,
+  onRemoveFromGroup,
 }: {
   plugins: ControlPluginInfo[];
   blocks: MissionBlock[];
@@ -1715,7 +1639,11 @@ function BottomPanel({
   ) => void;
   onUpdateBlock: (instanceId: string, params: Record<string, unknown>) => void;
   onRenameBlock: (instanceId: string, label: string) => void;
-  onSetParallel: (instanceId: string, parallel: boolean) => void;
+  onGroupWithAdjacent: (
+    instanceId: string,
+    direction: "above" | "below",
+  ) => void;
+  onRemoveFromGroup: (instanceId: string) => void;
 }) {
   const selectedBlock = blocks.find((b) => b.instanceId === selectedId) ?? null;
   const selectedIndex = selectedBlock ? blocks.indexOf(selectedBlock) : -1;
@@ -1881,34 +1809,88 @@ function BottomPanel({
                     outline: "none",
                   }}
                 />
-                {selectedIndex > 0 && (
-                  <label
-                    title="Start this step at the same time as the step above instead of after it"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      fontSize: "11px",
-                      color: "#999999",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!selectedBlock.parallel}
-                      onChange={(e) =>
-                        onSetParallel(selectedBlock.instanceId, e.target.checked)
-                      }
-                      style={{
-                        accentColor: "#A78BFA",
-                        width: "13px",
-                        height: "13px",
-                      }}
-                    />
-                    Run with step {selectedIndex}
-                  </label>
-                )}
               </div>
+
+              {/* Parallel group controls */}
+              {selectedBlock && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "6px",
+                    padding: "6px 14px",
+                    borderBottom: "1px solid #2D2D2D",
+                    flexShrink: 0,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {selectedBlock.parallelGroupId ? (
+                    <button
+                      onClick={() =>
+                        onRemoveFromGroup(selectedBlock.instanceId)
+                      }
+                      title="Remove this step from its parallel group"
+                      style={{
+                        padding: "3px 8px",
+                        backgroundColor: "#A78BFA18",
+                        border: "1px solid #A78BFA55",
+                        borderRadius: "4px",
+                        color: "#A78BFA",
+                        fontSize: "10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ⊗ Remove from group
+                    </button>
+                  ) : (
+                    <>
+                      {selectedIndex > 0 && (
+                        <button
+                          onClick={() =>
+                            onGroupWithAdjacent(
+                              selectedBlock.instanceId,
+                              "above",
+                            )
+                          }
+                          title="Run this step in parallel with the step above"
+                          style={{
+                            padding: "3px 8px",
+                            backgroundColor: "transparent",
+                            border: "1px solid #2D2D2D",
+                            borderRadius: "4px",
+                            color: "#999999",
+                            fontSize: "10px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ∥ Group with step {selectedIndex}
+                        </button>
+                      )}
+                      {selectedIndex < blocks.length - 1 && (
+                        <button
+                          onClick={() =>
+                            onGroupWithAdjacent(
+                              selectedBlock.instanceId,
+                              "below",
+                            )
+                          }
+                          title="Run this step in parallel with the step below"
+                          style={{
+                            padding: "3px 8px",
+                            backgroundColor: "transparent",
+                            border: "1px solid #2D2D2D",
+                            borderRadius: "4px",
+                            color: "#999999",
+                            fontSize: "10px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ∥ Group with step {selectedIndex + 2}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Plugin params */}
               {hasFields ? (
@@ -2070,6 +2052,8 @@ function ControlsPanel({
   onStop,
   showLog,
   onClearLog,
+  onViewReport,
+  reportBusy,
 }: {
   blocks: MissionBlock[];
   onClear: () => void;
@@ -2078,6 +2062,8 @@ function ControlsPanel({
   onStop: () => void;
   showLog: boolean;
   onClearLog: () => void;
+  onViewReport: (() => void) | null;
+  reportBusy: boolean;
 }) {
   const hasBlocks = blocks.length > 0;
   return (
@@ -2099,38 +2085,64 @@ function ControlsPanel({
       }}
     >
       {showLog ? (
-        /* ── Log visible post-run — show Clear button only ── */
-        <button
-          onClick={onClearLog}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "6px",
-            padding: "8px",
-            borderRadius: "6px",
-            border: "1px solid #2D2D2D",
-            backgroundColor: "#141414",
-            color: "#8B95A3",
-            cursor: "pointer",
-            fontSize: "11px",
-            fontWeight: 600,
-            transition: "all 120ms",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
-            (e.currentTarget as HTMLButtonElement).style.borderColor =
-              "#4A4A4A";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
-            (e.currentTarget as HTMLButtonElement).style.borderColor =
-              "#2D2D2D";
-          }}
-        >
-          <X size={11} />
-          Clear Log
-        </button>
+        /* ── Log visible post-run — View Report (if recorded) + Clear ── */
+        <>
+          {onViewReport && (
+            <button
+              onClick={onViewReport}
+              disabled={reportBusy}
+              title="Open this run's report in your browser"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                padding: "8px",
+                borderRadius: "6px",
+                border: "1px solid #4A9EFF55",
+                backgroundColor: "#4A9EFF1A",
+                color: "#4A9EFF",
+                cursor: reportBusy ? "default" : "pointer",
+                fontSize: "11px",
+                fontWeight: 600,
+              }}
+            >
+              <FileText size={11} />
+              {reportBusy ? "Building report…" : "View Report"}
+            </button>
+          )}
+          <button
+            onClick={onClearLog}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #2D2D2D",
+              backgroundColor: "#141414",
+              color: "#8B95A3",
+              cursor: "pointer",
+              fontSize: "11px",
+              fontWeight: 600,
+              transition: "all 120ms",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "#E8EAED";
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "#4A4A4A";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "#8B95A3";
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "#2D2D2D";
+            }}
+          >
+            <X size={11} />
+            Clear Log
+          </button>
+        </>
       ) : isRunning ? (
         /* ── Running state ── */
         <>
@@ -2338,10 +2350,12 @@ export default function MissionPage() {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [activeStepEnd, setActiveStepEnd] = useState(0);
   const stopRequestedRef = useRef(false);
-  const activeBlocksRef = useRef<MissionBlock[]>([]);
+  const activeOperationIdsRef = useRef<string[]>([]);
 
   // Mission log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
 
   // Run recordings — runs are named after the saved/loaded plan
   const [missionName, setMissionName] = useState("Untitled mission");
@@ -2350,7 +2364,9 @@ export default function MissionPage() {
   async function startMission() {
     if (blocks.length === 0) return;
     stopRequestedRef.current = false;
+    activeOperationIdsRef.current = [];
     setActiveStepIndex(0);
+    setActiveStepEnd(0);
     setIsRunning(true);
     setSelectedId(null);
 
@@ -2367,6 +2383,7 @@ export default function MissionPage() {
       ]);
 
     setLogEntries([]);
+    setLastRunId(null);
     addEntry(
       `Mission started · ${total} step${total !== 1 ? "s" : ""}`,
       "system",
@@ -2384,14 +2401,17 @@ export default function MissionPage() {
           plugin_id: b.pluginId,
           display_name: b.displayName,
           params: b.params,
-          parallel: !!b.parallel,
+          parallel: !!b.parallelGroupId,
         })),
       );
       runId = run.run_id;
       addEntry(`Recording run · ${run.run_id}`, "system");
     } catch (err) {
       console.error("[Mission] Run recording unavailable:", err);
-      addEntry("Run recording unavailable — mission continues unrecorded", "fail");
+      addEntry(
+        "Run recording unavailable — mission continues unrecorded",
+        "fail",
+      );
     }
     const reportStep = (
       index: number,
@@ -2404,9 +2424,9 @@ export default function MissionPage() {
     };
     let anyFailed = false;
 
-    // Steps marked "run with step above" are started together and the mission
-    // moves on once every step in the group has finished.
-    groupLoop: for (const group of groupBlocks(blocks)) {
+    // Each group is a list of block indices that run concurrently.
+    // Single-item groups are sequential steps (the common case).
+    missionLoop: for (const group of groupBlocks(blocks)) {
       if (stopRequestedRef.current) break;
 
       const first = group[0];
@@ -2424,24 +2444,33 @@ export default function MissionPage() {
             "fail",
           );
           anyFailed = true;
-          break groupLoop;
+          break missionLoop;
         }
         seen.set(blocks[i].pluginId, i);
       }
 
       const stepStart = Date.now();
-      const started: number[] = [];
-      for (const i of group) {
+      // operation_id per group member, aligned by index into group[]
+      const operationIds: string[] = [];
+
+      // Start all operations in the group sequentially
+      for (let g = 0; g < group.length; g++) {
+        if (stopRequestedRef.current) {
+          // Stop any we already started in this group
+          for (const id of operationIds) stopOperation(id).catch(() => {});
+          break missionLoop;
+        }
+        const i = group[g];
         const block = blocks[i];
         addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
         reportStep(i, "start");
         try {
-          await startOperation(
+          const result = await startOperation(
             block.pluginId,
             block.params as Record<string, unknown>,
           );
-          started.push(i);
-          activeBlocksRef.current = started.map((s) => blocks[s]);
+          operationIds.push(result.operation_id);
+          activeOperationIdsRef.current = [...operationIds];
         } catch (err) {
           console.error(`[Mission] Failed to start step ${i + 1}:`, err);
           const reason = err instanceof Error ? ` · ${err.message}` : "";
@@ -2453,17 +2482,16 @@ export default function MissionPage() {
             err instanceof Error ? err.message : "failed to start",
           );
           anyFailed = true;
-          // Don't leave half a group running.
-          for (const s of started) {
-            stopOperation(blocks[s].pluginId).catch(() => {});
-          }
-          break groupLoop;
+          // Stop any siblings already running
+          for (const id of operationIds) stopOperation(id).catch(() => {});
+          addEntry("Mission aborted", "stop");
+          break missionLoop;
         }
-        if (stopRequestedRef.current) break groupLoop;
       }
 
-      // Poll until every operation in the group reaches a terminal state
-      const finished = new Map<number, { state: string; text: string }>();
+      // Poll until every operation in the group reaches a terminal state.
+      // On any failure: stop all siblings and abort the mission.
+      const finished = new Map<number, string>(); // g-index -> state
       const lastText = new Map<number, string>();
       while (finished.size < group.length && !stopRequestedRef.current) {
         await new Promise<void>((r) => setTimeout(r, 500));
@@ -2473,36 +2501,48 @@ export default function MissionPage() {
         } catch {
           break;
         }
-        for (const i of group) {
-          if (finished.has(i)) continue;
-          const op = ops.find((o) => o.plugin_id === blocks[i].pluginId);
+        for (let g = 0; g < group.length; g++) {
+          if (finished.has(g)) continue;
+          const opId = operationIds[g];
+          const op = ops.find((o) => o.operation_id === opId);
           if (!op) {
-            finished.set(i, { state: "completed", text: "" });
+            // No longer in list — treat as completed
+            finished.set(g, "completed");
+            const elapsed = Math.round((Date.now() - stepStart) / 1000);
+            const i = group[g];
             reportStep(i, "end", "completed");
+            addEntry(
+              `Step ${i + 1}/${total} — ${blocks[i].displayName} · ${elapsed}s`,
+              "success",
+            );
             continue;
           }
           const s = op.status.state as string;
-          if (op.status.status_text) lastText.set(i, op.status.status_text);
+          if (op.status.status_text) lastText.set(g, op.status.status_text);
           if (s === "completed" || s === "failed" || s === "idle") {
-            finished.set(i, { state: s, text: lastText.get(i) ?? "" });
+            finished.set(g, s);
+            const i = group[g];
             const elapsed = Math.round((Date.now() - stepStart) / 1000);
-            const block = blocks[i];
             reportStep(
               i,
               "end",
               s === "failed" ? "failed" : "completed",
-              lastText.get(i) ?? "",
+              lastText.get(g) ?? "",
             );
             if (s === "failed") anyFailed = true;
             if (s === "failed") {
-              const t = lastText.get(i);
+              const t = lastText.get(g) ?? "";
               addEntry(
-                `Step ${i + 1}/${total} — ${block.displayName} failed${t ? " · " + t : ""}`,
+                `Step ${i + 1}/${total} — ${blocks[i].displayName} failed${t ? " · " + t : ""}`,
                 "fail",
               );
+              // Stop all siblings and abort
+              for (const id of operationIds) stopOperation(id).catch(() => {});
+              addEntry("Mission aborted", "stop");
+              break missionLoop;
             } else {
               addEntry(
-                `Step ${i + 1}/${total} — ${block.displayName} · ${elapsed}s`,
+                `Step ${i + 1}/${total} — ${blocks[i].displayName} · ${elapsed}s`,
                 "success",
               );
             }
@@ -2510,10 +2550,13 @@ export default function MissionPage() {
         }
       }
 
-      if (stopRequestedRef.current) break;
+      if (stopRequestedRef.current) {
+        for (const id of operationIds) stopOperation(id).catch(() => {});
+        break;
+      }
     }
 
-    activeBlocksRef.current = [];
+    activeOperationIdsRef.current = [];
     setIsRunning(false);
     setActiveStepIndex(0);
     setActiveStepEnd(0);
@@ -2532,21 +2575,97 @@ export default function MissionPage() {
           : "completed";
       try {
         await stopRun(runId, outcome);
-        addEntry("Run saved — open Runs to view results or export CSV", "system");
+        setLastRunId(runId);
+        addEntry(
+          "Run saved — View Report opens the analysis; Runs has CSV export",
+          "system",
+        );
       } catch (err) {
         console.error("[Mission] Failed to save run:", err);
       }
     }
   }
 
+  async function viewReport(runId: string) {
+    setReportBusy(true);
+    try {
+      await openRunReport(runId);
+    } catch (err) {
+      setLogEntries((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          time: new Date(),
+          message: `Report failed: ${(err as Error).message}`,
+          kind: "fail",
+        },
+      ]);
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
   function stopMission() {
     stopRequestedRef.current = true;
-    for (const block of activeBlocksRef.current) {
-      stopOperation(block.pluginId).catch(() => {});
+    for (const id of activeOperationIdsRef.current) {
+      stopOperation(id).catch(() => {});
     }
+    activeOperationIdsRef.current = [];
     setIsRunning(false);
     setActiveStepIndex(0);
     setActiveStepEnd(0);
+  }
+
+  function setBlockParallelGroup(
+    instanceId: string,
+    groupId: string | undefined,
+  ) {
+    setBlocks((prev) =>
+      prev.map((b) =>
+        b.instanceId === instanceId ? { ...b, parallelGroupId: groupId } : b,
+      ),
+    );
+  }
+
+  function groupWithAdjacent(instanceId: string, direction: "above" | "below") {
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.instanceId === instanceId);
+      if (idx < 0) return prev;
+      const adjacentIdx = direction === "above" ? idx - 1 : idx + 1;
+      if (adjacentIdx < 0 || adjacentIdx >= prev.length) return prev;
+      const adjacent = prev[adjacentIdx];
+      // Join the adjacent step's group if it has one, else create a new group
+      const groupId = adjacent.parallelGroupId ?? `group-${Date.now()}`;
+      return prev.map((b, i) => {
+        if (i === idx) return { ...b, parallelGroupId: groupId };
+        if (i === adjacentIdx && !adjacent.parallelGroupId)
+          return { ...b, parallelGroupId: groupId };
+        return b;
+      });
+    });
+  }
+
+  function removeFromGroup(instanceId: string) {
+    setBlocks((prev) => {
+      const next = prev.map((b) =>
+        b.instanceId === instanceId ? { ...b, parallelGroupId: undefined } : b,
+      );
+      // If only one step remains in that group, clear it too
+      const groupId = prev.find(
+        (b) => b.instanceId === instanceId,
+      )?.parallelGroupId;
+      if (groupId) {
+        const remaining = next.filter((b) => b.parallelGroupId === groupId);
+        if (remaining.length === 1) {
+          return next.map((b) =>
+            b.parallelGroupId === groupId
+              ? { ...b, parallelGroupId: undefined }
+              : b,
+          );
+        }
+      }
+      return next;
+    });
   }
 
   // Saved plans
@@ -2607,12 +2726,6 @@ export default function MissionPage() {
   function updateBlock(instanceId: string, params: Record<string, unknown>) {
     setBlocks((prev) =>
       prev.map((b) => (b.instanceId === instanceId ? { ...b, params } : b)),
-    );
-  }
-
-  function setBlockParallel(instanceId: string, parallel: boolean) {
-    setBlocks((prev) =>
-      prev.map((b) => (b.instanceId === instanceId ? { ...b, parallel } : b)),
     );
   }
 
@@ -2765,7 +2878,12 @@ export default function MissionPage() {
         onRun={startMission}
         onStop={stopMission}
         showLog={!isRunning && logEntries.length > 0}
-        onClearLog={() => setLogEntries([])}
+        onClearLog={() => {
+          setLogEntries([]);
+          setLastRunId(null);
+        }}
+        onViewReport={lastRunId ? () => viewReport(lastRunId) : null}
+        reportBusy={reportBusy}
       />
 
       {/* Right panel — ordered step list, full height */}
@@ -2800,7 +2918,8 @@ export default function MissionPage() {
           onAddBlock={addBlock}
           onUpdateBlock={updateBlock}
           onRenameBlock={renameBlock}
-          onSetParallel={setBlockParallel}
+          onGroupWithAdjacent={groupWithAdjacent}
+          onRemoveFromGroup={removeFromGroup}
         />
       )}
     </div>

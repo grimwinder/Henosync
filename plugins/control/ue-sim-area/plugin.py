@@ -11,6 +11,8 @@ angle_1/angle_2 -> ang_bounds, radius -> R, nag/envi_type 1:1.
 See NOTES.md in this folder for the design discussion and open questions.
 """
 
+import asyncio
+import json as _json
 import logging
 from math import pi, radians
 
@@ -47,19 +49,14 @@ class UESimAreaPlugin(ControlPlugin):
     async def start(self, context) -> None:
         self._state = OperationState.RUNNING
 
-        # operation_manager has already reserved these devices (node_ids
-        # convention); nag = how many the operator picked, in pick order.
-        selected_ids = [nid for nid in (self._config.get("node_ids") or []) if nid]
-        nag = len(selected_ids)
-        if not 1 <= nag <= 3:
-            await self._fail(context, f"Select 1–3 devices (got {nag})")
-            return
-
-        # Send through the first selected device
-        device = next((d for d in context.devices if d.id == selected_ids[0]), None)
-        if device is None:
-            await self._fail(context, f"Device {selected_ids[0]!r} not available")
-            return
+        # nag = number of selected devices; default to 1 if none selected
+        nag = len([
+            nid for nid in [
+                self._config.get("node_id_1", ""),
+                self._config.get("node_id_2", ""),
+                self._config.get("node_id_3", ""),
+            ] if nid
+        ]) or 1
 
         # coverage_fns.Agents expects ang_bounds in radians normalised to [0, 2π).
         # Whole circle: enter 0° and 359.9°, NOT 0° and 360°.
@@ -72,20 +69,36 @@ class UESimAreaPlugin(ControlPlugin):
 
         envi_type = self._config.get("envi_type") or "Circular"
 
-        result = await device.send_command("set_area", {
-            "angle_1": angle_1,
-            "angle_2": angle_2,
-            "radius": radius,
-            "nag": nag,
-            "envi_type": envi_type,
-        })
-        if not result.success:
-            await self._fail(context, f"Sending area failed: {result.message}")
+        sim_host = self._config.get("sim_host") or "192.168.0.136"
+        sim_port = int(self._config.get("sim_port") or 7000)
+
+        # Send one JSON line per agent over a single TCP connection.
+        lines = b"".join(
+            (_json.dumps({
+                "angle_1": angle_1,
+                "angle_2": angle_2,
+                "radius": radius,
+                "ag_id": i + 1,
+                "nag": nag,
+                "envi_type": envi_type,
+            }) + "\n").encode()
+            for i in range(nag)
+        )
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(sim_host, sim_port), timeout=5.0
+            )
+            writer.write(lines)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+        except Exception as e:
+            await self._fail(context, f"TCP send to {sim_host}:{sim_port} failed: {type(e).__name__}: {e}")
             return
 
         self._status_text = (
             f"Sent {nag} agent(s) ({envi_type}), angles ({angle_1:.4f}, {angle_2:.4f} rad), "
-            f"radius {radius} to {device.name}"
+            f"radius {radius} → {sim_host}:{sim_port}"
         )
         logger.info("UESimArea: %s", self._status_text)
         self._state = OperationState.COMPLETED
@@ -107,11 +120,23 @@ class UESimAreaPlugin(ControlPlugin):
             description="Send two angles and a radius to the Unreal Engine simulator.",
             icon="map",
             config_schema={
-                "node_ids": {
-                    "type": "device_multi_select",
-                    "label": "Devices",
+                "node_id_1": {
+                    "type": "device_select",
+                    "label": "Device 1",
                     "required": True,
-                    "description": "1–3 UE Sim devices. The packet is sent through the first one picked.",
+                    "description": "First UE Sim device (required).",
+                },
+                "node_id_2": {
+                    "type": "device_select",
+                    "label": "Device 2",
+                    "required": False,
+                    "description": "Second UE Sim device (optional).",
+                },
+                "node_id_3": {
+                    "type": "device_select",
+                    "label": "Device 3",
+                    "required": False,
+                    "description": "Third UE Sim device (optional).",
                 },
                 "angle_1": {
                     "type": "number",
@@ -142,6 +167,22 @@ class UESimAreaPlugin(ControlPlugin):
                     "options": [
                         {"label": "Circular", "value": "Circular"},
                     ],
+                },
+                "sim_host": {
+                    "type": "string",
+                    "label": "Sim Receiver IP",
+                    "required": False,
+                    "default": "192.168.0.136",
+                    "placeholder": "e.g. 192.168.0.136",
+                    "description": "IP of the machine running sim_receiver.py",
+                },
+                "sim_port": {
+                    "type": "number",
+                    "label": "Sim Receiver Port",
+                    "required": False,
+                    "default": 7000,
+                    "min": 1,
+                    "max": 65535,
                 },
             },
         )

@@ -6,8 +6,9 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  FileText,
 } from "lucide-react";
-import { getRuns, exportRun, deleteRun } from "../../lib/api";
+import { getRuns, exportRun, deleteRun, getRunReport } from "../../lib/api";
 import type { MissionRun, RunOutcome } from "../../types";
 
 const POLL_MS = 2000;
@@ -38,6 +39,13 @@ function fmtNum(v: number | null, digits: number) {
   return v == null ? "—" : v.toFixed(digits);
 }
 
+/** Builds the run's report.html if needed and opens it in the default browser. */
+export async function openRunReport(runId: string) {
+  const { path } = await getRunReport(runId);
+  const err = await window.henosync?.shell.openPath(path);
+  if (err) throw new Error(err);
+}
+
 const btn: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -58,6 +66,7 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -89,6 +98,17 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
       setNotice(`Exported to ${path}`);
     } catch (e) {
       setNotice(`Export failed: ${(e as Error).message}`);
+    }
+  }
+
+  async function handleReport(run: MissionRun) {
+    setReportBusy(run.id);
+    try {
+      await openRunReport(run.id);
+    } catch (e) {
+      setNotice(`Report failed: ${(e as Error).message}`);
+    } finally {
+      setReportBusy(null);
     }
   }
 
@@ -302,6 +322,23 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
                       Export CSV
                     </button>
                     <button
+                      onClick={() => handleReport(run)}
+                      disabled={running || reportBusy === run.id}
+                      title={
+                        running
+                          ? "Available when the run finishes"
+                          : "Open the run report in your browser"
+                      }
+                      style={{
+                        ...btn,
+                        opacity: running ? 0.4 : 1,
+                        cursor: running ? "default" : "pointer",
+                      }}
+                    >
+                      <FileText size={11} />
+                      {reportBusy === run.id ? "Building…" : "View report"}
+                    </button>
+                    <button
                       onClick={() => window.henosync?.shell.openPath(run.path)}
                       title={run.path}
                       style={btn}
@@ -344,7 +381,13 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
 function StepTable({ run }: { run: MissionRun }) {
   if (run.results.length === 0) {
     return (
-      <div style={{ padding: "0 12px 12px 32px", fontSize: "11px", color: "#666666" }}>
+      <div
+        style={{
+          padding: "0 12px 12px 32px",
+          fontSize: "11px",
+          color: "#666666",
+        }}
+      >
         {run.outcome === "running"
           ? "Step results appear when the run finishes."
           : "No step results recorded for this run."}
@@ -373,13 +416,20 @@ function StepTable({ run }: { run: MissionRun }) {
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
-            {["STEP", "TYPE", "ROBOT", "TARGET", "OUTCOME", "TIME (S)", "ERROR (M)", "COVERAGE (%)"].map(
-              (h) => (
-                <th key={h} style={th}>
-                  {h}
-                </th>
-              ),
-            )}
+            {[
+              "STEP",
+              "TYPE",
+              "ROBOT",
+              "TARGET",
+              "OUTCOME",
+              "TIME (S)",
+              "ERROR (M)",
+              "COVERAGE (%)",
+            ].map((h) => (
+              <th key={h} style={th}>
+                {h}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>

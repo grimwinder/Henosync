@@ -75,6 +75,18 @@ async def export_run(run_id: str, request: ExportRunRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/{run_id}/report")
+async def run_report(run_id: str):
+    try:
+        return {"path": await run_recorder.report(run_id)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
+
+
 @router.delete("/{run_id}")
 async def delete_run(run_id: str):
     try:

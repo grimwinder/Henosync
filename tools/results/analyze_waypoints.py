@@ -1,20 +1,19 @@
 """
 Waypoint accuracy trials (Results use case 1 / Table II).
 
-Recorded mission run (Henosync records every Run Mission to ~/.henosync/runs):
-every move-to-marker step is one trial, with its own target marker and robot.
+Recorded mission run — pass one or more run IDs to aggregate across repetitions:
 
-    python tools/results/analyze_waypoints.py "<run id or folder>" [--node Jackal] [--tolerance 0.3]
+    python tools/results/analyze_waypoints.py "<run id>" [<run id> ...] [--tolerance 0.3]
 
-ws_logger run: every completed run of the move-to-marker plugin is one trial,
-all to the same marker:
+Each move-to-marker step in each run is one trial. Aggregated mean ± std
+across all trials is printed at the end.
+
+ws_logger run: every completed run of the move-to-marker plugin is one trial:
 
     python tools/results/analyze_waypoints.py runs/jackal_waypoints \
-        --node Jackal --marker "Target A" [--plugin auto-navigate]
+        --node Jackal --marker "Target A" [--plugin area-navigate]
 
-For each trial the robot's final VICON position (last sample before the step
-ended) is compared with the marker. VICON arena only: markers drawn on the
-VICON map store lon = x_m, lat = y_m.
+VICON arena only: markers drawn on the VICON map store lon = x_m, lat = y_m.
 """
 
 import argparse
@@ -129,26 +128,37 @@ def _logger_trials(run: dict, args) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("run", help="run folder, or a run id from the app's Runs list")
+    parser.add_argument("runs", nargs="+", help="one or more run folders / run ids to aggregate")
     parser.add_argument("--node", help="robot name (required for ws_logger runs)")
     parser.add_argument("--marker", help="target marker (ws_logger runs only)")
-    parser.add_argument("--plugin", default="auto-navigate",
+    parser.add_argument("--plugin", default="area-navigate",
                         help="control plugin id the trials used (ws_logger runs only)")
     parser.add_argument("--tolerance", type=float, default=0.3,
                         help="max final error (m) that counts as a success (default 0.3)")
     parser.add_argument("--csv", help="also write per-trial rows to this CSV file")
     args = parser.parse_args()
 
-    run = load_run(args.run)
-    if run["meta"].get("steps") is not None:
-        rows = _mission_trials(run, args.run, args.node, args.tolerance)
-    else:
-        rows = _logger_trials(run, args)
+    rows: list[dict] = []
+    trial_offset = 0
+    for run_arg in args.runs:
+        run = load_run(run_arg)
+        if run["meta"].get("steps") is not None:
+            batch = _mission_trials(run, run_arg, args.node, args.tolerance)
+        else:
+            batch = _logger_trials(run, args)
+        # renumber trials globally across runs
+        for r in batch:
+            r["trial"] += trial_offset
+            r["run"] = run_arg
+        rows.extend(batch)
+        trial_offset += len(batch)
+
     if not rows:
         raise SystemExit("No analysable trials.")
 
-    print_table(rows, ["trial", "robot", "target", "state", "time_s", "start_dist_m",
-                       "path_len_m", "path_efficiency", "final_error_m", "success"])
+    print_table(rows, ["trial", "run", "robot", "target", "state", "time_s",
+                       "start_dist_m", "path_len_m", "path_efficiency",
+                       "final_error_m", "success"])
 
     errors = [r["final_error_m"] for r in rows]
     times = [r["time_s"] for r in rows]

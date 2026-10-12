@@ -108,6 +108,11 @@ async def test_run_records_results_and_exports_csv(arena, tmp_path):
     assert len(rows) == 3
     assert rows[0]["mission"] == "Lab test"
 
+    report = await run_recorder.report(run_id)  # waits for the auto-built report
+    assert report.endswith("report.html")
+    with open(report, encoding="utf-8") as f:
+        assert "Lab test" in f.read()
+
     assert [r["id"] for r in run_recorder.list_runs()] == [run_id]
     run_recorder.delete_run(run_id)
     assert run_recorder.list_runs() == []
@@ -127,3 +132,4 @@ async def test_unfinished_steps_are_marked_stopped(arena):
     assert run["results"][0]["outcome"] == "stopped"
     with pytest.raises(ValueError):
         run_recorder.record_step(run_id, 0, "end", "completed")  # run no longer active
+    await run_recorder.report(run_id)

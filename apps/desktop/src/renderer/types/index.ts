@@ -286,7 +286,6 @@ export interface PluginConfigField {
     | "boolean"
     | "select"
     | "device_select"
-    | "device_multi_select"
     | "marker_select"
     | "zone_select";
   label: string;
@@ -349,6 +348,7 @@ export interface OperationStatus {
 }
 
 export interface RunningOperation {
+  operation_id: string;
   plugin_id: string;
   operation_name: string;
   started_at: string;
