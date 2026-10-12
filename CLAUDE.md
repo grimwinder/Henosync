@@ -95,7 +95,8 @@ henosync/
 │   │       │       ├── operations.py  start/stop/list control plugin operations
 │   │       │       ├── zones.py       CRUD for zones
 │   │       │       ├── markers.py     CRUD for map markers
-│   │       │       └── safety.py      emergency-stop
+│   │       │       ├── safety.py      emergency-stop
+│   │       │       └── runs.py        mission run recordings: start/step/stop/list/export/delete
 │   │       ├── core/
 │   │       │   ├── node_registry.py    Source of truth for all nodes; manages connect/telemetry tasks
 │   │       │   ├── operation_manager.py  Starts/stops control plugin operations; device matching
@@ -104,6 +105,8 @@ henosync/
 │   │       │   ├── telemetry_bus.py    Pub/sub for TelemetryFrame and SystemEvent
 │   │       │   ├── zone_manager.py     Zone CRUD + geometry (ray casting, haversine)
 │   │       │   ├── marker_manager.py   Map marker CRUD
+│   │       │   ├── run_recorder.py     Records each Run Mission to ~/.henosync/runs/<id>/; per-step results + CSV export
+│   │       │   ├── run_metrics.py      Pure final-error / coverage % maths (shared with tools/results)
 │   │       │   ├── fleet_context.py    Injected into control plugins; device access + messaging
 │   │       │   ├── device_proxy.py     Wraps Node; universal movement, capability data, coord conversion
 │   │       │   └── event_bus.py        Inter-control-plugin messaging (broadcast/point-to-point)
@@ -188,7 +191,7 @@ On shutdown: `failsafe_manager.stop()` → `node_registry.shutdown()` (disconnec
 Module-level instances — never instantiate, always import the singleton.
 
 | Singleton            | File                      | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `node_registry`      | node_registry.py          | Source of truth for all nodes. Persists to SQLite. Manages plugin connect/disconnect/telemetry tasks. Tracks `_telemetry_tasks` and `_liveness_tasks` per node; cancels both on disconnect. Liveness monitor polls `plugin.is_connected()` every 2 s (LIVENESS_CHECK_INTERVAL). Per-frame timeout of 15 s (FRAME_TIMEOUT) catches frozen generators. Status is always set here — never by plugins. In-memory cache: `_nodes: dict[str, Node]`. |
 | `operation_manager`  | operation_manager.py      | Starts/stops control plugin operations. Matches devices to plugins by capability. Handles device priority conflicts. Tracks `_operations: dict[str, ActiveOperation]` and `_device_assignments: dict[str, str]`.                                                                                                                                                                                                                               |
 | `mission_engine`     | mission_engine.py         | Step-by-step mission execution state machine. One active mission at a time.                                                                                                                                                                                                                                                                                                                                                                    |
@@ -199,6 +202,7 @@ Module-level instances — never instantiate, always import the singleton.
 | `plugin_registry`    | plugin_system/registry.py | Maps `plugin_id → class`, `plugin_id → manifest`, `node_id → instance`.                                                                                                                                                                                                                                                                                                                                                                        |
 | `event_bus`          | event_bus.py              | Inter-control-plugin messaging (broadcast / point-to-point).                                                                                                                                                                                                                                                                                                                                                                                   |
 | `mission_store`      | storage/mission_store.py  | Full SQLite CRUD for missions. Missions ARE persisted — `missions` table in henosync.db.                                                                                                                                                                                                                                                                                                                                                       |
+| `run_recorder`       | run_recorder.py           | One active mission run recording at a time. `start_run(mission, steps)` makes `~/.henosync/runs/<YYYY-MM-DD_HH-MM-SS>_<mission>/` (meta.json snapshot + telemetry/events/status/operations/steps .jsonl, same layout as tools/results/ws_logger.py); subscribes to telemetry_bus + node_registry listener once, polls operation_manager every 0.5 s. `record_step(index, start                                                                 | end)`from MissionPage gives step windows.`stop_run(outcome)`writes summary.json with per-step-per-robot results (final_error_m vs VICON marker, coverage_pct via run_metrics).`export_csv()`columns =`CSV_COLUMNS`. Stopped with outcome "interrupted" on shutdown. |
 | `connection_manager` | api/websocket_server.py   | Manages WebSocket connection lists; broadcasts telemetry and event messages.                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Database (`~/.henosync/henosync.db`)
@@ -309,17 +313,18 @@ If telemetry stream raises an exception, node is set to `DEGRADED`.
 
 All route files are in `henosync/api/routes/`. All prefixed `/api/` except `/health`.
 
-| Route file    | Endpoints                                                                                                                                                                |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| nodes.py      | `GET /api/nodes`, `POST /api/nodes`, `GET /api/nodes/{id}`, `DELETE /api/nodes/{id}`, `POST /api/nodes/{id}/reconnect`                                                   |
-| commands.py   | `POST /api/nodes/{id}/command`, `GET /api/nodes/{id}/stream_url`                                                                                                         |
-| missions.py   | `GET /api/missions`, `POST /api/missions`, `GET /api/missions/{id}`, `PUT /api/missions/{id}`, `DELETE /api/missions/{id}`                                               |
-| execution.py  | `POST /api/missions/{id}/execute`, `POST /api/missions/{id}/pause`, `POST /api/missions/{id}/resume`, `POST /api/missions/{id}/abort`, `GET /api/missions/engine/status` |
-| operations.py | `GET /api/operations`, `POST /api/operations/start`, `POST /api/operations/{plugin_id}/stop`, `POST /api/operations/{plugin_id}/input`, `GET /api/control-plugins`       |
-| zones.py      | `GET /api/zones`, `POST /api/zones`, `DELETE /api/zones/{id}`                                                                                                            |
-| markers.py    | `GET /api/markers`, `POST /api/markers`, `DELETE /api/markers/{id}`                                                                                                      |
-| safety.py     | `POST /api/safety/emergency-stop`                                                                                                                                        |
-| app.py inline | `GET /health`, `GET /api/plugins` (device manifests), `GET /api/transports`                                                                                              |
+| Route file    | Endpoints                                                                                                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| nodes.py      | `GET /api/nodes`, `POST /api/nodes`, `GET /api/nodes/{id}`, `DELETE /api/nodes/{id}`, `POST /api/nodes/{id}/reconnect`                                                       |
+| commands.py   | `POST /api/nodes/{id}/command`, `GET /api/nodes/{id}/stream_url`                                                                                                             |
+| missions.py   | `GET /api/missions`, `POST /api/missions`, `GET /api/missions/{id}`, `PUT /api/missions/{id}`, `DELETE /api/missions/{id}`                                                   |
+| execution.py  | `POST /api/missions/{id}/execute`, `POST /api/missions/{id}/pause`, `POST /api/missions/{id}/resume`, `POST /api/missions/{id}/abort`, `GET /api/missions/engine/status`     |
+| operations.py | `GET /api/operations`, `POST /api/operations/start`, `POST /api/operations/{plugin_id}/stop`, `POST /api/operations/{plugin_id}/input`, `GET /api/control-plugins`           |
+| zones.py      | `GET /api/zones`, `POST /api/zones`, `DELETE /api/zones/{id}`                                                                                                                |
+| markers.py    | `GET /api/markers`, `POST /api/markers`, `DELETE /api/markers/{id}`                                                                                                          |
+| runs.py       | `GET /api/runs`, `POST /api/runs/start`, `GET /api/runs/{id}`, `POST /api/runs/{id}/step`, `POST /api/runs/{id}/stop`, `POST /api/runs/{id}/export`, `DELETE /api/runs/{id}` |
+| safety.py     | `POST /api/safety/emergency-stop`                                                                                                                                            |
+| app.py inline | `GET /health`, `GET /api/plugins` (device manifests), `GET /api/transports`                                                                                                  |
 
 ### WebSocket endpoints
 
@@ -398,15 +403,16 @@ Key types:
 - Health check: 20 retries × 500ms = 10s max wait before showing window
 - Window: 1440×900, minWidth=1280, minHeight=720, `frame=false` (custom title bar), CSP header set
 - Window state (position/size) persisted to `userData/window-state.json`
-- IPC handlers: `window:minimize`, `window:maximize`, `window:close`, `window:isMaximized`, `backend:url`, `backend:port`, `dialog:openFile`, `dialog:saveFile`
+- IPC handlers: `window:minimize`, `window:maximize`, `window:close`, `window:isMaximized`, `backend:url`, `backend:port`, `dialog:openFile`, `dialog:saveFile` (optional `defaultPath`), `shell:openPath`
 
 ### Preload (`desktop/src/preload/index.ts`)
 
-`contextBridge` exposes `window.henosync` with three namespaces:
+`contextBridge` exposes `window.henosync` with four namespaces:
 
 - `window.henosync.backend` — `getUrl()`, `getPort()`
 - `window.henosync.window` — `minimize()`, `maximize()`, `close()`, `isMaximized()`
-- `window.henosync.dialog` — `openFile(options)`, `saveFile(options)`
+- `window.henosync.dialog` — `openFile(filters)`, `saveFile(filters, defaultPath?)`
+- `window.henosync.shell` — `openPath(path)` (open a local folder in the OS file manager)
 
 Security: `nodeIntegration=false`, `contextIsolation=true`, `sandbox=true`.
 
@@ -465,7 +471,7 @@ Saves zone+marker snapshots to `localStorage` under key `"henosync_map_layouts"`
 
 - **HomePage** — map + device panel + mission status panel + camera feed panel
 - **DevicesPage** — device list, Add Device modal (uses `config_schema` from plugin manifest), device detail panel
-- **MissionPage** — map + mission step builder (right panel) + step config (bottom panel) + run controls. Steps stored as `MissionBlock[]` in local state (not persisted to backend missions). Run Mission: iterates blocks, calls `startOperation(block.pluginId, block.params)`, polls `getOperations()` every 500ms until state is `"completed"`, `"failed"`, or `"idle"`. `stopRequestedRef` allows clean cancellation.
+- **MissionPage** — map + mission step builder (right panel) + step config (bottom panel) + run controls. Steps stored as `MissionBlock[]` in local state (not persisted to backend missions). Run Mission: `groupBlocks()` groups consecutive blocks sharing a `parallelGroupId` into concurrent stages; all ops in a group start together via `startOperation(block.pluginId, block.params)`, then `getOperations()` is polled every 500ms until every op in the group is `"completed"`, `"failed"`, or `"idle"` before the next group starts. `activeOperationIdsRef` tracks running operation_ids for `stopMission()`. Every Run Mission is recorded: `startRun(missionName, blocks)` → `recordRunStep(start/end)` per step → `stopRun(outcome)`; recording failures never block the mission. Clock (History) icon in the step list header opens `components/mission/RunsDialog.tsx` — lists runs (polls `/api/runs` every 2s), per-step results table, Export CSV, Open folder, Delete.
 - **PluginsPage** — lists control plugins; starts operations
 - **ZonesPage** — map with draw tools for zones and markers
 
@@ -780,3 +786,8 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-10-12 | routes/operations.py: POST /api/operations/start returns operation_id in response; POST /api/operations/{operation_id}/stop URL param is operation_id; POST /api/operations/{plugin_id}/input still uses plugin_id |
 | 2026-10-12 | api.ts: startOperation() return type gains operation_id string; stopOperation(operation_id) URL uses operation_id; RunningOperation type gains operation_id field |
 | 2026-10-12 | MissionPage: parallel mission execution — MissionBlock gains parallelGroupId?:string; groupBlocks() groups consecutive blocks sharing an ID into concurrent stages; startMission() iterates stages (parallel groups); all ops in a group start together, poll until all finish, fail-fast on any failure; activeOperationIdsRef tracks running operation_ids for stopMission(); activeStepEnd state tracks last step index in current group for "STEP 1–2 / N" display; step rows show purple bracket for grouped steps; BottomPanel gains "∥ Group with step N" and "⊗ Remove from group" controls |
+| 2026-10-12 | Added tools/results/ — Results-section data collection scripts (ws_logger, analyze_telemetry/waypoints/coverage, reconnection_trial, resource_monitor, plugin_loc) + README lab guide |
+| 2026-10-12 | Mission run recording: added core/run_recorder.py (records every Run Mission to ~/.henosync/runs/<id>/, per-step results, CSV export), core/run_metrics.py (shared final-error / coverage maths), routes/runs.py (/api/runs start/step/stop/list/get/export/delete); MissionPage reports run + step start/end and gained Runs dialog (RunsDialog.tsx); preload gained shell.openPath and saveFile defaultPath; added tests/test_run_recorder.py |
+| 2026-10-12 | analyze_waypoints.py: accepts nargs="+" for multiple run IDs — aggregates all trials and renumbers globally; also fixes plugin default "auto-navigate"→"area-navigate"; adds "run" column to output |
+| 2026-10-12 | analyze_telemetry.py: added --dropout flag — reads status.jsonl for ONLINE→DEGRADED/ERROR windows, counts VICON frames and distance moved during each window (proves position pipeline stayed live during rosbridge dropout) |
+| 2026-10-12 | Added tools/results/analyze_timing.py — parallel execution timing: per-step timeline, detects overlapping steps, prints serial estimate, actual wall time and speedup ratio |

@@ -355,6 +355,49 @@ export interface RunningOperation {
   status: OperationStatus;
 }
 
+// ── Mission run recordings ─────────────────────────────────────────────────────
+
+export type RunOutcome =
+  | "running"
+  | "completed"
+  | "stopped"
+  | "failed"
+  | "interrupted"
+  | "incomplete";
+
+/** One row of a run's results — one per step per robot (matches the CSV). */
+export interface RunStepResult {
+  step: number;
+  step_name: string;
+  step_type: string;
+  robot: string;
+  target: string;
+  started_at: string;
+  ended_at: string;
+  duration_s: number | null;
+  outcome: string;
+  final_x_m: number | null;
+  final_y_m: number | null;
+  target_x_m: number | null;
+  target_y_m: number | null;
+  final_error_m: number | null;
+  coverage_pct: number | null;
+  status_text: string;
+}
+
+export interface MissionRun {
+  id: string;
+  mission: string;
+  path: string;
+  started: number; // epoch seconds
+  ended: number | null;
+  duration_s: number | null;
+  outcome: RunOutcome;
+  robots: string[];
+  step_count: number;
+  results: RunStepResult[];
+}
+
 // ── Zone models ────────────────────────────────────────────────────────────────
 
 export interface GeoPoint {
