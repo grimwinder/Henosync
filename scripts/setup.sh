@@ -71,6 +71,13 @@ VENV_DIR="$BACKEND_DIR/.venv"
 
 echo "Setting up Python virtual environment..."
 
+# An existing .venv built with an unsupported Python (e.g. 3.13+) is recreated.
+if [ -x "$VENV_DIR/bin/python" ] && ! "$VENV_DIR/bin/python" -c \
+    "import sys; sys.exit(0 if sys.version_info[:2] in ((3, 11), (3, 12)) else 1)"; then
+    echo "  Existing .venv uses an unsupported Python version — recreating it"
+    rm -rf "$VENV_DIR"
+fi
+
 if [ -d "$VENV_DIR" ]; then
     echo "  .venv already exists — skipping creation"
 else
@@ -89,14 +96,33 @@ echo "  Installing backend packages..."
     websockets \
     aiofiles \
     python-multipart \
-    roslibpy
+    roslibpy \
+    cflib
 "$VENV_DIR/bin/python" -m pip install --quiet -e packages/plugin-sdk
-echo ""
-echo "  NOTE: VICON positioning requires the Vicon DataStream SDK, which ships"
-echo "  with Vicon Tracker or Nexus. After installing Vicon software, run:"
-echo "    $VENV_DIR/bin/python -m pip install '/path/to/Vicon/DataStream SDK/.../Python/vicon_dssdk'"
-echo "  The backend works fine without it — only VICON-mode devices will be unavailable."
 echo "  Done"
+echo ""
+
+# ── VICON Support ────────────────────────────────────────────────
+# vicon_dssdk is not on PyPI — it ships inside the Vicon DataStream SDK.
+# Point VICON_SDK_DIR at the extracted SDK to have it installed automatically.
+
+echo "Installing VICON support..."
+if [ -n "$VICON_SDK_DIR" ] && [ -d "$VICON_SDK_DIR" ]; then
+    VICON_PKG=$(find "$VICON_SDK_DIR" -type d -name vicon_dssdk \
+        -exec test -e '{}/setup.py' -o -e '{}/pyproject.toml' \; -print | head -n 1)
+    if [ -n "$VICON_PKG" ]; then
+        echo "  Found $VICON_PKG"
+        "$VENV_DIR/bin/python" -m pip install --quiet "$VICON_PKG"
+    fi
+fi
+if "$VENV_DIR/bin/python" -c "import vicon_dssdk" 2>/dev/null; then
+    echo "  VICON support installed"
+else
+    echo "  WARNING: VICON support NOT installed — VICON positioning will not connect."
+    echo "  1. Download the Vicon DataStream SDK: https://www.vicon.com/software/datastream-sdk/"
+    echo "  2. Re-run: VICON_SDK_DIR=/path/to/extracted/sdk ./scripts/setup.sh"
+    echo "  Everything else in Henosync works without it."
+fi
 echo ""
 
 # ── Verify Backend Starts ────────────────────────────────────────
