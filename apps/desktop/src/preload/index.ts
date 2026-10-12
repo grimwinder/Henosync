@@ -30,8 +30,18 @@ const henosyncAPI = {
   dialog: {
     openFile: (filters?: Electron.FileFilter[]): Promise<string | null> =>
       ipcRenderer.invoke("dialog:openFile", filters),
-    saveFile: (filters?: Electron.FileFilter[]): Promise<string | null> =>
-      ipcRenderer.invoke("dialog:saveFile", filters),
+    saveFile: (
+      filters?: Electron.FileFilter[],
+      defaultPath?: string,
+    ): Promise<string | null> =>
+      ipcRenderer.invoke("dialog:saveFile", filters, defaultPath),
+  },
+
+  // ── Shell ─────────────────────────────────────────────────────
+  shell: {
+    /** Open a local folder in the OS file manager. Resolves to "" on success. */
+    openPath: (path: string): Promise<string> =>
+      ipcRenderer.invoke("shell:openPath", path),
   },
 };
 

@@ -20,6 +20,7 @@ import {
   FolderOpen,
   Check,
   CheckCircle2,
+  History,
 } from "lucide-react";
 import MissionMap, {
   type MapBase,
@@ -33,7 +34,15 @@ import VICONMap from "../components/map/VICONMap";
 import { useHubLocation } from "../hooks/useHubLocation";
 import { useControlPlugins } from "../hooks/usePlugins";
 import { useMissionPlans, type MissionPlan } from "../hooks/useMissionPlans";
-import { startOperation, stopOperation, getOperations } from "../lib/api";
+import {
+  startOperation,
+  stopOperation,
+  getOperations,
+  startRun,
+  recordRunStep,
+  stopRun,
+} from "../lib/api";
+import RunsDialog from "../components/mission/RunsDialog";
 import { useUIStore } from "../stores/uiStore";
 import type { ControlPluginInfo, PluginConfigField } from "../types";
 
@@ -919,6 +928,7 @@ function StepListPanel({
   isRunning,
   activeStepIndex,
   activeStepEnd,
+  onShowRuns,
 }: {
   blocks: MissionBlock[];
   selectedId: string | null;
@@ -934,6 +944,7 @@ function StepListPanel({
   isRunning: boolean;
   activeStepIndex: number;
   activeStepEnd: number; // last index of the group running alongside activeStepIndex
+  onShowRuns: () => void;
 }) {
   const [activePopup, setActivePopup] = useState<"save" | "open" | null>(null);
   const popupAnchorRef = useRef<HTMLDivElement>(null);
@@ -1010,6 +1021,37 @@ function StepListPanel({
             ? `STEP ${activeStepIndex + 1}${activeStepEnd > activeStepIndex ? `–${activeStepEnd + 1}` : ""} / ${blocks.length}`
             : "MISSION PLAN"}
         </span>
+
+        {/* Recorded runs — available while running too */}
+        <button
+          title="Mission runs — results and CSV export"
+          onClick={onShowRuns}
+          style={{
+            width: "26px",
+            height: "26px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "5px",
+            border: "1px solid transparent",
+            backgroundColor: "transparent",
+            color: "#999999",
+            cursor: "pointer",
+            transition: "all 150ms",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+              "#1C1C1C";
+            (e.currentTarget as HTMLButtonElement).style.color = "#EFEFEF";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+              "transparent";
+            (e.currentTarget as HTMLButtonElement).style.color = "#999999";
+          }}
+        >
+          <History size={13} />
+        </button>
 
         {/* Save / Open buttons — hidden while running */}
         <div
@@ -2299,6 +2341,10 @@ export default function MissionPage() {
   // Mission log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
 
+  // Run recordings — runs are named after the saved/loaded plan
+  const [missionName, setMissionName] = useState("Untitled mission");
+  const [showRuns, setShowRuns] = useState(false);
+
   async function startMission() {
     if (blocks.length === 0) return;
     stopRequestedRef.current = false;
@@ -2324,6 +2370,38 @@ export default function MissionPage() {
       "system",
     );
 
+    // Record this run to ~/.henosync/runs. Recording problems never block
+    // the mission itself.
+    let runId: string | null = null;
+    try {
+      const run = await startRun(
+        missionName,
+        blocks.map((b, i) => ({
+          index: i,
+          name: b.label,
+          plugin_id: b.pluginId,
+          display_name: b.displayName,
+          params: b.params,
+          parallel: !!b.parallel,
+        })),
+      );
+      runId = run.run_id;
+      addEntry(`Recording run · ${run.run_id}`, "system");
+    } catch (err) {
+      console.error("[Mission] Run recording unavailable:", err);
+      addEntry("Run recording unavailable — mission continues unrecorded", "fail");
+    }
+    const reportStep = (
+      index: number,
+      event: "start" | "end",
+      outcome?: string,
+      text = "",
+    ) => {
+      if (runId)
+        recordRunStep(runId, index, event, outcome, text).catch(() => {});
+    };
+    let anyFailed = false;
+
     // Steps marked "run with step above" are started together and the mission
     // moves on once every step in the group has finished.
     groupLoop: for (const group of groupBlocks(blocks)) {
@@ -2343,6 +2421,7 @@ export default function MissionPage() {
             `Steps ${prev + 1} and ${i + 1} are both ${blocks[i].displayName} — the same step type can't run at the same time as itself`,
             "fail",
           );
+          anyFailed = true;
           break groupLoop;
         }
         seen.set(blocks[i].pluginId, i);
@@ -2353,6 +2432,7 @@ export default function MissionPage() {
       for (const i of group) {
         const block = blocks[i];
         addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
+        reportStep(i, "start");
         try {
           await startOperation(
             block.pluginId,
@@ -2364,6 +2444,13 @@ export default function MissionPage() {
           console.error(`[Mission] Failed to start step ${i + 1}:`, err);
           const reason = err instanceof Error ? ` · ${err.message}` : "";
           addEntry(`Step ${i + 1}/${total} — failed to start${reason}`, "fail");
+          reportStep(
+            i,
+            "end",
+            "failed",
+            err instanceof Error ? err.message : "failed to start",
+          );
+          anyFailed = true;
           // Don't leave half a group running.
           for (const s of started) {
             stopOperation(blocks[s].pluginId).catch(() => {});
@@ -2389,6 +2476,7 @@ export default function MissionPage() {
           const op = ops.find((o) => o.plugin_id === blocks[i].pluginId);
           if (!op) {
             finished.set(i, { state: "completed", text: "" });
+            reportStep(i, "end", "completed");
             continue;
           }
           const s = op.status.state as string;
@@ -2397,6 +2485,13 @@ export default function MissionPage() {
             finished.set(i, { state: s, text: lastText.get(i) ?? "" });
             const elapsed = Math.round((Date.now() - stepStart) / 1000);
             const block = blocks[i];
+            reportStep(
+              i,
+              "end",
+              s === "failed" ? "failed" : "completed",
+              lastText.get(i) ?? "",
+            );
+            if (s === "failed") anyFailed = true;
             if (s === "failed") {
               const t = lastText.get(i);
               addEntry(
@@ -2426,6 +2521,20 @@ export default function MissionPage() {
     } else {
       addEntry("All steps complete", "system");
     }
+
+    if (runId) {
+      const outcome = stopRequestedRef.current
+        ? "stopped"
+        : anyFailed
+          ? "failed"
+          : "completed";
+      try {
+        await stopRun(runId, outcome);
+        addEntry("Run saved — open Runs to view results or export CSV", "system");
+      } catch (err) {
+        console.error("[Mission] Failed to save run:", err);
+      }
+    }
   }
 
   function stopMission() {
@@ -2443,11 +2552,13 @@ export default function MissionPage() {
 
   function handleSavePlan(name: string) {
     savePlan(name, blocks);
+    setMissionName(name);
   }
 
   function handleLoadPlan(plan: MissionPlan) {
     setBlocks(plan.blocks);
     setSelectedId(null);
+    setMissionName(plan.name);
   }
 
   const handleMapReady = useCallback((m: maplibregl.Map) => {
@@ -2671,7 +2782,10 @@ export default function MissionPage() {
         isRunning={isRunning}
         activeStepIndex={activeStepIndex}
         activeStepEnd={activeStepEnd}
+        onShowRuns={() => setShowRuns(true)}
       />
+
+      {showRuns && <RunsDialog onClose={() => setShowRuns(false)} />}
 
       {/* Bottom panel — log while running or after run; configure otherwise */}
       {isRunning || logEntries.length > 0 ? (

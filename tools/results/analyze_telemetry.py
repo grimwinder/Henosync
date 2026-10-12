@@ -1,15 +1,17 @@
 """
-Telemetry pipeline performance from a ws_logger run (Results use case 1).
+Telemetry pipeline performance from a recorded mission run or a ws_logger
+run (Results use cases 1 and 5).
 
 Per node and per source (the robot's own plugin vs. VICON):
   - frames received and mean update rate (Hz)
   - inter-arrival jitter (std, p95, max gap)
   - dropped frames (gaps in the sequence numbers)
-  - backend -> client delay: logger receive time minus the frame's backend
-    timestamp. Valid only when the logger runs on the same machine as the
-    backend (same clock). It does NOT include robot -> backend delay.
+  - backend -> client delay: receive time minus the frame's backend
+    timestamp (same machine, same clock). For runs recorded inside Henosync
+    this is only the in-process delay; use a ws_logger run to measure the
+    WebSocket path to the UI. Neither includes robot -> backend delay.
 
-    python tools/results/analyze_telemetry.py runs/jackal_waypoints [--csv out.csv]
+    python tools/results/analyze_telemetry.py "<run id or folder>" [--csv out.csv]
 """
 
 import argparse

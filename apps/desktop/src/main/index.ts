@@ -243,14 +243,17 @@ function setupIPC(): void {
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle("dialog:saveFile", async (_, filters) => {
+  ipcMain.handle("dialog:saveFile", async (_, filters, defaultPath) => {
     const result = await dialog.showSaveDialog(mainWindow!, {
+      defaultPath,
       filters: filters ?? [
         { name: "Henosync Mission", extensions: ["rbmission"] },
       ],
     });
     return result.canceled ? null : result.filePath;
   });
+
+  ipcMain.handle("shell:openPath", (_, path: string) => shell.openPath(path));
 
   mainWindow?.on("maximize", () => {
     mainWindow?.webContents.send("window:maximizeChanged", true);

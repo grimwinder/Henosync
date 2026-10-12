@@ -8,6 +8,7 @@ import type {
   PluginManifest,
   ControlPluginInfo,
   RunningOperation,
+  MissionRun,
   Zone,
   ZoneCreate,
   MapMarker,
@@ -203,6 +204,52 @@ export const sendOperatorInput = (
       body: JSON.stringify({ input_key, value }),
     },
   );
+
+// ── Mission run recordings ─────────────────────────────────────────────────────
+
+export const getRuns = () =>
+  apiFetch<{ runs: MissionRun[] }>("/api/runs").then((r) => r.runs);
+
+export const startRun = (
+  mission: string,
+  steps: Array<Record<string, unknown>>,
+) =>
+  apiFetch<{ run_id: string; path: string }>("/api/runs/start", {
+    method: "POST",
+    body: JSON.stringify({ mission, steps }),
+  });
+
+export const recordRunStep = (
+  runId: string,
+  index: number,
+  event: "start" | "end",
+  outcome?: string,
+  status_text = "",
+) =>
+  apiFetch<{ success: boolean }>(
+    `/api/runs/${encodeURIComponent(runId)}/step`,
+    {
+      method: "POST",
+      body: JSON.stringify({ index, event, outcome, status_text }),
+    },
+  );
+
+export const stopRun = (runId: string, outcome: string) =>
+  apiFetch<MissionRun>(`/api/runs/${encodeURIComponent(runId)}/stop`, {
+    method: "POST",
+    body: JSON.stringify({ outcome }),
+  });
+
+export const exportRun = (runId: string, path: string) =>
+  apiFetch<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/export`, {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+
+export const deleteRun = (runId: string) =>
+  apiFetch<{ success: boolean }>(`/api/runs/${encodeURIComponent(runId)}`, {
+    method: "DELETE",
+  });
 
 // ── Zones ──────────────────────────────────────────────────────────────────────
 

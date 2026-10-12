@@ -95,7 +95,8 @@ henosync/
 │   │       │       ├── operations.py  start/stop/list control plugin operations
 │   │       │       ├── zones.py       CRUD for zones
 │   │       │       ├── markers.py     CRUD for map markers
-│   │       │       └── safety.py      emergency-stop
+│   │       │       ├── safety.py      emergency-stop
+│   │       │       └── runs.py        mission run recordings: start/step/stop/list/export/delete
 │   │       ├── core/
 │   │       │   ├── node_registry.py    Source of truth for all nodes; manages connect/telemetry tasks
 │   │       │   ├── operation_manager.py  Starts/stops control plugin operations; device matching
@@ -104,6 +105,8 @@ henosync/
 │   │       │   ├── telemetry_bus.py    Pub/sub for TelemetryFrame and SystemEvent
 │   │       │   ├── zone_manager.py     Zone CRUD + geometry (ray casting, haversine)
 │   │       │   ├── marker_manager.py   Map marker CRUD
+│   │       │   ├── run_recorder.py     Records each Run Mission to ~/.henosync/runs/<id>/; per-step results + CSV export
+│   │       │   ├── run_metrics.py      Pure final-error / coverage % maths (shared with tools/results)
 │   │       │   ├── fleet_context.py    Injected into control plugins; device access + messaging
 │   │       │   ├── device_proxy.py     Wraps Node; universal movement, capability data, coord conversion
 │   │       │   └── event_bus.py        Inter-control-plugin messaging (broadcast/point-to-point)
@@ -203,6 +206,7 @@ Module-level instances — never instantiate, always import the singleton.
 | `plugin_registry`    | plugin_system/registry.py | Maps `plugin_id → class`, `plugin_id → manifest`, `node_id → instance`.                                                                                                                                                                                                                                                                                                                                                                        |
 | `event_bus`          | event_bus.py              | Inter-control-plugin messaging (broadcast / point-to-point).                                                                                                                                                                                                                                                                                                                                                                                   |
 | `mission_store`      | storage/mission_store.py  | Full SQLite CRUD for missions. Missions ARE persisted — `missions` table in henosync.db.                                                                                                                                                                                                                                                                                                                                                       |
+| `run_recorder`       | run_recorder.py           | One active mission run recording at a time. `start_run(mission, steps)` makes `~/.henosync/runs/<YYYY-MM-DD_HH-MM-SS>_<mission>/` (meta.json snapshot + telemetry/events/status/operations/steps .jsonl, same layout as tools/results/ws_logger.py); subscribes to telemetry_bus + node_registry listener once, polls operation_manager every 0.5 s. `record_step(index, start|end)` from MissionPage gives step windows. `stop_run(outcome)` writes summary.json with per-step-per-robot results (final_error_m vs VICON marker, coverage_pct via run_metrics). `export_csv()` columns = `CSV_COLUMNS`. Stopped with outcome "interrupted" on shutdown. |
 | `connection_manager` | api/websocket_server.py   | Manages WebSocket connection lists; broadcasts telemetry and event messages.                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Database (`~/.henosync/henosync.db`)
@@ -322,6 +326,7 @@ All route files are in `henosync/api/routes/`. All prefixed `/api/` except `/hea
 | operations.py | `GET /api/operations`, `POST /api/operations/start`, `POST /api/operations/{plugin_id}/stop`, `POST /api/operations/{plugin_id}/input`, `GET /api/control-plugins`       |
 | zones.py      | `GET /api/zones`, `POST /api/zones`, `DELETE /api/zones/{id}`                                                                                                            |
 | markers.py    | `GET /api/markers`, `POST /api/markers`, `DELETE /api/markers/{id}`                                                                                                      |
+| runs.py       | `GET /api/runs`, `POST /api/runs/start`, `GET /api/runs/{id}`, `POST /api/runs/{id}/step`, `POST /api/runs/{id}/stop`, `POST /api/runs/{id}/export`, `DELETE /api/runs/{id}` |
 | safety.py     | `POST /api/safety/emergency-stop`                                                                                                                                        |
 | app.py inline | `GET /health`, `GET /api/plugins` (device manifests), `GET /api/transports`                                                                                              |
 
@@ -402,15 +407,16 @@ Key types:
 - Health check: 20 retries × 500ms = 10s max wait before showing window
 - Window: 1440×900, minWidth=1280, minHeight=720, `frame=false` (custom title bar), CSP header set
 - Window state (position/size) persisted to `userData/window-state.json`
-- IPC handlers: `window:minimize`, `window:maximize`, `window:close`, `window:isMaximized`, `backend:url`, `backend:port`, `dialog:openFile`, `dialog:saveFile`
+- IPC handlers: `window:minimize`, `window:maximize`, `window:close`, `window:isMaximized`, `backend:url`, `backend:port`, `dialog:openFile`, `dialog:saveFile` (optional `defaultPath`), `shell:openPath`
 
 ### Preload (`desktop/src/preload/index.ts`)
 
-`contextBridge` exposes `window.henosync` with three namespaces:
+`contextBridge` exposes `window.henosync` with four namespaces:
 
 - `window.henosync.backend` — `getUrl()`, `getPort()`
 - `window.henosync.window` — `minimize()`, `maximize()`, `close()`, `isMaximized()`
-- `window.henosync.dialog` — `openFile(options)`, `saveFile(options)`
+- `window.henosync.dialog` — `openFile(filters)`, `saveFile(filters, defaultPath?)`
+- `window.henosync.shell` — `openPath(path)` (open a local folder in the OS file manager)
 
 Security: `nodeIntegration=false`, `contextIsolation=true`, `sandbox=true`.
 
@@ -469,7 +475,7 @@ Saves zone+marker snapshots to `localStorage` under key `"henosync_map_layouts"`
 
 - **HomePage** — map + device panel + mission status panel + camera feed panel
 - **DevicesPage** — device list, Add Device modal (uses `config_schema` from plugin manifest), device detail panel
-- **MissionPage** — map + mission step builder (right panel) + step config (bottom panel) + run controls. Steps stored as `MissionBlock[]` in local state (not persisted to backend missions). Run Mission: `groupBlocks()` joins each block with `parallel: true` ("Run with step N" checkbox in the config panel) to the group above; each group's operations are started together via `startOperation(block.pluginId, block.params)`, then `getOperations()` is polled every 500ms until every op in the group is `"completed"`, `"failed"`, or `"idle"` before the next group starts. Two blocks of the same plugin in one group are rejected (ops are keyed by plugin_id). Failure to start any op stops the rest of its group. `stopRequestedRef` + `activeBlocksRef` allow clean cancellation of the whole group. Field type `device_multi_select` (DeviceMultiSelectField, checkbox list) stores an array of node ids.
+- **MissionPage** — map + mission step builder (right panel) + step config (bottom panel) + run controls. Steps stored as `MissionBlock[]` in local state (not persisted to backend missions). Run Mission: `groupBlocks()` joins each block with `parallel: true` ("Run with step N" checkbox in the config panel) to the group above; each group's operations are started together via `startOperation(block.pluginId, block.params)`, then `getOperations()` is polled every 500ms until every op in the group is `"completed"`, `"failed"`, or `"idle"` before the next group starts. Two blocks of the same plugin in one group are rejected (ops are keyed by plugin_id). Failure to start any op stops the rest of its group. `stopRequestedRef` + `activeBlocksRef` allow clean cancellation of the whole group. Field type `device_multi_select` (DeviceMultiSelectField, checkbox list) stores an array of node ids. Every Run Mission is recorded: `startRun(missionName, blocks)` → `recordRunStep(start/end)` per step → `stopRun(outcome)`; recording failures never block the mission. `missionName` = last saved/loaded plan name (default "Untitled mission"). Clock (History) icon in the step list header opens `components/mission/RunsDialog.tsx` — lists runs (polls `/api/runs` every 2 s), per-step results table, Export CSV (save dialog → `POST /api/runs/{id}/export`), Open folder, Delete (two-click confirm).
 - **PluginsPage** — lists control plugins; starts operations
 - **ZonesPage** — map with draw tools for zones and markers
 
@@ -782,3 +788,5 @@ Tailwind is available but rarely used — most styling is inline CSS objects.
 | 2026-10-11 | Concurrent missions on different robots: operation_manager honours config node_id/node_ids as explicit robot selection, only takes free robots when none selected, preempts lower-priority holders with on_device_left notification (previously silently double-assigned), refuses equal/higher-priority/offline/incompatible requests with a reason, releases finished ops' robots; area-navigate gained node_ids (device_multi_select) field; MissionPage gained per-step "Run with step N" (MissionBlock.parallel) and group execution; added device_multi_select to PluginConfigField |
 | 2026-10-11 | Added backend tests: test_operation_manager.py (concurrency/selection), test_failsafe_vicon.py, test_connection_liveness.py (detection, no auto-reconnect, manual reconnect), test_coverage_paths.py (area-navigate lawnmower geometry; documents lane gap is ≥ spacing and < 2× spacing because lane count is floor(height/spacing)) |
 | 2026-10-11 | Added tools/results/ — Results-section data collection scripts (ws_logger, analyze_telemetry/waypoints/coverage, reconnection_trial, resource_monitor, plugin_loc) + README lab guide |
+| 2026-10-12 | Mission run recording: added core/run_recorder.py (records every Run Mission to ~/.henosync/runs/<id>/, per-step results, CSV export), core/run_metrics.py (shared final-error / coverage maths), routes/runs.py (/api/runs start/step/stop/list/get/export/delete); MissionPage reports run + step start/end and gained a Runs dialog (components/mission/RunsDialog.tsx); preload gained shell.openPath and saveFile defaultPath; tools/results analyze_* scripts accept run ids / recorded runs and analyze_coverage uses run_metrics; added tests/test_run_recorder.py |
+| 2026-10-12 | Found (not fixed): area-navigate _sweep_bands lane count is floor(band height / spacing); with 2+ robots the equal-area split makes bands slightly short of a whole multiple, dropping a lane (2 m zone, 0.5 m spacing: 4 lanes with 1 robot, 3 with 2 robots) |
