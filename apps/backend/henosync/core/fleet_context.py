@@ -28,12 +28,14 @@ class FleetContext:
 
     def __init__(
         self,
+        operation_id: str,
         plugin_id: str,
         initial_devices: list[DeviceProxy],
         zone_manager: "ZoneManager",
         marker_manager: "MarkerManager",
         event_bus: "EventBus"
     ):
+        self._operation_id = operation_id
         self._plugin_id = plugin_id
         self._devices: dict[str, DeviceProxy] = {
             d.id: d for d in initial_devices
@@ -97,7 +99,7 @@ class FleetContext:
 
         # Check if operation manager allows recruitment
         proxy = await operation_manager.try_recruit_device(
-            self._plugin_id, device_id
+            self._operation_id, device_id
         )
         if proxy:
             self._devices[device_id] = proxy
@@ -116,7 +118,7 @@ class FleetContext:
         if device_id in self._devices:
             del self._devices[device_id]
             await operation_manager.release_device(
-                self._plugin_id, device_id
+                self._operation_id, device_id
             )
             logger.info(
                 f"Plugin {self._plugin_id} released device: {device_id}"

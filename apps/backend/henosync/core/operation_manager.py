@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -24,10 +25,12 @@ class ActiveOperation:
 
     def __init__(
         self,
+        operation_id: str,
         plugin: ControlPlugin,
         context: FleetContext,
         task: asyncio.Task
     ):
+        self.operation_id = operation_id
         self.plugin = plugin
         self.context = context
         self.task = task
@@ -39,19 +42,14 @@ class OperationManager:
     """
     Manages all running control plugin operations.
 
-    Responsibilities:
-    - Start and stop control plugin operations
-    - Match devices to control plugins by capability
-    - Handle operation priority and device conflicts
-    - Graceful degradation when devices go offline
-    - Device recruitment and release
-    - Emergency stop all operations
+    Operations are keyed by a generated operation_id (UUID), allowing the same
+    plugin type to run multiple times concurrently on different devices.
     """
 
     def __init__(self):
-        # plugin_id -> ActiveOperation
+        # operation_id -> ActiveOperation
         self._operations: dict[str, ActiveOperation] = {}
-        # device_id -> plugin_id (which operation owns it)
+        # device_id -> operation_id (which operation owns it)
         self._device_assignments: dict[str, str] = {}
         # plugin_id -> ControlPlugin class
         self._registered_plugins: dict[str, type[ControlPlugin]] = {}
@@ -96,49 +94,50 @@ class OperationManager:
         self,
         plugin_id: str,
         config: dict[str, Any] = {}
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str]:
         """
         Start a control plugin operation.
 
-        Returns (success, message).
+        Returns (success, message, operation_id).
+        operation_id is "" on failure.
         """
-        if plugin_id in self._operations:
-            existing = self._operations[plugin_id]
-            if existing.task.done():
-                # Previous run finished but was never explicitly stopped — clean up.
-                for dev_id, pid in list(self._device_assignments.items()):
-                    if pid == plugin_id:
+        # Clean up any finished operations for this plugin first.
+        for op_id, op in list(self._operations.items()):
+            if op.plugin_id == plugin_id and op.task.done():
+                for dev_id, assigned in list(self._device_assignments.items()):
+                    if assigned == op_id:
                         del self._device_assignments[dev_id]
-                event_bus.unregister_plugin(plugin_id)
-                del self._operations[plugin_id]
-                logger.info("Cleaned up completed operation: %s", plugin_id)
-            else:
-                return False, f"Operation already running: {plugin_id}"
+                event_bus.unregister_plugin(op_id)
+                del self._operations[op_id]
+                logger.info("Cleaned up completed operation: %s", op_id)
 
         plugin_class = self._registered_plugins.get(plugin_id)
         if not plugin_class:
-            return False, f"Control plugin not found: {plugin_id}"
+            return False, f"Control plugin not found: {plugin_id}", ""
 
         # Match devices to this plugin
-        matched_devices = await self._match_devices(plugin_class)
+        matched_devices = await self._match_devices(plugin_class, config)
 
         if not matched_devices and plugin_class.REQUIRED_CAPABILITIES:
             return False, (
                 f"No devices available matching requirements for "
                 f"{plugin_class.PLUGIN_NAME}"
-            )
+            ), ""
+
+        operation_id = str(uuid.uuid4())
 
         # Create plugin instance
         plugin_instance = plugin_class()
 
-        # Register with event bus
+        # Register with event bus (keyed by operation_id for uniqueness)
         event_bus.register_plugin(
-            plugin_id,
+            operation_id,
             plugin_instance.on_message
         )
 
         # Create fleet context
         context = FleetContext(
+            operation_id=operation_id,
             plugin_id=plugin_id,
             initial_devices=matched_devices,
             zone_manager=zone_manager,
@@ -148,15 +147,15 @@ class OperationManager:
 
         # Assign devices to this operation
         for device in matched_devices:
-            self._device_assignments[device.id] = plugin_id
+            self._device_assignments[device.id] = operation_id
 
         # Start operation as background task
         task = asyncio.create_task(
             self._run_operation(plugin_instance, context, config)
         )
 
-        self._operations[plugin_id] = ActiveOperation(
-            plugin_instance, context, task
+        self._operations[operation_id] = ActiveOperation(
+            operation_id, plugin_instance, context, task
         )
 
         device_names = [d.name for d in matched_devices]
@@ -171,21 +170,21 @@ class OperationManager:
         )
 
         logger.info(
-            f"Operation started: {plugin_id} "
+            f"Operation started: {plugin_id} (id={operation_id}) "
             f"with {len(matched_devices)} devices"
         )
-        return True, "Operation started"
+        return True, "Operation started", operation_id
 
     async def stop_operation(
         self,
-        plugin_id: str
+        operation_id: str
     ) -> tuple[bool, str]:
-        """Stop a running operation."""
-        operation = self._operations.get(plugin_id)
+        """Stop a running operation by operation_id."""
+        operation = self._operations.get(operation_id)
         if not operation:
-            return False, f"No running operation: {plugin_id}"
+            return False, f"No running operation: {operation_id}"
 
-        logger.info(f"Stopping operation: {plugin_id}")
+        logger.info(f"Stopping operation: {operation_id}")
 
         # Give plugin 3 seconds to stop cleanly
         try:
@@ -195,7 +194,7 @@ class OperationManager:
             )
         except asyncio.TimeoutError:
             logger.warning(
-                f"Operation {plugin_id} did not stop within 3s — forcing"
+                f"Operation {operation_id} did not stop within 3s — forcing"
             )
 
         # Cancel the task
@@ -207,16 +206,14 @@ class OperationManager:
                 pass
 
         # Release all devices
-        for device_id, assigned_plugin in list(
-            self._device_assignments.items()
-        ):
-            if assigned_plugin == plugin_id:
+        for device_id, assigned_op in list(self._device_assignments.items()):
+            if assigned_op == operation_id:
                 del self._device_assignments[device_id]
 
         # Unregister from event bus
-        event_bus.unregister_plugin(plugin_id)
+        event_bus.unregister_plugin(operation_id)
 
-        del self._operations[plugin_id]
+        del self._operations[operation_id]
 
         await telemetry_bus.publish_event(
             title="Operation Stopped",
@@ -232,8 +229,16 @@ class OperationManager:
         input_key: str,
         value: Any
     ) -> tuple[bool, str]:
-        """Forward operator input (e.g. keyboard) to a running operation."""
-        operation = self._operations.get(plugin_id)
+        """
+        Forward operator input to a running operation by plugin_id.
+
+        Finds the first running instance of the given plugin.
+        Teleop is the only consumer and only runs once.
+        """
+        operation = next(
+            (op for op in self._operations.values() if op.plugin_id == plugin_id),
+            None
+        )
         if not operation:
             return False, f"No running operation: {plugin_id}"
 
@@ -243,8 +248,8 @@ class OperationManager:
     async def stop_all_operations(self) -> None:
         """Stop all running operations. Called by emergency stop."""
         logger.critical("Stopping all control plugin operations")
-        for plugin_id in list(self._operations.keys()):
-            await self.stop_operation(plugin_id)
+        for operation_id in list(self._operations.keys()):
+            await self.stop_operation(operation_id)
 
     async def _run_operation(
         self,
@@ -273,33 +278,41 @@ class OperationManager:
     def get_all_operation_statuses(self) -> list[dict]:
         """Get status of all running operations."""
         statuses = []
-        for plugin_id, operation in self._operations.items():
+        for operation_id, operation in self._operations.items():
             try:
                 status = operation.plugin.get_status()
                 statuses.append({
-                    "plugin_id": plugin_id,
+                    "operation_id": operation_id,
+                    "plugin_id": operation.plugin_id,
                     "operation_name": operation.plugin.OPERATION_NAME,
                     "started_at": operation.started_at.isoformat(),
                     "status": status.model_dump()
                 })
             except Exception as e:
-                logger.error(f"Status error for {plugin_id}: {e}")
+                logger.error(f"Status error for {operation_id}: {e}")
         return statuses
 
     # ── Device Management ──────────────────────────────────────
 
     async def _match_devices(
         self,
-        plugin_class: type[ControlPlugin]
+        plugin_class: type[ControlPlugin],
+        config: dict[str, Any] = {}
     ) -> list[DeviceProxy]:
         """
         Find all available devices matching plugin requirements.
-        Applies capability negotiation.
+
+        If config contains node_id, only that device is matched.
         """
         from .node_registry import node_registry
 
+        requested_id: str = config.get("node_id", "") or ""
+
         matched = []
         for node in node_registry.get_online_nodes():
+            if requested_id and node.id != requested_id:
+                continue
+
             proxy = DeviceProxy(node)
 
             # Category filter
@@ -336,21 +349,21 @@ class OperationManager:
         Check if a device can be assigned to an operation.
         Higher priority operations win device conflicts.
         """
-        current_plugin_id = self._device_assignments.get(device_id)
-        if not current_plugin_id:
+        current_op_id = self._device_assignments.get(device_id)
+        if not current_op_id:
             return True
 
-        # Check priority of current owner
-        current_op = self._operations.get(current_plugin_id)
-        if not current_op:
+        current_op = self._operations.get(current_op_id)
+        if not current_op or current_op.task.done():
+            # Stale assignment — clean it up
+            del self._device_assignments[device_id]
             return True
 
-        current_priority = current_op.plugin.PRIORITY
-        return requesting_priority > current_priority
+        return requesting_priority > current_op.plugin.PRIORITY
 
     async def try_recruit_device(
         self,
-        requesting_plugin_id: str,
+        requesting_operation_id: str,
         device_id: str
     ) -> Optional[DeviceProxy]:
         """
@@ -359,7 +372,7 @@ class OperationManager:
         """
         from .node_registry import node_registry
 
-        requesting_op = self._operations.get(requesting_plugin_id)
+        requesting_op = self._operations.get(requesting_operation_id)
         if not requesting_op:
             return None
 
@@ -375,35 +388,42 @@ class OperationManager:
             return None
 
         # Preempt lower priority operation if needed
-        current_plugin_id = self._device_assignments.get(device_id)
-        if current_plugin_id:
-            current_op = self._operations.get(current_plugin_id)
+        current_op_id = self._device_assignments.get(device_id)
+        if current_op_id:
+            current_op = self._operations.get(current_op_id)
             if current_op:
+                proxy = current_op.context.get_device(device_id)
                 current_op.context._remove_device(device_id)
-                await current_op.plugin.on_device_left(
-                    current_op.context.get_device(device_id)
-                )
+                if proxy:
+                    await current_op.plugin.on_device_left(proxy)
 
         node = node_registry.get_node(device_id)
         if not node:
             return None
 
         proxy = DeviceProxy(node)
-        self._device_assignments[device_id] = requesting_plugin_id
+        self._device_assignments[device_id] = requesting_operation_id
         return proxy
 
     async def release_device(
         self,
-        plugin_id: str,
+        operation_id: str,
         device_id: str
     ) -> None:
         """Release a device from an operation."""
-        if self._device_assignments.get(device_id) == plugin_id:
+        if self._device_assignments.get(device_id) == operation_id:
             del self._device_assignments[device_id]
 
     async def is_device_available(self, device_id: str) -> bool:
         """Check if a device is available for recruitment."""
-        return device_id not in self._device_assignments
+        op_id = self._device_assignments.get(device_id)
+        if not op_id:
+            return True
+        op = self._operations.get(op_id)
+        if not op or op.task.done():
+            del self._device_assignments[device_id]
+            return True
+        return False
 
     # ── Graceful Degradation ───────────────────────────────────
 
@@ -412,11 +432,11 @@ class OperationManager:
         Called by failsafe manager when a node goes offline.
         Notifies all affected operations for graceful degradation.
         """
-        plugin_id = self._device_assignments.get(node_id)
-        if not plugin_id:
+        operation_id = self._device_assignments.get(node_id)
+        if not operation_id:
             return
 
-        operation = self._operations.get(plugin_id)
+        operation = self._operations.get(operation_id)
         if not operation:
             return
 
@@ -426,7 +446,7 @@ class OperationManager:
 
         logger.warning(
             f"Device lost mid-operation: {proxy.name} "
-            f"in operation {plugin_id}"
+            f"in operation {operation_id}"
         )
 
         # Remove from context
@@ -441,12 +461,12 @@ class OperationManager:
             )
         except asyncio.TimeoutError:
             logger.warning(
-                f"Plugin {plugin_id} did not respond to "
+                f"Plugin {operation.plugin_id} did not respond to "
                 f"device_left within 5s"
             )
         except Exception as e:
             logger.error(
-                f"Plugin {plugin_id} on_device_left error: {e}"
+                f"Plugin {operation.plugin_id} on_device_left error: {e}"
             )
 
 

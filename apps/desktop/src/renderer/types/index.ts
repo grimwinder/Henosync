@@ -348,6 +348,7 @@ export interface OperationStatus {
 }
 
 export interface RunningOperation {
+  operation_id: string;
   plugin_id: string;
   operation_name: string;
   started_at: string;

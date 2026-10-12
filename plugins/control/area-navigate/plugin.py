@@ -641,6 +641,12 @@ class AutoNavigatePlugin(ControlPlugin):
             self._state = OperationState.COMPLETED
             return
 
+        target_id = self._config.get("node_id", "")
+        if target_id:
+            for d in list(context.devices):
+                if d.id != target_id:
+                    await context.release_device(d.id)
+
         no_lidar = [d.name for d in context.devices if not d.has_capability(DeviceCapability.LIDAR)]
         if no_lidar:
             await context.send_alert(
@@ -733,6 +739,12 @@ class AutoNavigatePlugin(ControlPlugin):
             description=self.OPERATION_DESCRIPTION,
             icon="navigation",
             config_schema={
+                "node_id": {
+                    "type": "device_select",
+                    "label": "Robot",
+                    "required": False,
+                    "description": "Leave empty to use any free matching robot.",
+                },
                 "step_type": {
                     "type": "select",
                     "label": "Step Type",

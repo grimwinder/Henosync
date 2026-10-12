@@ -51,6 +51,24 @@ export interface MissionBlock {
   displayName: string; // step type name from plugin
   configSchema: Record<string, PluginConfigField>;
   params: Record<string, unknown>;
+  parallelGroupId?: string; // steps sharing an ID run concurrently
+}
+
+// Group consecutive blocks that share a parallelGroupId into stages.
+// Each stage is an array of block indices that run in parallel.
+function groupBlocks(blocks: MissionBlock[]): number[][] {
+  const groups: number[][] = [];
+  blocks.forEach((b, i) => {
+    if (b.parallelGroupId && groups.length > 0) {
+      const prev = blocks[groups[groups.length - 1][0]];
+      if (prev.parallelGroupId === b.parallelGroupId) {
+        groups[groups.length - 1].push(i);
+        return;
+      }
+    }
+    groups.push([i]);
+  });
+  return groups;
 }
 
 type LogKind = "start" | "success" | "fail" | "stop" | "system";
@@ -812,6 +830,7 @@ function StepListPanel({
   onDeletePlan,
   isRunning,
   activeStepIndex,
+  activeStepEnd,
 }: {
   blocks: MissionBlock[];
   selectedId: string | null;
@@ -826,6 +845,7 @@ function StepListPanel({
   onDeletePlan: (id: string) => void;
   isRunning: boolean;
   activeStepIndex: number;
+  activeStepEnd: number;
 }) {
   const [activePopup, setActivePopup] = useState<"save" | "open" | null>(null);
   const popupAnchorRef = useRef<HTMLDivElement>(null);
@@ -899,7 +919,7 @@ function StepListPanel({
             />
           )}
           {isRunning
-            ? `STEP ${activeStepIndex + 1} / ${blocks.length}`
+            ? `STEP ${activeStepIndex + 1}${activeStepEnd > activeStepIndex ? `–${activeStepEnd + 1}` : ""} / ${blocks.length}`
             : "MISSION PLAN"}
         </span>
 
@@ -1048,10 +1068,19 @@ function StepListPanel({
           </div>
         ) : (
           blocks.map((block, i) => {
-            const isActive = isRunning && i === activeStepIndex;
+            const isActive =
+              isRunning && i >= activeStepIndex && i <= activeStepEnd;
             const isDone = isRunning && i < activeStepIndex;
-            const isPending = isRunning && i > activeStepIndex;
+            const isPending = isRunning && i > activeStepEnd;
             const selected = !isRunning && block.instanceId === selectedId;
+            const groupId = block.parallelGroupId;
+            const prevGroupId =
+              i > 0 ? blocks[i - 1].parallelGroupId : undefined;
+            const nextGroupId =
+              i < blocks.length - 1 ? blocks[i + 1].parallelGroupId : undefined;
+            const inGroup = !!groupId;
+            const isGroupStart = inGroup && groupId !== prevGroupId;
+            const isGroupEnd = inGroup && groupId !== nextGroupId;
 
             const accentColor = isActive
               ? "#3DD68C"
@@ -1099,6 +1128,13 @@ function StepListPanel({
                   flexShrink: 0,
                   opacity: isPending ? 0.45 : 1,
                   transition: "opacity 200ms",
+                  // Group bracket: purple left border
+                  borderLeft: inGroup
+                    ? "3px solid #A78BFA55"
+                    : "3px solid transparent",
+                  borderTop: isGroupStart ? "1px solid #A78BFA33" : "none",
+                  borderBottom: isGroupEnd ? "1px solid #A78BFA33" : "none",
+                  paddingLeft: inGroup ? "2px" : "0",
                 }}
               >
                 {/* Step number / done indicator — outside the card */}
@@ -1547,6 +1583,8 @@ function BottomPanel({
   onAddBlock,
   onUpdateBlock,
   onRenameBlock,
+  onGroupWithAdjacent,
+  onRemoveFromGroup,
 }: {
   plugins: ControlPluginInfo[];
   blocks: MissionBlock[];
@@ -1558,8 +1596,14 @@ function BottomPanel({
   ) => void;
   onUpdateBlock: (instanceId: string, params: Record<string, unknown>) => void;
   onRenameBlock: (instanceId: string, label: string) => void;
+  onGroupWithAdjacent: (
+    instanceId: string,
+    direction: "above" | "below",
+  ) => void;
+  onRemoveFromGroup: (instanceId: string) => void;
 }) {
   const selectedBlock = blocks.find((b) => b.instanceId === selectedId) ?? null;
+  const selectedIndex = selectedBlock ? blocks.indexOf(selectedBlock) : -1;
   const selectedPlugin = selectedBlock
     ? (plugins.find((p) => p.id === selectedBlock.pluginId) ?? null)
     : null;
@@ -1723,6 +1767,87 @@ function BottomPanel({
                   }}
                 />
               </div>
+
+              {/* Parallel group controls */}
+              {selectedBlock && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "6px",
+                    padding: "6px 14px",
+                    borderBottom: "1px solid #2D2D2D",
+                    flexShrink: 0,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {selectedBlock.parallelGroupId ? (
+                    <button
+                      onClick={() =>
+                        onRemoveFromGroup(selectedBlock.instanceId)
+                      }
+                      title="Remove this step from its parallel group"
+                      style={{
+                        padding: "3px 8px",
+                        backgroundColor: "#A78BFA18",
+                        border: "1px solid #A78BFA55",
+                        borderRadius: "4px",
+                        color: "#A78BFA",
+                        fontSize: "10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ⊗ Remove from group
+                    </button>
+                  ) : (
+                    <>
+                      {selectedIndex > 0 && (
+                        <button
+                          onClick={() =>
+                            onGroupWithAdjacent(
+                              selectedBlock.instanceId,
+                              "above",
+                            )
+                          }
+                          title="Run this step in parallel with the step above"
+                          style={{
+                            padding: "3px 8px",
+                            backgroundColor: "transparent",
+                            border: "1px solid #2D2D2D",
+                            borderRadius: "4px",
+                            color: "#999999",
+                            fontSize: "10px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ∥ Group with step {selectedIndex}
+                        </button>
+                      )}
+                      {selectedIndex < blocks.length - 1 && (
+                        <button
+                          onClick={() =>
+                            onGroupWithAdjacent(
+                              selectedBlock.instanceId,
+                              "below",
+                            )
+                          }
+                          title="Run this step in parallel with the step below"
+                          style={{
+                            padding: "3px 8px",
+                            backgroundColor: "transparent",
+                            border: "1px solid #2D2D2D",
+                            borderRadius: "4px",
+                            color: "#999999",
+                            fontSize: "10px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ∥ Group with step {selectedIndex + 2}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Plugin params */}
               {hasFields ? (
@@ -2150,8 +2275,9 @@ export default function MissionPage() {
   // Execution state
   const [isRunning, setIsRunning] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [activeStepEnd, setActiveStepEnd] = useState(0);
   const stopRequestedRef = useRef(false);
-  const activeBlockRef = useRef<MissionBlock | null>(null);
+  const activeOperationIdsRef = useRef<string[]>([]);
 
   // Mission log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -2159,7 +2285,9 @@ export default function MissionPage() {
   async function startMission() {
     if (blocks.length === 0) return;
     stopRequestedRef.current = false;
+    activeOperationIdsRef.current = [];
     setActiveStepIndex(0);
+    setActiveStepEnd(0);
     setIsRunning(true);
     setSelectedId(null);
 
@@ -2181,69 +2309,111 @@ export default function MissionPage() {
       "system",
     );
 
-    for (let i = 0; i < blocks.length; i++) {
+    // Each group is a list of block indices that run concurrently.
+    // Single-item groups are sequential steps (the common case).
+    missionLoop: for (const group of groupBlocks(blocks)) {
       if (stopRequestedRef.current) break;
 
-      const block = blocks[i];
-      setActiveStepIndex(i);
-      activeBlockRef.current = block;
+      const first = group[0];
+      const last = group[group.length - 1];
+      setActiveStepIndex(first);
+      setActiveStepEnd(last);
+
       const stepStart = Date.now();
-      addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
+      // operation_id per group member, aligned by index into group[]
+      const operationIds: string[] = [];
 
-      try {
-        await startOperation(
-          block.pluginId,
-          block.params as Record<string, unknown>,
-        );
-      } catch (err) {
-        console.error(`[Mission] Failed to start step ${i + 1}:`, err);
-        addEntry(`Step ${i + 1}/${total} — failed to start`, "fail");
-        break;
-      }
-
-      // Poll until operation reaches a terminal state
-      let done = false;
-      let finalState = "completed";
-      let lastStatusText = "";
-      while (!done && !stopRequestedRef.current) {
-        await new Promise<void>((r) => setTimeout(r, 500));
+      // Start all operations in the group sequentially
+      for (let g = 0; g < group.length; g++) {
+        if (stopRequestedRef.current) {
+          // Stop any we already started in this group
+          for (const id of operationIds) stopOperation(id).catch(() => {});
+          break missionLoop;
+        }
+        const i = group[g];
+        const block = blocks[i];
+        addEntry(`Step ${i + 1}/${total} — ${block.displayName}`, "start");
         try {
-          const ops = await getOperations();
-          const op = ops.find((o) => o.plugin_id === block.pluginId);
-          if (!op) {
-            done = true;
-          } else {
-            const s = op.status.state as string;
-            if (op.status.status_text) lastStatusText = op.status.status_text;
-            if (s === "completed" || s === "failed" || s === "idle") {
-              finalState = s;
-              done = true;
-            }
-          }
-        } catch {
-          done = true;
+          const result = await startOperation(
+            block.pluginId,
+            block.params as Record<string, unknown>,
+          );
+          operationIds.push(result.operation_id);
+          activeOperationIdsRef.current = [...operationIds];
+        } catch (err) {
+          console.error(`[Mission] Failed to start step ${i + 1}:`, err);
+          const reason = err instanceof Error ? ` · ${err.message}` : "";
+          addEntry(`Step ${i + 1}/${total} — failed to start${reason}`, "fail");
+          // Stop any siblings already running
+          for (const id of operationIds) stopOperation(id).catch(() => {});
+          addEntry("Mission aborted", "stop");
+          break missionLoop;
         }
       }
 
-      if (stopRequestedRef.current) break;
+      // Poll until every operation in the group reaches a terminal state.
+      // On any failure: stop all siblings and abort the mission.
+      const finished = new Map<number, string>(); // g-index -> state
+      const lastText = new Map<number, string>();
+      while (finished.size < group.length && !stopRequestedRef.current) {
+        await new Promise<void>((r) => setTimeout(r, 500));
+        let ops: Awaited<ReturnType<typeof getOperations>>;
+        try {
+          ops = await getOperations();
+        } catch {
+          break;
+        }
+        for (let g = 0; g < group.length; g++) {
+          if (finished.has(g)) continue;
+          const opId = operationIds[g];
+          const op = ops.find((o) => o.operation_id === opId);
+          if (!op) {
+            // No longer in list — treat as completed
+            finished.set(g, "completed");
+            const elapsed = Math.round((Date.now() - stepStart) / 1000);
+            const i = group[g];
+            addEntry(
+              `Step ${i + 1}/${total} — ${blocks[i].displayName} · ${elapsed}s`,
+              "success",
+            );
+            continue;
+          }
+          const s = op.status.state as string;
+          if (op.status.status_text) lastText.set(g, op.status.status_text);
+          if (s === "completed" || s === "failed" || s === "idle") {
+            finished.set(g, s);
+            const i = group[g];
+            const elapsed = Math.round((Date.now() - stepStart) / 1000);
+            if (s === "failed") {
+              const t = lastText.get(g) ?? "";
+              addEntry(
+                `Step ${i + 1}/${total} — ${blocks[i].displayName} failed${t ? " · " + t : ""}`,
+                "fail",
+              );
+              // Stop all siblings and abort
+              for (const id of operationIds) stopOperation(id).catch(() => {});
+              addEntry("Mission aborted", "stop");
+              break missionLoop;
+            } else {
+              addEntry(
+                `Step ${i + 1}/${total} — ${blocks[i].displayName} · ${elapsed}s`,
+                "success",
+              );
+            }
+          }
+        }
+      }
 
-      const elapsed = Math.round((Date.now() - stepStart) / 1000);
-      if (finalState === "failed") {
-        addEntry(
-          `Step ${i + 1}/${total} — ${block.displayName} failed${lastStatusText ? " · " + lastStatusText : ""}`,
-          "fail",
-        );
-      } else {
-        addEntry(
-          `Step ${i + 1}/${total} — ${block.displayName} · ${elapsed}s`,
-          "success",
-        );
+      if (stopRequestedRef.current) {
+        for (const id of operationIds) stopOperation(id).catch(() => {});
+        break;
       }
     }
 
-    activeBlockRef.current = null;
+    activeOperationIdsRef.current = [];
     setIsRunning(false);
     setActiveStepIndex(0);
+    setActiveStepEnd(0);
 
     if (stopRequestedRef.current) {
       addEntry("Mission stopped", "stop");
@@ -2254,12 +2424,65 @@ export default function MissionPage() {
 
   function stopMission() {
     stopRequestedRef.current = true;
-    const block = activeBlockRef.current;
-    if (block) {
-      stopOperation(block.pluginId).catch(() => {});
+    for (const id of activeOperationIdsRef.current) {
+      stopOperation(id).catch(() => {});
     }
+    activeOperationIdsRef.current = [];
     setIsRunning(false);
     setActiveStepIndex(0);
+    setActiveStepEnd(0);
+  }
+
+  function setBlockParallelGroup(
+    instanceId: string,
+    groupId: string | undefined,
+  ) {
+    setBlocks((prev) =>
+      prev.map((b) =>
+        b.instanceId === instanceId ? { ...b, parallelGroupId: groupId } : b,
+      ),
+    );
+  }
+
+  function groupWithAdjacent(instanceId: string, direction: "above" | "below") {
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.instanceId === instanceId);
+      if (idx < 0) return prev;
+      const adjacentIdx = direction === "above" ? idx - 1 : idx + 1;
+      if (adjacentIdx < 0 || adjacentIdx >= prev.length) return prev;
+      const adjacent = prev[adjacentIdx];
+      // Join the adjacent step's group if it has one, else create a new group
+      const groupId = adjacent.parallelGroupId ?? `group-${Date.now()}`;
+      return prev.map((b, i) => {
+        if (i === idx) return { ...b, parallelGroupId: groupId };
+        if (i === adjacentIdx && !adjacent.parallelGroupId)
+          return { ...b, parallelGroupId: groupId };
+        return b;
+      });
+    });
+  }
+
+  function removeFromGroup(instanceId: string) {
+    setBlocks((prev) => {
+      const next = prev.map((b) =>
+        b.instanceId === instanceId ? { ...b, parallelGroupId: undefined } : b,
+      );
+      // If only one step remains in that group, clear it too
+      const groupId = prev.find(
+        (b) => b.instanceId === instanceId,
+      )?.parallelGroupId;
+      if (groupId) {
+        const remaining = next.filter((b) => b.parallelGroupId === groupId);
+        if (remaining.length === 1) {
+          return next.map((b) =>
+            b.parallelGroupId === groupId
+              ? { ...b, parallelGroupId: undefined }
+              : b,
+          );
+        }
+      }
+      return next;
+    });
   }
 
   // Saved plans
@@ -2488,6 +2711,7 @@ export default function MissionPage() {
         onDeletePlan={deletePlan}
         isRunning={isRunning}
         activeStepIndex={activeStepIndex}
+        activeStepEnd={activeStepEnd}
       />
 
       {/* Bottom panel — log while running or after run; configure otherwise */}
@@ -2501,6 +2725,8 @@ export default function MissionPage() {
           onAddBlock={addBlock}
           onUpdateBlock={updateBlock}
           onRenameBlock={renameBlock}
+          onGroupWithAdjacent={groupWithAdjacent}
+          onRemoveFromGroup={removeFromGroup}
         />
       )}
     </div>

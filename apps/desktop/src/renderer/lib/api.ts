@@ -178,14 +178,17 @@ export const startOperation = (
   plugin_id: string,
   config: Record<string, unknown> = {},
 ) =>
-  apiFetch<{ success: boolean; message: string }>("/api/operations/start", {
-    method: "POST",
-    body: JSON.stringify({ plugin_id, config }),
-  });
+  apiFetch<{ success: boolean; message: string; operation_id: string }>(
+    "/api/operations/start",
+    {
+      method: "POST",
+      body: JSON.stringify({ plugin_id, config }),
+    },
+  );
 
-export const stopOperation = (plugin_id: string) =>
+export const stopOperation = (operation_id: string) =>
   apiFetch<{ success: boolean; message: string }>(
-    `/api/operations/${plugin_id}/stop`,
+    `/api/operations/${operation_id}/stop`,
     {
       method: "POST",
     },
