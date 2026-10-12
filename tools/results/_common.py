@@ -1,20 +1,29 @@
 """
 Shared helpers for the Results tooling: REST access and run-log loading.
 
-A "run" is a directory written by ws_logger.py:
+A "run" is a directory with this layout, written either by Henosync itself
+for every Run Mission (~/.henosync/runs/<run id>/, plus steps.jsonl and
+summary.json) or by ws_logger.py for anything that isn't a mission:
     meta.json          snapshot of nodes, zones and markers at start
-    telemetry.jsonl    every /ws/telemetry frame + "recv" (logger clock, epoch s)
-    events.jsonl       every /ws/events event + "recv"
-    status.jsonl       node status changes polled from /api/nodes
-    operations.jsonl   operation state changes polled from /api/operations
+    telemetry.jsonl    every telemetry frame + "recv" (epoch s)
+    events.jsonl       every system event + "recv"
+    status.jsonl       node status changes
+    operations.jsonl   operation state changes
 """
 
 import json
 import math
+import sys
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+# Make the backend importable so scripts share henosync.core.run_metrics
+# with the in-app CSV export (same numbers either way).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "apps" / "backend"))
+
+RUNS_DIR = Path.home() / ".henosync" / "runs"
 
 DEFAULT_HOST = "127.0.0.1:8765"
 TERMINAL_STATES = {"completed", "failed", "idle"}
@@ -47,11 +56,25 @@ def read_jsonl(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
+def resolve_run_dir(run_dir: str | Path) -> Path:
+    """A path, or just a run id from the app's Runs list (looked up in ~/.henosync/runs)."""
+    path = Path(run_dir)
+    if not path.exists() and (RUNS_DIR / str(run_dir)).exists():
+        path = RUNS_DIR / str(run_dir)
+    if not (path / "meta.json").exists():
+        raise SystemExit(f"Not a run folder: {run_dir}")
+    return path
+
+
 def load_run(run_dir: str | Path) -> dict[str, Any]:
-    run = Path(run_dir)
-    meta_path = run / "meta.json"
+    run = resolve_run_dir(run_dir)
+    summary_path = run / "summary.json"
     return {
-        "meta": json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {},
+        "meta": json.loads((run / "meta.json").read_text(encoding="utf-8")),
+        "summary": (
+            json.loads(summary_path.read_text(encoding="utf-8"))
+            if summary_path.exists() else None
+        ),
         "telemetry": read_jsonl(run / "telemetry.jsonl"),
         "events": read_jsonl(run / "events.jsonl"),
         "status": read_jsonl(run / "status.jsonl"),

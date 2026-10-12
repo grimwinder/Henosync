@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..core.failsafe_manager import failsafe_manager
 from ..core.marker_manager import marker_manager
 from ..core.node_registry import node_registry
+from ..core.run_recorder import run_recorder
 from ..core.vicon_manager import vicon_manager
 from ..core.zone_manager import zone_manager
 from ..plugin_system.loader import PluginLoader
@@ -17,6 +18,7 @@ from .routes.markers import router as markers_router
 from .routes.missions import router as missions_router
 from .routes.nodes import router as nodes_router
 from .routes.operations import router as operations_router
+from .routes.runs import router as runs_router
 from .routes.safety import router as safety_router
 from .routes.vicon import router as vicon_router
 from .routes.zones import router as zones_router
@@ -54,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(zones_router)
     app.include_router(markers_router)
     app.include_router(vicon_router)
+    app.include_router(runs_router)
 
     # WebSocket routes
     @app.websocket("/ws/telemetry")
@@ -102,6 +105,7 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown():
         logger.info("Henosync backend shutting down...")
+        await run_recorder.shutdown()
         await failsafe_manager.stop()
         await vicon_manager.stop()
         await node_registry.shutdown()
