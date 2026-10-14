@@ -168,7 +168,7 @@ class NodeRegistry:
             emit_event_fn=self._emit_plugin_event,
             command_completed_fn=self._handle_command_completed,
             active_run_id_fn=self._get_active_run_id,
-            backfill_fn=self._handle_backfill,
+            robot_log_fn=self._handle_robot_log,
         )
 
         try:
@@ -237,22 +237,28 @@ class NodeRegistry:
                     NodeStatus.DEGRADED, NodeStatus.ERROR
                 ):
                     return
+                if node.link_blocked:
+                    continue  # operator dropout — wait for restore_link()
                 logger.info(f"{node.name}: attempting automatic reconnect")
-                old = plugin_registry.get_instance(node.id)
-                if old:
-                    try:
-                        await old.disconnect(node)
-                    except Exception as e:
-                        logger.error(f"Error disconnecting {node.name}: {e}")
-                await self._connect_node(node, reconnect=True, quiet=True)
+                await self._reconnect_quiet(node)
                 if node.status == NodeStatus.ONLINE:
                     return
         finally:
             if self._reconnect_tasks.get(node.id) is asyncio.current_task():
                 del self._reconnect_tasks[node.id]
 
+    async def _reconnect_quiet(self, node: Node) -> None:
+        old = plugin_registry.get_instance(node.id)
+        if old:
+            try:
+                await old.disconnect(node)
+            except Exception as e:
+                logger.error(f"Error disconnecting {node.name}: {e}")
+        await self._connect_node(node, reconnect=True, quiet=True)
+
     async def _disconnect_node(self, node: Node) -> None:
         """Disconnect a node via its plugin."""
+        node.link_blocked = False
         # Cancel background tasks first so they don't race with disconnect.
         for task_dict in (self._telemetry_tasks, self._liveness_tasks, self._reconnect_tasks):
             task = task_dict.pop(node.id, None)
@@ -296,6 +302,58 @@ class NodeRegistry:
             return False
         await self._disconnect_node(node)
         return True
+
+    async def drop_link(self, node_id: str) -> None:
+        """
+        Operator-triggered link dropout (Test 2). Really closes the plugin's
+        connection to the robot — nothing more reaches it from Henosync — and
+        holds off auto-reconnect until restore_link(). Everything downstream
+        runs exactly as for an unplanned dropout: DEGRADED, the failsafe
+        link-lost event, vicon_manager keeps tracking the node.
+        """
+        node = self._nodes.get(node_id)
+        if not node:
+            raise KeyError(node_id)
+        if node.status != NodeStatus.ONLINE:
+            raise ValueError(f"{node.name} is {node.status.value}, not online")
+        node.link_blocked = True
+        await telemetry_bus.publish_event(
+            title="Link Dropout Simulated",
+            message=f"Operator cut the connection to {node.name}. "
+                    f"It stays down until Restore Link is pressed.",
+            severity=EventSeverity.WARNING,
+            node_id=node.id,
+        )
+        for task_dict in (self._telemetry_tasks, self._liveness_tasks):
+            task = task_dict.pop(node.id, None)
+            if task and not task.done():
+                task.cancel()
+        plugin_instance = plugin_registry.get_instance(node.id)
+        if plugin_instance:
+            try:
+                await plugin_instance.disconnect(node)
+            except Exception as e:
+                logger.error(f"Error disconnecting {node.name}: {e}")
+        logger.warning(f"{node.name}: link dropped by operator")
+        await self._update_status(node, NodeStatus.DEGRADED)
+
+    async def restore_link(self, node_id: str) -> None:
+        """End an operator dropout: reconnect now (auto-reconnect continues if it fails)."""
+        node = self._nodes.get(node_id)
+        if not node:
+            raise KeyError(node_id)
+        if not node.link_blocked:
+            raise ValueError(f"{node.name} has no simulated dropout")
+        node.link_blocked = False
+        await telemetry_bus.publish_event(
+            title="Link Restore Requested",
+            message=f"Operator restored the connection to {node.name} — reconnecting.",
+            severity=EventSeverity.INFO,
+            node_id=node.id,
+        )
+        logger.info(f"{node.name}: link restore requested by operator")
+        if node.status in (NodeStatus.DEGRADED, NodeStatus.ERROR):
+            await self._reconnect_quiet(node)
 
     async def reconnect_node(self, node_id: str) -> bool:
         """Manually trigger a reconnection attempt."""
@@ -436,13 +494,13 @@ class NodeRegistry:
         from .run_recorder import run_recorder
         return run_recorder.active_run_id
 
-    async def _handle_backfill(self, run_id: str, data: dict) -> None:
-        """Callback used by NodePluginContext.backfill()."""
+    def _handle_robot_log(self, run_id: str, node_id: str, records: list[dict]) -> None:
+        """Callback used by NodePluginContext.record_robot_log()."""
         from .run_recorder import run_recorder
         try:
-            await run_recorder.backfill(run_id, data)
+            run_recorder.record_robot_log(run_id, node_id, records)
         except Exception as e:
-            logger.error(f"Backfill failed for run {run_id}: {e}")
+            logger.error(f"Robot log for run {run_id} not recorded: {e}")
 
     # ── Status Management ─────────────────────────────────────────
 

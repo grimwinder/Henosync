@@ -204,6 +204,9 @@ class Node(BaseModel):
     local_origin: Optional[LocalOrigin] = None
     config: dict[str, Any] = {}
     specs: Optional[DeviceSpecs] = None
+    # True while an operator-triggered link dropout is in effect — the
+    # connection is closed and auto-reconnect is held off until restored.
+    link_blocked: bool = False
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -340,13 +343,13 @@ class NodePluginContext:
         emit_event_fn: Callable,
         command_completed_fn: Callable,
         active_run_id_fn: Optional[Callable] = None,
-        backfill_fn: Optional[Callable] = None,
+        robot_log_fn: Optional[Callable] = None,
     ):
         self._node_id = node_id
         self._emit_event_fn = emit_event_fn
         self._command_completed_fn = command_completed_fn
         self._active_run_id_fn = active_run_id_fn
-        self._backfill_fn = backfill_fn
+        self._robot_log_fn = robot_log_fn
 
     async def emit_event(
         self,
@@ -376,13 +379,13 @@ class NodePluginContext:
         """Return the ID of the currently recording run, or None."""
         return self._active_run_id_fn() if self._active_run_id_fn else None
 
-    async def backfill(self, run_id: str, data: dict) -> None:
+    def record_robot_log(self, run_id: str, records: list[dict]) -> None:
         """
-        Merge robot-reported data into a stopped run recording.
-
-        data keys:
-          telemetry  list of dicts — raw telemetry entries to append
-          steps      list of dicts — step/waypoint events to append
+        Store records the robot logged itself (its own pose, commands, link
+        and waypoint events) in a run recording's robot.jsonl. Works for the
+        active run and for runs that already stopped — a robot that was out
+        of contact may only deliver its log after the run ended. Synchronous:
+        call it from the asyncio thread.
         """
-        if self._backfill_fn:
-            await self._backfill_fn(run_id, data)
+        if self._robot_log_fn:
+            self._robot_log_fn(run_id, self._node_id, records)

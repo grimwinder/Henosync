@@ -80,6 +80,18 @@ export const reconnectNode = (id: string) =>
     method: "POST",
   });
 
+// Simulated link dropout (Test 2): really closes the connection to the robot
+// and holds off auto-reconnect until restoreLink().
+export const dropLink = (id: string) =>
+  apiFetch<{ success: boolean }>(`/api/nodes/${id}/link/drop`, {
+    method: "POST",
+  });
+
+export const restoreLink = (id: string) =>
+  apiFetch<{ success: boolean }>(`/api/nodes/${id}/link/restore`, {
+    method: "POST",
+  });
+
 export const sendCommand = (
   id: string,
   capability: string,

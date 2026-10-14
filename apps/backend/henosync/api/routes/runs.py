@@ -28,9 +28,9 @@ class ExportRunRequest(BaseModel):
     path: str
 
 
-class BackfillRequest(BaseModel):
-    telemetry: list[dict[str, Any]] = []
-    steps: list[dict[str, Any]] = []
+class RobotLogRequest(BaseModel):
+    node_id: str
+    records: list[dict[str, Any]]  # lines of the robot's ~/henosync_logs/*.jsonl
 
 
 @router.get("")
@@ -92,14 +92,21 @@ async def run_report(run_id: str):
         raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
 
 
-@router.post("/{run_id}/backfill")
-async def backfill_run(run_id: str, request: BackfillRequest):
+@router.post("/{run_id}/robot-log")
+async def import_robot_log(run_id: str, request: RobotLogRequest):
+    """
+    Manual import of a robot's on-disk log, for when the link never came back
+    and the log was copied off the robot instead of delivered over rosbridge.
+    """
+    records = [r for r in request.records if r.get("run_id") in (run_id, "", None)]
+    for r in records:
+        r.setdefault("recv", None)  # not received live — no Henosync timestamp
+        r["imported"] = True
     try:
-        return await run_recorder.backfill(run_id, request.model_dump())
+        run_recorder.record_robot_log(run_id, request.node_id, records)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return {"imported": len(records)}
 
 
 @router.delete("/{run_id}")

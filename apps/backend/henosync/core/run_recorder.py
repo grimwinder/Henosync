@@ -8,6 +8,9 @@ Records every mission run (one press of Run Mission) to its own folder.
         status.jsonl       node status changes
         operations.jsonl   operation state changes
         steps.jsonl        step start / end reported by the Mission page
+        robot.jsonl        what the robot logged itself (onboard controller):
+                           its pose, commands, link and waypoint events —
+                           including the backlog delivered after a dropout
         summary.json       per-step results, written when the run stops
         report.html        human-readable report built from the above by
                            tools/results/henosync_report.py after the run stops
@@ -42,6 +45,7 @@ OPERATION_POLL_S = 0.5
 REPORT_SCRIPT = Path(__file__).resolve().parents[4] / "tools" / "results" / "henosync_report.py"
 REPORT_NAME = "report.html"
 REPORT_TIMEOUT_S = 120
+REPORT_REBUILD_DELAY_S = 3.0  # wait for a robot's late log backlog to finish arriving
 
 CSV_COLUMNS = [
     "run_id", "mission", "step", "step_name", "step_type", "robot", "target",
@@ -78,7 +82,7 @@ class _ActiveRun:
         self.started = time.time()
         self.files = {
             name: (path / f"{name}.jsonl").open("a", encoding="utf-8", buffering=1)
-            for name in ("telemetry", "events", "status", "operations", "steps")
+            for name in ("telemetry", "events", "status", "operations", "steps", "robot")
         }
         self.node_status: dict[str, str] = {}
         self.op_signatures: dict[tuple, tuple] = {}
@@ -99,6 +103,7 @@ class RunRecorder:
         self._active: Optional[_ActiveRun] = None
         self._subscribed = False
         self._report_tasks: dict[str, asyncio.Task] = {}
+        self._rebuild_handles: dict[str, asyncio.TimerHandle] = {}
 
     @property
     def active_run_id(self) -> Optional[str]:
@@ -222,57 +227,27 @@ class RunRecorder:
             raise ValueError("Run is still in progress")
         shutil.rmtree(self._run_path(run_id))
 
-    async def backfill(self, run_id: str, data: dict) -> dict:
+    def record_robot_log(self, run_id: str, node_id: str, records: list[dict]) -> None:
         """
-        Merge robot-reported data into a stopped run.
+        Append records the robot logged itself to the run's robot.jsonl.
 
-        Called when a robot reconnects after executing a mission autonomously
-        during a Henosync dropout. Appends entries to the run's .jsonl files,
-        regenerates summary.json, and rebuilds the report.
-
-        data keys:
-          telemetry  list of {"recv", "node_id", "timestamp", "values"} dicts
-          steps      list of {"recv", "index", "event", "outcome", "status_text"} dicts
+        A robot running its onboard controller keeps logging while out of
+        contact and delivers the backlog once the link returns — possibly
+        after the run has stopped, in which case the report is rebuilt.
+        Each record already carries "recv" (Henosync clock) and "sent"/"t"
+        (robot clock); node_id is added here.
         """
+        lines = "".join(
+            json.dumps({**r, "node_id": node_id}, default=str) + "\n" for r in records
+        )
         if self._active and self._active.id == run_id:
-            raise ValueError("Cannot backfill an active run")
+            self._active.files["robot"].write(lines)
+            return
         path = self._run_path(run_id)
-
-        tel_entries = data.get("telemetry") or []
-        if tel_entries:
-            with (path / "telemetry.jsonl").open("a", encoding="utf-8") as f:
-                for entry in tel_entries:
-                    f.write(json.dumps({**entry, "backfilled": True}, default=str) + "\n")
-
-        step_entries = data.get("steps") or []
-        if step_entries:
-            with (path / "steps.jsonl").open("a", encoding="utf-8") as f:
-                for entry in step_entries:
-                    f.write(json.dumps({**entry, "backfilled": True}, default=str) + "\n")
-
-        summary_path = path / "summary.json"
-        existing = (
-            json.loads(summary_path.read_text(encoding="utf-8"))
-            if summary_path.exists() else {}
-        )
-        ended = existing.get("ended") or time.time()
-        outcome = existing.get("outcome") or "completed"
-        meta = json.loads((path / "meta.json").read_text(encoding="utf-8"))
-        summary = {
-            "run_id": run_id,
-            "mission": meta["mission"],
-            "started": meta["started"],
-            "ended": ended,
-            "outcome": outcome,
-            "results": self._step_results(path, ended, outcome),
-        }
-        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        logger.info(
-            f"Run {run_id} backfilled: "
-            f"{len(tel_entries)} telemetry, {len(step_entries)} steps"
-        )
-        self._start_report(run_id, path)
-        return self._describe(path)
+        with (path / "robot.jsonl").open("a", encoding="utf-8") as f:
+            f.write(lines)
+        logger.info(f"Run {run_id}: {len(records)} late robot record(s) from {node_id}")
+        self._schedule_report_rebuild(run_id, path)
 
     # ── Recording ─────────────────────────────────────────────────
 
@@ -448,6 +423,20 @@ class RunRecorder:
                 logger.warning(f"Report generation failed for {run_id}: {t.exception()}")
 
         task.add_done_callback(done)
+
+    def _schedule_report_rebuild(self, run_id: str, path: Path) -> None:
+        """Rebuild the report once late robot records stop arriving."""
+        handle = self._rebuild_handles.pop(run_id, None)
+        if handle:
+            handle.cancel()
+
+        def rebuild() -> None:
+            self._rebuild_handles.pop(run_id, None)
+            self._start_report(run_id, path)
+
+        self._rebuild_handles[run_id] = asyncio.get_running_loop().call_later(
+            REPORT_REBUILD_DELAY_S, rebuild
+        )
 
     # ── Helpers ───────────────────────────────────────────────────
 

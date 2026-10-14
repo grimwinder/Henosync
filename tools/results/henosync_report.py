@@ -11,7 +11,7 @@ Pure Python 3.8+ standard library. The HTML it writes is a single self-contained
 (no internet, no CDN), so you can email it or keep it next to the logs.
 
 What it reads (per run folder): meta.json, summary.json, steps.jsonl, operations.jsonl,
-events.jsonl, status.jsonl, telemetry.jsonl.  Missing/partial files are tolerated.
+events.jsonl, status.jsonl, telemetry.jsonl, robot.jsonl.  Missing/partial files are tolerated.
 """
 import argparse
 import json
@@ -26,7 +26,7 @@ from pathlib import Path
 MOVE_V = 0.05          # m/s above which a robot counts as "moving"
 GRID_DT = 0.25         # seconds, resampling grid for position data
 FILE_ORDER = ["summary.json", "meta.json", "steps.jsonl", "operations.jsonl",
-              "events.jsonl", "status.jsonl", "telemetry.jsonl"]
+              "events.jsonl", "status.jsonl", "telemetry.jsonl", "robot.jsonl"]
 FILE_DESC = {
     "summary.json": "The final scorecard: overall outcome plus one result row per step (duration, target, where the robot ended up, error).",
     "meta.json": "A snapshot of the mission as it was launched: the step list and parameters, every robot's configuration, and the map markers/zones.",
@@ -35,7 +35,9 @@ FILE_DESC = {
     "events.jsonl": "Operator-facing alerts and notices (info / warning / critical), e.g. 'Node Lost'.",
     "status.jsonl": "Changes in each robot's connection status (online, degraded, ...).",
     "telemetry.jsonl": "The raw sensor stream from every robot: position, heading, battery, speed. By far the biggest file.",
+    "robot.jsonl": "The robot's own log from its onboard controller: its pose, the velocity it commanded, waypoints reached, and when it lost and regained Henosync. Records made while disconnected arrive after the link returns ('recv' is when Henosync got them).",
 }
+CMD_V, CMD_W = 0.01, 0.05   # m/s, rad/s - onboard command counts as "driving"
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -143,6 +145,7 @@ def analyse_run(d):
     events, _ = read_jsonl(d / "events.jsonl")
     status, _ = read_jsonl(d / "status.jsonl")
     tele, bad_tele = read_jsonl(d / "telemetry.jsonl")
+    robot_log, _ = read_jsonl(d / "robot.jsonl")
 
     recvs = [r["recv"] for lst in (steps_log, ops, events, status, tele) for r in lst
              if isinstance(r.get("recv"), (int, float))]
@@ -344,6 +347,91 @@ def analyse_run(d):
         if rbn["last_t"] is not None and rbn["silent_s"] > 10 and (t_end - rbn["last_t"]) > 10:
             silent[nid] = [r3(rbn["last_t"]), r3(t_end)]
 
+    ev_out_pre = [{"t": e["recv"] - t0, "title": e.get("title") or "", "node_id": e.get("node_id")}
+                  for e in events if isinstance(e.get("recv"), (int, float))]
+
+    # ---- onboard execution: the robot's own log (robot clock aligned to Henosync's)
+    onboard = {}
+    by_node = defaultdict(list)
+    for r in robot_log:
+        if r.get("node_id") in nodes and isinstance(r.get("t"), (int, float)):
+            by_node[r["node_id"]].append(r)
+    for nid, recs in by_node.items():
+        recs.sort(key=lambda r: r["t"])
+        # recv - sent = network latency + clock offset; the smallest is the best estimate
+        offs = [r["recv"] - r["sent"] for r in recs
+                if isinstance(r.get("recv"), (int, float)) and isinstance(r.get("sent"), (int, float))]
+        off = min(offs) if offs else 0.0
+        rt = (lambda o: lambda t: t + o - t0)(off)
+        samples = [(rt(r["t"]), r["x"], r["y"], r.get("v") or 0.0, r.get("w") or 0.0)
+                   for r in recs if r.get("kind") == "sample" and r.get("x") is not None]
+        wps = [(rt(r["t"]), r.get("index"), r.get("link")) for r in recs if r.get("kind") == "waypoint"]
+        segs, state, since = [], None, None
+        for r in recs:
+            k = r.get("kind")
+            if k not in ("link_up", "link_lost", "link_restored"):
+                continue
+            ts = rt(r.get("last_heartbeat_t") or r["t"]) if k == "link_lost" else rt(r["t"])
+            if state is not None:
+                segs.append([r3(since), r3(ts), state])
+            state, since = ("down" if k == "link_lost" else "up"), ts
+        if state is not None:
+            segs.append([r3(since), r3(max(t_end, since)), state])
+        onboard[nid] = {"off": off, "aligned": bool(offs), "rt": rt, "recs": recs, "samples": samples,
+                        "wps": wps, "segs": segs, "pose_topic": next((r.get("pose_topic") for r in reversed(recs) if r.get("kind") == "path_start"), None)}
+
+    def _track_m(pts):
+        return sum(math.dist((a[1], a[2]), (b[1], b[2])) for a, b in zip(pts, pts[1:]))
+
+    # ---- link dropouts as Henosync saw them (status leaves "online"), cross-checked with the robot's log
+    offline = []
+    series_off, series_rob = {}, {}
+    for nid in nodes:
+        start = None
+        wins = []
+        for ts, st in status_by.get(nid, []):
+            if st in ("degraded", "error") and start is None:
+                start = ts
+            elif st == "online" and start is not None:
+                wins.append((start, ts, True))
+                start = None
+        if start is not None:
+            wins.append((start, t_end, False))
+        for a, b, restored in wins:
+            simulated = any(e["node_id"] == nid and e["title"] == "Link Dropout Simulated" and a - 3 <= e["t"] <= a + 1
+                            for e in ev_out_pre)
+            g = grids[nid][0] if nid in grids else []
+            vseg = [p for p in g if a <= p[0] <= b]
+            w = {"node": nodes[nid]["name"], "node_id": nid, "start": r3(a), "end": r3(b), "dur": r3(b - a),
+                 "restored": restored, "simulated": simulated, "vicon_m": r3(_track_m(vseg)),
+                 "vicon_n": sum(1 for p in (T[nid]["pos"] if nid in T else []) if a <= p[0] <= b),
+                 "robot_log": nid in onboard}
+            if vseg:
+                series_off.setdefault(nid, []).append([[r3(p[0]), r3(p[1]), r3(p[2])] for p in vseg])
+            ob = onboard.get(nid)
+            if ob:
+                rt = ob["rt"]
+                s_in = [x for x in ob["samples"] if a <= x[0] <= b]
+                recs_in = [r for r in ob["recs"] if a <= rt(r["t"]) <= b]
+                recv_in = [r["recv"] for r in recs_in if isinstance(r.get("recv"), (int, float))]
+                down = next(([x, y] for x, y, st in ob["segs"] if st == "down" and x < b + 3 and y > a - 3), None)
+                w.update({
+                    "samples": len(s_in),
+                    "cmd_samples": sum(1 for x in s_in if abs(x[3]) > CMD_V or abs(x[4]) > CMD_W),
+                    "robot_m": r3(_track_m(s_in)),
+                    "wps": [x[1] for x in ob["wps"] if a <= x[0] <= b],
+                    "robot_down": down,
+                    "records": len(recs_in),
+                    "synced": r3(max(recv_in) - t0) if recv_in else None,
+                    "pose_stale": sum(1 for r in recs_in if r.get("kind") == "pose_stale"),
+                    "path_done": any(r.get("kind") == "path_done" for r in recs_in),
+                    "pose_topic": ob["pose_topic"],
+                    "aligned": ob["aligned"],
+                })
+                if s_in:
+                    series_rob.setdefault(nid, []).append([[r3(x[0]), r3(x[1]), r3(x[2])] for x in s_in])
+            offline.append(w)
+
     # ---- events
     ev_out = []
     for e in sorted(events, key=lambda e: e.get("recv", 0)):
@@ -387,6 +475,47 @@ def analyse_run(d):
             F.append({"sev": "bad" if e["sev"] != "warning" else "warn",
                       "title": "%s%s" % (e["title"], (" - " + e["node"]) if e["node"] else ""),
                       "body": "At %s: %s" % (rel(e["t"]), e["msg"])})
+
+    # 1b. link dropouts - did the robot carry on by itself?
+    for w in offline:
+        how = "an operator-simulated dropout" if w["simulated"] else "a link dropout"
+        span = "from %s to %s (%s)" % (rel(w["start"]), rel(w["end"]), dur(w["dur"])) if w["restored"] else \
+               "from %s until the end of the run (%s) - never restored" % (rel(w["start"]), dur(w["dur"]))
+        base = "Henosync lost its connection to %s %s, %s. " % (w["node"], span, how)
+        vic = "Henosync's own VICON feed (independent of the robot link) recorded %d position samples and %.2f m of movement in that window." % (w["vicon_n"], w["vicon_m"] or 0)
+        if not w["robot_log"]:
+            F.append({"sev": "warn" if (w["vicon_m"] or 0) > 0.1 else "info",
+                      "title": "%s: %s link dropout, no onboard log" % (w["node"], dur(w["dur"])),
+                      "body": base + vic + " There is no robot-side log for this robot, so this can't be attributed to its onboard controller."})
+            continue
+        moved = (w["robot_m"] or 0) > 0.1 or (w["vicon_m"] or 0) > 0.1
+        if w["samples"]:
+            rob = "The robot's own log covers the window with %d samples; %d of them show its onboard controller commanding motion, it tracked %.2f m from its own pose" % (
+                w["samples"], w["cmd_samples"], w["robot_m"] or 0)
+            rob += (", and it reached waypoint%s %s while disconnected." % ("" if len(w["wps"]) == 1 else "s", ", ".join(str(i + 1) for i in w["wps"]))) if w["wps"] else ", reaching no waypoint while disconnected."
+            if w["robot_down"]:
+                rob += " Its own heartbeat watchdog saw Henosync go silent at %s and return at %s." % (rel(w["robot_down"][0]), rel(w["robot_down"][1]))
+            if w["synced"] is not None:
+                rob += " This log reached Henosync at %s%s." % (rel(w["synced"]), (", %s after the link came back" % dur(max(0, w["synced"] - w["end"]))) if w["restored"] else "")
+            if not w["aligned"]:
+                rob += " (Imported from the robot's disk log - robot clock not aligned to Henosync's.)"
+            if moved and w["cmd_samples"]:
+                F.append({"sev": "ok", "title": "%s kept executing its mission on the onboard controller while disconnected" % w["node"],
+                          "body": base + vic + " " + rob})
+            else:
+                why = " It was steering by Henosync's relayed pose (%s), which stops with the link." % w["pose_topic"] if w["pose_topic"] and w["pose_topic"].endswith("vicon_pose") else \
+                      (" Its pose went stale %d time(s)." % w["pose_stale"] if w["pose_stale"] else "")
+                F.append({"sev": "warn", "title": "%s did not drive during the dropout" % w["node"],
+                          "body": base + vic + " " + rob + why,
+                          "action": "For onboard execution through a dropout, run vicon_pose_publisher.py and start the controller with --pose_topic /<ns>/henosync/onboard_pose."})
+        elif w["restored"]:
+            F.append({"sev": "bad", "title": "%s's log of the dropout never arrived" % w["node"],
+                      "body": base + vic + " The link came back, but no robot-side records from the dropout window reached Henosync.",
+                      "action": "Check henosync_controller.py was running; its records are also on the robot in ~/henosync_logs/."})
+        else:
+            F.append({"sev": "warn", "title": "%s's log of the dropout is still on the robot" % w["node"],
+                      "body": base + vic + " The link never came back, so the robot couldn't send its log.",
+                      "action": "Copy ~/henosync_logs/<file>.jsonl off the robot and import it: POST /api/runs/<run id>/robot-log (see tools/robot/README.md)."})
 
     # 2. idle time / lag between arrival and step close
     nav_steps = [s for s in steps if s["settle"] is not None and s["end"] is not None]
@@ -526,6 +655,10 @@ def analyse_run(d):
         tail.append("%s dropped out at %s%s" % (rb_by[nid]["name"], rel(ts), ", pausing the mission" if any("paus" in e["msg"].lower() for e in faults) else ""))
     if any(f["title"].startswith("No position data") for f in F):
         tail.append("no position data was captured")
+    offline_ok = [w for w in offline if w.get("cmd_samples") and ((w.get("robot_m") or 0) > 0.1 or (w.get("vicon_m") or 0) > 0.1)]
+    if offline_ok:
+        tail.insert(0, "%s drove %.2f m on its onboard controller while disconnected" % (
+            offline_ok[0]["node"], sum(w["vicon_m"] or w["robot_m"] or 0 for w in offline_ok)))
     headline = pieces[0] if pieces else "Run %s" % outcome
     if tail:
         headline += " - but " + (tail[0] if len(tail) == 1 else ", ".join(tail[:-1]) + ", and " + tail[-1])
@@ -543,6 +676,14 @@ def analyse_run(d):
                   "level": "bad" if any(e["sev"] == "critical" for e in faults) else ("warn" if faults else "ok")})
     if cmd:
         tiles.insert(1, {"label": "Commands sent", "value": str(len(cmd)), "sub": "keyboard teleop"})
+    cov = [s["coverage"] for s in steps if s["coverage"] is not None]
+    if cov:
+        tiles.append({"label": "Zone coverage", "value": "%.0f%%" % max(cov), "sub": "from the VICON trail"})
+    if offline:
+        moved = sum(w["vicon_m"] or 0 for w in offline)
+        tiles.append({"label": "Disconnected", "value": dur(sum(w["dur"] for w in offline)),
+                      "sub": "%.2f m driven meanwhile, %d waypoint(s)" % (moved, sum(len(w.get("wps") or []) for w in offline)),
+                      "level": "ok" if offline_ok else "warn"})
 
     # ---- narrative
     N = [{"t": 0, "sev": "info", "text": "Run started - mission \"%s\"; robots: %s." % (meta.get("mission") or summ.get("mission") or "?", ", ".join(r["name"] for r in robots) or "none")}]
@@ -567,6 +708,19 @@ def analyse_run(d):
                 N.append({"t": ts, "sev": "warn", "text": "%s status changed to \"%s\"." % (rb_by[nid]["name"], st)})
     if cmd:
         N.append({"t": cmd[0][0], "sev": "info", "text": "Operator began driving with the keyboard (%s sent)." % plural(len(cmd), "command")})
+    for nid, ob in onboard.items():
+        nm = nodes[nid]["name"]
+        for a, b, st in ob["segs"]:
+            if st == "down":
+                N.append({"t": a, "sev": "warn", "text": "%s (robot log): last heartbeat from Henosync - link lost, onboard controller carries on." % nm})
+                if b < t_end:
+                    N.append({"t": b, "sev": "info", "text": "%s (robot log): Henosync heartbeat back after %s." % (nm, dur(b - a))})
+        for t, idx, link in ob["wps"]:
+            if link is False:
+                N.append({"t": t, "sev": "ok", "text": "%s (robot log): reached waypoint %s on its own while disconnected." % (nm, (idx or 0) + 1)})
+    for w in offline:
+        if w.get("synced") is not None and w["records"]:
+            N.append({"t": w["synced"], "sev": "info", "text": "%s's log of the dropout received by Henosync (%s)." % (w["node"], plural(w["records"], "record"))})
     N.append({"t": t_end, "sev": "ok" if outcome == "completed" else "info", "text": "Run ended - outcome \"%s\"." % outcome})
     N.sort(key=lambda x: x["t"])
     for x in N:
@@ -618,6 +772,9 @@ def analyse_run(d):
             info = "%s: %s." % (plural(len(ev_out), "event"), ", ".join("%d %s" % (v, k) for k, v in Counter(e["sev"] for e in ev_out).items()) or "none")
         elif fn == "status.jsonl":
             info = "%s across %s." % (plural(len(status), "status record"), plural(len(status_by), "robot"))
+        elif fn == "robot.jsonl":
+            late = sum(1 for r in robot_log if r.get("link") is False or r.get("kind") == "link_lost")
+            info = "%s from %s; %d made while disconnected." % (plural(len(robot_log), "record"), plural(len(onboard), "robot"), late)
         elif fn == "telemetry.jsonl":
             info = "%s samples from %s; %s." % (format(len(tele), ","), plural(len(T), "robot"), "; ".join("%s ~%.0f Hz" % (rb["name"], rb["rate_hz"]) for rb in robots if rb["rate_hz"]))
             if bad_tele:
@@ -635,6 +792,21 @@ def analyse_run(d):
         if m.get("map_mode") == "vicon" and m.get("name") not in used:
             targets.append({"name": m["name"], "x": m["lon"], "y": m["lat"], "step": None})
 
+    zones = []
+    for z in meta.get("zones") or []:
+        if z.get("map_mode") != "vicon":
+            continue
+        if z.get("center") and z.get("radius_m"):
+            c, rad = z["center"], z["radius_m"]
+            pts = [[c["lon"] + rad * math.cos(2 * math.pi * i / 32), c["lat"] + rad * math.sin(2 * math.pi * i / 32)] for i in range(32)]
+        else:
+            pts = [[q["lon"], q["lat"]] for q in z.get("points") or []]
+        if len(pts) >= 3:
+            zones.append({"name": z.get("name") or "", "pts": [[r3(x), r3(y)] for x, y in pts]})
+    series["offline"] = series_off
+    series["robot"] = series_rob
+    onboard_rows = {nid: {"segs": ob["segs"], "wps": [[r3(t), i, l] for t, i, l in ob["wps"]]} for nid, ob in onboard.items()}
+
     for s in steps:
         for k in ("start", "end", "duration", "settle", "idle_after", "op_done", "travel_s", "path_m", "straight_m", "err", "tx", "ty", "fx", "fy", "straightness", "cruise"):
             if k in s:
@@ -651,6 +823,7 @@ def analyse_run(d):
         "verdict": {"level": level, "chip": chip, "headline": headline}, "tiles": tiles, "robots": robots, "steps": steps,
         "narrative": N, "findings": F, "events": ev_out, "status_segs": status_segs, "silent": silent,
         "series": series, "targets": targets, "captions": cap, "files": files,
+        "zones": zones, "offline": offline, "onboard": onboard_rows,
         "moving_s": r3(moving_s), "n_faults": len(faults),
         "assigned": sorted(assigned),
     }
@@ -857,7 +1030,7 @@ function lineChart(host,o){
 function legend(items){return items.length>1?`<div class="legend">${items.map(i=>`<span><span class="sw" style="background:${i.color}"></span>${esc(i.name)}</span>`).join('')}</div>`:'';}
 
 function gantt(host,R){
-  const rows=[{k:'steps',label:'Steps'}];R.robots.forEach(r=>rows.push({k:r.id,label:r.name,robot:r}));rows.push({k:'ev',label:'Alerts'});
+  const rows=[{k:'steps',label:'Steps'}];R.robots.forEach(r=>{rows.push({k:r.id,label:r.name,robot:r});if(R.onboard[r.id])rows.push({k:'ob',label:r.name+' (own)',robot:r});});rows.push({k:'ev',label:'Alerts'});
   const W=Math.max(320,host.clientWidth),L=78,rh=28,H=rows.length*rh+26,iw=W-L-10,xmax=Math.max(R.duration,1),x=t=>L+t/xmax*iw;
   let s=`<svg width="${W}" height="${H}" role="img" aria-label="Run timeline">`;
   xTicks(xmax).forEach(t=>{s+=`<line class="grid" x1="${x(t)}" x2="${x(t)}" y1="0" y2="${rows.length*rh}"/><text x="${x(t)}" y="${H-6}" text-anchor="middle">${fmtT(t)}</text>`;});
@@ -870,6 +1043,9 @@ function gantt(host,R){
       if(w>70)s+=`<text x="${x(st.start)+6}" y="${y0+rh/2+4}" style="fill:#fff;font-weight:600">${esc('Step '+st.n)}</text>`;
       if(st.settle!=null&&st.idle_after>1){s+=`<rect x="${x(st.settle)}" y="${y0+4}" width="${Math.max(0,x(e)-x(st.settle))}" height="${rh-8}" rx="4" style="fill:var(--surface)" opacity=".55" data-tip="${esc(`<b>Waiting</b><br>Robot already at rest; step open for ${fmtDur(st.idle_after)} more`)}"/>`;}
     });}
+    else if(r.k==='ob'){const ob=R.onboard[r.robot.id];ob.segs.forEach(([a,b,st])=>{const up=st==='up';
+        s+=`<rect ${up?'style="fill:var(--ok)" opacity=".35"':'class="hatch"'} x="${x(a)}" y="${y0+8}" width="${Math.max(1,x(b)-x(a))}" height="${rh-16}" rx="3" data-tip="${esc(`<b>${r.robot.name}, robot's own log</b><br>${up?'Henosync heartbeat received':'No heartbeat from Henosync - driving on its own'}<br>${fmtT(a)} → ${fmtT(b)} (${fmtDur(b-a)})`)}"/>`;});
+      ob.wps.forEach(([t,i,l])=>{s+=`<circle cx="${x(t)}" cy="${y0+rh/2}" r="4" style="fill:${l===false?'var(--warn)':'var(--ink2)'};stroke:var(--surface)" stroke-width="1.5" data-tip="${esc(`<b>Waypoint ${(i||0)+1} reached</b> (${fmtT(t)})${l===false?'<br>while disconnected':''}`)}"/>`;});}
     else if(r.k==='ev'){R.events.filter(e=>!(e.title.startsWith('Operation ')&&e.sev==='info')).forEach(e=>{const c=e.sev==='critical'||e.sev==='error'?'var(--bad)':e.sev==='warning'?'var(--warn)':'var(--info)';const cx=x(e.t),cy=y0+rh/2;
       s+=`<path d="M${cx},${cy-8}L${cx+8},${cy}L${cx},${cy+8}L${cx-8},${cy}Z" style="fill:${c};stroke:var(--surface)" stroke-width="2" data-tip="${esc(`<b>${e.title}</b> (${fmtT(e.t)})<br>${e.msg}`)}"/>`;});}
     else{ (R.status_segs[r.k]||[]).forEach(g=>{let [a,b,st]=g;const sil=R.silent[r.k];if(sil&&b>sil[0]&&a<sil[0]){b=sil[0];}
@@ -888,7 +1064,7 @@ function gantt(host,R){
 function mapChart(host,R){
   const ids=Object.keys(R.series.path);
   if(!ids.length){host.innerHTML='<div class="note">No position data was recorded in this run.</div>';return;}
-  let xs=[],ys=[];ids.forEach(i=>R.series.path[i].forEach(p=>{xs.push(p[1]);ys.push(p[2]);}));R.targets.forEach(t=>{xs.push(t.x);ys.push(t.y);});
+  let xs=[],ys=[];ids.forEach(i=>R.series.path[i].forEach(p=>{xs.push(p[1]);ys.push(p[2]);}));R.targets.forEach(t=>{xs.push(t.x);ys.push(t.y);});R.zones.forEach(z=>z.pts.forEach(p=>{xs.push(p[0]);ys.push(p[1]);}));
   const pad=.5,x0=Math.min(...xs)-pad,x1=Math.max(...xs)+pad,y0=Math.min(...ys)-pad,y1=Math.max(...ys)+pad;
   const W=Math.min(Math.max(300,host.clientWidth),640),sc=(W-50)/(x1-x0),H=Math.max(220,Math.min(460,(y1-y0)*sc+30)),k=Math.min(sc,(H-30)/(y1-y0));
   const X=v=>40+(v-x0)*k,Y=v=>H-24-(v-y0)*k;
@@ -896,10 +1072,13 @@ function mapChart(host,R){
   ticks(x0,x1,6).forEach(v=>{s+=`<line class="grid" x1="${X(v)}" x2="${X(v)}" y1="6" y2="${H-24}"/><text x="${X(v)}" y="${H-8}" text-anchor="middle">${v}</text>`;});
   ticks(y0,y1,6).forEach(v=>{s+=`<line class="grid" y1="${Y(v)}" y2="${Y(v)}" x1="40" x2="${W-6}"/><text x="34" y="${Y(v)+4}" text-anchor="end">${v}</text>`;});
   s+=`<text x="${W-6}" y="${H-8}" text-anchor="end">x (m)</text><text x="4" y="12">y (m)</text>`;
+  R.zones.forEach(z=>{s+=`<polygon points="${z.pts.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' ')}" style="fill:var(--info-bg);stroke:var(--info)" stroke-width="1.5" stroke-dasharray="5 3" data-tip="<b>Zone</b>: ${esc(z.name)}"/><text class="lab" x="${X(z.pts[0][0])+4}" y="${Y(z.pts[0][1])-4}">${esc(z.name)}</text>`;});
   R.targets.forEach(t=>{const used=t.step!=null;s+=`<g data-tip="<b>${esc(t.name)}</b><br>(${t.x.toFixed(2)}, ${t.y.toFixed(2)}) m"><circle cx="${X(t.x)}" cy="${Y(t.y)}" r="${used?11:8}" fill="none" stroke="var(--ink2)" stroke-width="${used?2:1}" ${used?'':'stroke-dasharray="3 3"'}/><circle cx="${X(t.x)}" cy="${Y(t.y)}" r="2.5" style="fill:var(--ink2)"/><text class="lab" x="${X(t.x)+14}" y="${Y(t.y)+4}">${esc(t.name)}</text></g>`;});
   R.robots.forEach(rb=>{const p=R.series.path[rb.id];if(!p)return;const c=col(rb.slot);
     s+=`<path d="${p.map((q,i)=>(i?'L':'M')+X(q[1]).toFixed(1)+','+Y(q[2]).toFixed(1)).join('')}" fill="none" style="stroke:${c}" stroke-width="2" opacity=".28" stroke-linejoin="round"/>`;
     s+=`<path id="tr-${rb.id}" fill="none" style="stroke:${c}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    (R.series.offline[rb.id]||[]).forEach(seg=>{s+=`<path d="${seg.map((q,i)=>(i?'L':'M')+X(q[1]).toFixed(1)+','+Y(q[2]).toFixed(1)).join('')}" fill="none" style="stroke:var(--warn)" stroke-width="5" opacity=".45" stroke-linecap="round" data-tip="${esc(`<b>${rb.name}</b>: VICON trail while disconnected<br>${fmtT(seg[0][0])} → ${fmtT(seg[seg.length-1][0])}`)}"/>`;});
+    (R.series.robot[rb.id]||[]).forEach(seg=>{s+=`<path d="${seg.map((q,i)=>(i?'L':'M')+X(q[1]).toFixed(1)+','+Y(q[2]).toFixed(1)).join('')}" fill="none" style="stroke:var(--ink)" stroke-width="1.5" stroke-dasharray="4 3" data-tip="${esc(`<b>${rb.name}</b>: robot's own pose log while disconnected`)}"/>`;});
     s+=`<circle cx="${X(p[0][1])}" cy="${Y(p[0][2])}" r="4" fill="var(--surface)" style="stroke:${c}" stroke-width="2"><title>${esc(rb.name)} start</title></circle>`;
     s+=`<g id="rb-${rb.id}"><circle r="7" style="fill:${c};stroke:var(--surface)" stroke-width="2"/><text class="lab" x="11" y="-9" style="font-weight:600"></text></g>`;});
   s+='</svg>';host.innerHTML=s;
@@ -932,6 +1111,7 @@ function renderRun(R){
    <div class="hl">${esc(R.verdict.headline)}</div>
    <div class="tiles">${R.tiles.map(t=>`<div class="tile"><div class="l">${esc(t.label)}</div><div class="v ${t.level||''}">${esc(t.value)}</div><div class="s" title="${esc(t.sub)}">${esc(t.sub)}</div></div>`).join('')}</div></div></section>`;
   h+=`<section><h2>What the logs are telling us</h2><div class="card">${R.findings.length?R.findings.map(f=>`<div class="finding"><div class="ic ${f.sev}">${ICON[f.sev]}</div><div><h3>${esc(f.title)}</h3><p>${esc(f.body)}</p>${f.action?`<div class="act"><b>Suggestion:</b> ${esc(f.action)}</div>`:''}</div></div>`).join(''):'<div class="note">Nothing notable.</div>'}</div></section>`;
+  if(R.offline.length){h+=`<section><h2>Link dropouts and onboard execution</h2><div class="card scroll"><table><thead><tr><th>Robot</th><th>Henosync lost link</th><th>Restored</th><th>Down for</th><th>Cause</th><th>VICON moved</th><th>Robot log: samples / commanding</th><th>Robot tracked</th><th>Waypoints offline</th><th>Robot saw link down</th><th>Log received</th></tr></thead><tbody>${R.offline.map(w=>`<tr><td>${esc(w.node)}</td><td>${fmtT(w.start)}</td><td>${w.restored?fmtT(w.end):'<span class="bad">never</span>'}</td><td>${fmtDur(w.dur)}</td><td>${w.simulated?'operator (simulated)':'link fault'}</td><td>${(w.vicon_m||0).toFixed(2)} m</td><td>${w.robot_log?`${w.samples} / ${w.cmd_samples}`:'-'}</td><td>${w.robot_log?(w.robot_m||0).toFixed(2)+' m':'-'}</td><td>${w.robot_log?(w.wps.length?w.wps.map(i=>i+1).join(', '):'none'):'-'}</td><td>${w.robot_down?fmtT(w.robot_down[0])+' → '+fmtT(w.robot_down[1]):'-'}</td><td class="${w.robot_log&&w.synced==null?'bad':''}">${w.synced!=null?fmtT(w.synced):(w.robot_log?'not received':'-')}</td></tr>`).join('')}</tbody></table><p class="sub" style="margin:10px 2px 0">"VICON moved" is from Henosync's own VICON connection, which doesn't go through the robot link. The robot columns come from robot.jsonl, which the robot's onboard controller logged itself and delivered after reconnecting. On the map, the thick orange trail is the VICON trail while disconnected; the dashed line is the robot's own pose log for the same window.</p></div></section>`;}
   h+=`<section><h2>What happened, in order</h2><div class="card"><ul class="story">${R.narrative.map(n=>`<li class="${n.sev}"><span class="t">${fmtT(n.t)}</span><span class="dot ${n.sev}"></span><span>${esc(n.text)}</span></li>`).join('')}</ul></div></section>`;
   h+=`<section><h2>Visual replay</h2><div class="scrub"><div class="row"><span class="tt" id="tt">0:00</span><input id="slider" type="range" min="0" max="${R.duration}" step="0.1" value="0" aria-label="Replay time"></div><div class="rd" id="rd"></div></div>
    <div class="card chart"><h3>${esc(R.captions.gantt)}</h3><div class="legend"><span><span class="sw" style="background:var(--s1)"></span>step</span><span><span class="sw" style="background:var(--ok)"></span>robot online</span><span><span class="sw" style="background:var(--warn)"></span>degraded</span><span><span class="sw" style="background:var(--bad)"></span>no data</span><span><span class="sw" style="background:var(--warn);transform:rotate(45deg)"></span>alert</span></div><div id="c-gantt"></div></div>`;

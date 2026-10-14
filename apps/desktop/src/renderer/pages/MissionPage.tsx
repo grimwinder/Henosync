@@ -22,6 +22,8 @@ import {
   CheckCircle2,
   History,
   FileText,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import MissionMap, {
   type MapBase,
@@ -42,10 +44,16 @@ import {
   startRun,
   recordRunStep,
   stopRun,
+  dropLink,
+  restoreLink,
 } from "../lib/api";
 import RunsDialog, { openRunReport } from "../components/mission/RunsDialog";
 import { useUIStore } from "../stores/uiStore";
-import type { ControlPluginInfo, PluginConfigField } from "../types";
+import type {
+  ControlPluginInfo,
+  Node as HenosyncNode,
+  PluginConfigField,
+} from "../types";
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
@@ -2315,6 +2323,107 @@ function ControlsPanel({
             Clear All
           </button>
         </>
+      )}
+      <LinkDropControls isRunning={isRunning} />
+    </div>
+  );
+}
+
+// ── Simulated link dropout (Test 2) ──────────────────────────────────────────
+// Drop really closes Henosync's connection to the robot and holds it down until
+// Restore — the run's logs and report record it as an operator-simulated dropout.
+
+function LinkDropControls({ isRunning }: { isRunning: boolean }) {
+  // Offer Drop for online robots during a run; keep Restore available even
+  // after the run ends so a dropped link is never left stranded.
+  const nodes = useNodeStore((s) => Object.values(s.nodes)).filter(
+    (n) => n.link_blocked || (isRunning && n.status === "online"),
+  );
+  const upsertNode = useNodeStore((s) => s.upsertNode);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = async (node: HenosyncNode) => {
+    setBusy(node.id);
+    setError(null);
+    try {
+      if (node.link_blocked) {
+        await restoreLink(node.id);
+        upsertNode({ ...node, link_blocked: false });
+      } else {
+        await dropLink(node.id);
+        upsertNode({ ...node, link_blocked: true, status: "degraded" });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (nodes.length === 0) return null;
+  return (
+    <div
+      style={{
+        borderTop: "1px solid #2D2D2D",
+        paddingTop: "6px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "4px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "10px",
+          fontWeight: 700,
+          letterSpacing: "1px",
+          color: "#666666",
+          padding: "0 2px",
+        }}
+      >
+        LINK TEST
+      </div>
+      {nodes.map((node) => {
+        const blocked = !!node.link_blocked;
+        const color = blocked ? "#3DD68C" : "#F5A623";
+        return (
+          <button
+            key={node.id}
+            onClick={() => toggle(node)}
+            disabled={busy === node.id}
+            title={
+              blocked
+                ? `Reconnect to ${node.name}`
+                : `Cut the connection to ${node.name} until Restore is pressed`
+            }
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              padding: "7px",
+              borderRadius: "6px",
+              border: `1px solid ${color}55`,
+              backgroundColor: `${color}18`,
+              color,
+              cursor: busy === node.id ? "default" : "pointer",
+              fontSize: "11px",
+              fontWeight: 600,
+            }}
+          >
+            {blocked ? <Wifi size={11} /> : <WifiOff size={11} />}
+            {busy === node.id
+              ? "…"
+              : `${blocked ? "Restore" : "Drop"} ${node.name}`}
+          </button>
+        );
+      })}
+      {error && (
+        <div
+          style={{ fontSize: "10px", color: "#F05252", maxWidth: "160px" }}
+        >
+          {error}
+        </div>
       )}
     </div>
   );

@@ -18,13 +18,23 @@ same frame as the waypoints (--pose_topic):
 If no pose arrives for POSE_TIMEOUT_S the robot stops and waits — it never
 drives on a stale position.
 
+Robot log: the controller records its own account of what it does — its pose
+and the velocity it commands (SAMPLE_HZ while a path is active), waypoint
+arrivals, path start/end, pose loss, and when Henosync's heartbeat stops and
+resumes (link_lost / link_restored). Records are numbered and re-sent on
+henosync/robot_log until Henosync acknowledges them, so whatever happened
+while the link was down reaches Henosync once it is back. Every record is
+also appended to ~/henosync_logs/ on the robot, in case it never comes back.
+
 Topics subscribed:
   /<ns>/henosync/waypoint      std_msgs/String  — JSON, one of:
                                  {"x": m, "y": m, "arrival_radius": m, "max_speed": m/s}
-                                 {"path_id": str, "path": [{"x": m, "y": m}, ...],
+                                 {"path_id": str, "run_id": str, "path": [{"x": m, "y": m}, ...],
                                   "arrival_radius": m, "max_speed": m/s}
                                  {"stop": true}
   <pose_topic>                 geometry_msgs/Pose2D — x, y (m), theta (rad)
+  /<ns>/henosync/heartbeat     std_msgs/String  — sent by Henosync at 2 Hz while connected
+  /<ns>/henosync/robot_log_ack std_msgs/String  — JSON {"boot", "seq"}: records up to seq received
 
 Topics published:
   <cmd_vel_topic>              geometry_msgs/TwistStamped (default)
@@ -34,6 +44,9 @@ Topics published:
                                "total", "done", "stopped"}; sent on every
                                waypoint reached and re-sent at 1 Hz so Henosync
                                catches up after a reconnect
+  /<ns>/henosync/robot_log     std_msgs/String — JSON {"boot", "sent", "records":
+                               [{"seq", "t", "kind", "path_id", "run_id", ...}]};
+                               unacknowledged records, oldest first, at LOG_SEND_HZ
 
 Usage:
   python henosync_controller.py [--namespace tb2] [--unstamped]
@@ -42,15 +55,18 @@ Usage:
 """
 
 import argparse
+import collections
 import json
 import math
+import os
 import time
+import uuid
+from datetime import datetime
 
 import rclpy
-from rclpy.node import Node
 from geometry_msgs.msg import Pose2D, Twist, TwistStamped
+from rclpy.node import Node
 from std_msgs.msg import Bool, String
-
 
 # ── Controller constants ───────────────────────────────────────────────────────
 
@@ -62,6 +78,14 @@ ANGULAR_DEADBAND: float = 0.05  # rad — ignore heading errors below this thres
 CTRL_HZ: float = 10.0
 POSE_TIMEOUT_S: float = 1.5   # stop if no pose received for this long (relay sends at 2 Hz)
 PROGRESS_HZ: float = 1.0
+
+# ── Robot log constants ────────────────────────────────────────────────────────
+
+LINK_TIMEOUT_S: float = 2.0   # no Henosync heartbeat (2 Hz) for this long → link lost
+SAMPLE_HZ: float = 2.0        # pose + command samples while a path is active
+LOG_SEND_HZ: float = 2.0
+LOG_CHUNK: int = 200          # records per robot_log message
+LOG_DIR = os.path.expanduser("~/henosync_logs")
 
 
 class HenosyncController(Node):
@@ -76,6 +100,7 @@ class HenosyncController(Node):
             return f"/{namespace}/{path}" if namespace else f"/{path}"
 
         pose_topic = pose_topic or _ht("henosync/vicon_pose")
+        self._pose_topic = pose_topic
 
         self._waypoint_sub = self.create_subscription(
             String, _ht("henosync/waypoint"), self._on_waypoint, 10
@@ -83,8 +108,15 @@ class HenosyncController(Node):
         self._pose_sub = self.create_subscription(
             Pose2D, pose_topic, self._on_pose, 10
         )
+        self._heartbeat_sub = self.create_subscription(
+            String, _ht("henosync/heartbeat"), self._on_heartbeat, 10
+        )
+        self._log_ack_sub = self.create_subscription(
+            String, _ht("henosync/robot_log_ack"), self._on_log_ack, 10
+        )
         self._arrived_pub = self.create_publisher(Bool, _ht("henosync/arrived"), 10)
         self._progress_pub = self.create_publisher(String, _ht("henosync/progress"), 10)
+        self._log_pub = self.create_publisher(String, _ht("henosync/robot_log"), 10)
 
         if unstamped:
             self._cmd_vel_pub = self.create_publisher(Twist, cmd_vel_topic, 10)
@@ -94,6 +126,7 @@ class HenosyncController(Node):
         # Path state — a single waypoint is a path of length 1
         self._path: list[tuple[float, float]] = []
         self._path_id: str = ""
+        self._run_id: str = ""
         self._index: int = 0
         self._stopped: bool = False
         self._arrival_radius: float = 0.1
@@ -105,13 +138,106 @@ class HenosyncController(Node):
         self._pos_theta: float = 0.0
         self._last_pose_time: float = 0.0
         self._pose_stale_logged: bool = False
+        self._cmd: tuple[float, float] = (0.0, 0.0)  # last velocity commanded
+
+        # Link to Henosync, judged by its heartbeat
+        self._link_up: bool = False
+        self._last_heartbeat: float = 0.0       # monotonic
+        self._last_heartbeat_wall: float = 0.0  # epoch, for the log
+
+        # Robot log — unacknowledged records, oldest first
+        self._boot = uuid.uuid4().hex[:8]
+        self._seq = 0
+        self._unacked: collections.deque = collections.deque()
+        os.makedirs(LOG_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self._log_path = os.path.join(LOG_DIR, f"{stamp}_{self._boot}.jsonl")
+        self._log_file = open(self._log_path, "a", buffering=1)
+        self._tick = 0
 
         self._timer = self.create_timer(1.0 / CTRL_HZ, self._control_tick)
         self._progress_timer = self.create_timer(1.0 / PROGRESS_HZ, self._publish_progress)
+        self._log_timer = self.create_timer(1.0 / LOG_SEND_HZ, self._send_log)
+        self._log(
+            "controller_start", pose_topic=pose_topic, cmd_vel_topic=cmd_vel_topic,
+            log_file=self._log_path,
+        )
         self.get_logger().info(
             f"henosync_controller ready — ns='{namespace}', "
-            f"cmd_vel={cmd_vel_topic}, pose={pose_topic}, unstamped={unstamped}"
+            f"cmd_vel={cmd_vel_topic}, pose={pose_topic}, unstamped={unstamped}, "
+            f"log={self._log_path}"
         )
+
+    # ── Robot log ──────────────────────────────────────────────────────────────
+
+    def _log(self, kind: str, **fields) -> None:
+        self._seq += 1
+        record = {
+            "seq": self._seq, "t": time.time(), "kind": kind,
+            "path_id": self._path_id, "run_id": self._run_id, **fields,
+        }
+        self._unacked.append(record)
+        self._log_file.write(json.dumps({"boot": self._boot, **record}) + "\n")
+
+    def _send_log(self) -> None:
+        if not self._unacked:
+            return
+        msg = String()
+        msg.data = json.dumps({
+            "boot": self._boot,
+            "sent": time.time(),
+            "records": [self._unacked[i] for i in range(min(LOG_CHUNK, len(self._unacked)))],
+        })
+        self._log_pub.publish(msg)
+
+    def _on_log_ack(self, msg: String) -> None:
+        try:
+            data = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        if data.get("boot") != self._boot:
+            return
+        acked = int(data.get("seq", 0))
+        while self._unacked and self._unacked[0]["seq"] <= acked:
+            self._unacked.popleft()
+
+    def _on_heartbeat(self, msg: String) -> None:
+        now = time.monotonic()
+        if not self._link_up:
+            if self._last_heartbeat_wall:
+                self._log(
+                    "link_restored",
+                    down_s=round(time.time() - self._last_heartbeat_wall, 3),
+                    backlog=len(self._unacked),
+                )
+                self.get_logger().info(
+                    f"Henosync link restored — sending {len(self._unacked)} logged record(s)"
+                )
+            else:
+                self._log("link_up")
+            self._link_up = True
+        self._last_heartbeat = now
+        self._last_heartbeat_wall = time.time()
+
+    def _check_link(self) -> None:
+        if self._link_up and time.monotonic() - self._last_heartbeat > LINK_TIMEOUT_S:
+            self._link_up = False
+            self._log("link_lost", last_heartbeat_t=self._last_heartbeat_wall)
+            self.get_logger().warning(
+                "Henosync link lost — "
+                + ("continuing path on onboard controller" if self._active else "no path active")
+            )
+
+    def _log_sample(self) -> None:
+        pose_ok = time.monotonic() - self._last_pose_time <= POSE_TIMEOUT_S
+        self._log(
+            "sample",
+            x=round(self._pos_x, 4), y=round(self._pos_y, 4), theta=round(self._pos_theta, 4),
+            v=round(self._cmd[0], 4), w=round(self._cmd[1], 4),
+            wp=self._index, link=self._link_up, pose_ok=pose_ok,
+        )
+
+    # ── Waypoints and pose ─────────────────────────────────────────────────────
 
     def _on_waypoint(self, msg: String) -> None:
         try:
@@ -121,6 +247,8 @@ class HenosyncController(Node):
             return
 
         if data.get("stop", False):
+            if self._active:
+                self._log("path_stopped", completed=self._index, total=len(self._path))
             self._active = False
             self._stopped = True
             self._publish_zero()
@@ -135,11 +263,17 @@ class HenosyncController(Node):
 
         self._path = path
         self._path_id = str(data.get("path_id", ""))
+        self._run_id = str(data.get("run_id", ""))
         self._index = 0
         self._stopped = False
         self._arrival_radius = float(data.get("arrival_radius", 0.1))
         self._max_speed = min(float(data.get("max_speed", MAX_LINEAR_VEL)), MAX_LINEAR_VEL)
         self._active = bool(path)
+        self._log(
+            "path_start", total=len(path), path=[[x, y] for x, y in path],
+            arrival_radius=self._arrival_radius, max_speed=self._max_speed,
+            pose_topic=self._pose_topic,
+        )
         self.get_logger().info(
             f"New path '{self._path_id}': {len(path)} waypoint(s), first "
             f"({path[0][0]:.3f}, {path[0][1]:.3f}) "
@@ -153,21 +287,29 @@ class HenosyncController(Node):
         self._pos_theta = msg.theta
         self._last_pose_time = time.monotonic()
 
+    # ── Control loop ───────────────────────────────────────────────────────────
+
     def _control_tick(self) -> None:
+        self._check_link()
         if not self._active:
             return
+        self._tick += 1
+        if self._tick % max(1, round(CTRL_HZ / SAMPLE_HZ)) == 0:
+            self._log_sample()
 
         if time.monotonic() - self._last_pose_time > POSE_TIMEOUT_S:
             # Never drive on a stale position — hold until the pose comes back.
             self._publish_zero()
             if not self._pose_stale_logged:
                 self._pose_stale_logged = True
+                self._log("pose_stale")
                 self.get_logger().warning(
                     f"No pose for {POSE_TIMEOUT_S:.1f}s — holding position"
                 )
             return
         if self._pose_stale_logged:
             self._pose_stale_logged = False
+            self._log("pose_restored")
             self.get_logger().info("Pose restored — resuming")
 
         target_x, target_y = self._path[self._index]
@@ -176,6 +318,10 @@ class HenosyncController(Node):
         distance = math.sqrt(dx * dx + dy * dy)
 
         if distance < self._arrival_radius:
+            self._log(
+                "waypoint", index=self._index, x=round(self._pos_x, 4), y=round(self._pos_y, 4),
+                dist=round(distance, 4), link=self._link_up,
+            )
             self._index += 1
             self.get_logger().info(
                 f"Reached waypoint {self._index}/{len(self._path)} "
@@ -184,6 +330,7 @@ class HenosyncController(Node):
             if self._index >= len(self._path):
                 self._active = False
                 self._publish_zero()
+                self._log("path_done", total=len(self._path), link=self._link_up)
                 arrived = Bool()
                 arrived.data = True
                 self._arrived_pub.publish(arrived)
@@ -224,6 +371,7 @@ class HenosyncController(Node):
         self._progress_pub.publish(msg)
 
     def _publish_velocity(self, linear: float, angular: float) -> None:
+        self._cmd = (linear, angular)
         if self._unstamped:
             msg = Twist()
             msg.linear.x = linear

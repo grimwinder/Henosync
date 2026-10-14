@@ -66,3 +66,27 @@ async def reconnect_node(node_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="Node not found")
     return {"success": True}
+
+
+@router.post("/{node_id}/link/drop")
+async def drop_link(node_id: str):
+    """Simulate a link dropout: close the connection and hold off reconnecting."""
+    try:
+        await node_registry.drop_link(node_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Node not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True}
+
+
+@router.post("/{node_id}/link/restore")
+async def restore_link(node_id: str):
+    """End a simulated dropout and reconnect."""
+    try:
+        await node_registry.restore_link(node_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Node not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True}

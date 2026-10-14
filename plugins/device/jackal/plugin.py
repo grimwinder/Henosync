@@ -35,11 +35,22 @@ Topics subscribed (all optionally prefixed with `namespace`, e.g. a200_0000):
   sensors/imu_0/data                  sensor_msgs/Imu                 (orientation)
   sensors/lidar2d_0/scan              sensor_msgs/LaserScan           (optional)
   henosync/progress                   std_msgs/String  JSON           (onboard_ctrl only)
+  henosync/robot_log                  std_msgs/String  JSON           (onboard_ctrl only)
 
 Topics published:
   platform/cmd_vel_unstamped           geometry_msgs/Twist
   henosync/waypoint                    std_msgs/String  JSON           (onboard_ctrl only)
   henosync/vicon_pose                  geometry_msgs/Pose2D           (onboard_ctrl + relay pose only)
+  henosync/heartbeat                   std_msgs/String  JSON           (onboard_ctrl only, 2 Hz)
+  henosync/robot_log_ack               std_msgs/String  JSON           (onboard_ctrl only)
+
+Robot log (onboard_ctrl): henosync_controller.py logs what it does itself -
+its pose, the velocity it commands, waypoint arrivals, and when Henosync's
+heartbeat stops and resumes - as numbered records it re-sends until they are
+acknowledged. While the link is up they arrive within a second; after a
+dropout the backlog arrives on reconnect. Accepted records go to the run's
+robot.jsonl, and a path only completes once its log has arrived, so the
+report covers the robot's own account of the dropout.
 """
 
 import asyncio
@@ -90,6 +101,8 @@ class _NodeState:
         # Onboard controller publishers (created only when onboard_ctrl selected)
         self.waypoint_pub: Optional[Any] = None
         self.vicon_pose_pub: Optional[Any] = None
+        self.heartbeat_pub: Optional[Any] = None
+        self.robot_log_ack_pub: Optional[Any] = None
 
         # Position — GPS mode only, written by _on_gps.
         # VICON mode: vicon_manager sets node.position directly, nothing here.
@@ -137,13 +150,17 @@ class _PathTracker:
         self.stopped: bool = False
         self.stop_requested: bool = False
         self.heard: bool = False
+        self.log_complete: bool = False  # robot's path_done/path_stopped log record received
+        self.finished_at: Optional[float] = None  # when the robot reported done/stopped
         now = time.monotonic()
         self.last_heard: float = now   # last progress message for this path
         self.last_change: float = now  # last time a waypoint was reached
 
 
 _PATHS: dict[str, _PathTracker] = {}
-_BACKFILLED_PATHS: set[str] = set()  # path_ids that have already been backfilled
+# node_id -> (controller boot id, last robot log seq accepted). Module-level so
+# it survives the new plugin instance a reconnect creates.
+_LOG_CURSORS: dict[str, tuple[str, int]] = {}
 
 
 class JackalPlugin(NodePlugin):
@@ -178,6 +195,7 @@ class JackalPlugin(NodePlugin):
     PROGRESS_ACK_TIMEOUT_S: float = 5.0   # no progress at all → controller not running
     LINK_LOST_S: float = 3.0              # no progress for this long → link considered down
     LINK_LOSS_GRACE_S: float = 300.0      # give up if the link stays down this long
+    LOG_SYNC_TIMEOUT_S: float = 15.0      # after the path ends, wait this long for the robot's log
 
     def __init__(self):
         super().__init__()
@@ -341,11 +359,19 @@ class JackalPlugin(NodePlugin):
                 progress_topic.subscribe(lambda msg: self._on_progress(node.id, msg))
                 state._subscriptions.append(progress_topic)
 
-                backfill_topic = roslibpy.Topic(
-                    ros, self._topic(ns, "henosync/backfill"), "std_msgs/String"
+                state.heartbeat_pub = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/heartbeat"), "std_msgs/String"
                 )
-                backfill_topic.subscribe(lambda msg: self._on_backfill(node.id, msg))
-                state._subscriptions.append(backfill_topic)
+                state.heartbeat_pub.advertise()
+                state.robot_log_ack_pub = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/robot_log_ack"), "std_msgs/String"
+                )
+                state.robot_log_ack_pub.advertise()
+                robot_log_topic = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/robot_log"), "std_msgs/String"
+                )
+                robot_log_topic.subscribe(lambda msg: self._on_robot_log(node.id, msg))
+                state._subscriptions.append(robot_log_topic)
 
                 # Reconnected mid-path: let the waiting cmd_follow_path use this connection.
                 tracker = _PATHS.get(node.id)
@@ -420,7 +446,8 @@ class JackalPlugin(NodePlugin):
         tracker.done = bool(data.get("done", False))
         tracker.stopped = bool(data.get("stopped", False))
 
-    def _on_backfill(self, node_id: str, msg: dict) -> None:
+    def _on_robot_log(self, node_id: str, msg: dict) -> None:
+        recv = time.time()
         state = self._nodes.get(node_id)
         if state:
             state.last_message_time = time.monotonic()
@@ -428,33 +455,61 @@ class JackalPlugin(NodePlugin):
             data = _json.loads(msg.get("data", ""))
         except ValueError:
             return
-        path_id = data.get("path_id", "")
-        run_id = data.get("run_id", "")
-        if not path_id or not run_id or not data.get("steps"):
-            return
-        if path_id in _BACKFILLED_PATHS:
-            return
-        _BACKFILLED_PATHS.add(path_id)
-        # Schedule the async backfill on the asyncio event loop from the Twisted thread.
-        try:
-            loop = self._loop
-            loop.call_soon_threadsafe(
-                lambda: loop.create_task(self._do_backfill(run_id, data))
-            )
-        except Exception as e:
-            logger.error("Jackal [%s]: backfill schedule failed: %s", node_id, e)
+        if self._loop:
+            # Twisted thread -> asyncio thread; call_soon keeps messages in order.
+            self._loop.call_soon_threadsafe(self._ingest_robot_log, node_id, data, recv)
 
-    async def _do_backfill(self, run_id: str, data: dict) -> None:
-        if not self._context:
+    def _ingest_robot_log(self, node_id: str, data: dict, recv: float) -> None:
+        """
+        Accept the next contiguous records, store them in their run, ack.
+        The robot always sends from its oldest unacknowledged record, so with
+        no cursor yet (Henosync restarted, or the controller restarted with a
+        new boot id) the first record sent is where to start.
+        """
+        boot = str(data.get("boot", ""))
+        records = sorted(
+            (r for r in data.get("records") or [] if isinstance(r.get("seq"), int)),
+            key=lambda r: r["seq"],
+        )
+        cursor = _LOG_CURSORS.get(node_id)
+        if cursor and cursor[0] == boot:
+            last = cursor[1]
+        elif records:
+            last = records[0]["seq"] - 1
+        else:
             return
-        try:
-            await self._context.backfill(run_id, data)
-            logger.info(
-                "Jackal: backfill %d step(s) → run %s",
-                len(data.get("steps", [])), run_id,
+
+        accepted = []
+        for r in records:
+            if r["seq"] <= last:
+                continue
+            if r["seq"] != last + 1:
+                break  # gap - the robot re-sends from our ack
+            accepted.append({**r, "recv": recv, "sent": data.get("sent")})
+            last = r["seq"]
+        _LOG_CURSORS[node_id] = (boot, last)
+
+        if accepted and self._context:
+            fallback = self._context.active_run_id() or ""
+            by_run: dict[str, list[dict]] = {}
+            for r in accepted:
+                by_run.setdefault(r.get("run_id") or fallback, []).append(r)
+            for run_id, recs in by_run.items():
+                if run_id:
+                    self._context.record_robot_log(run_id, recs)
+            tracker = _PATHS.get(node_id)
+            if tracker and any(
+                r.get("kind") in ("path_done", "path_stopped")
+                and r.get("path_id") == tracker.path_id
+                for r in accepted
+            ):
+                tracker.log_complete = True
+
+        state = self._nodes.get(node_id)
+        if state and state.robot_log_ack_pub:
+            self._publish_string(
+                state.robot_log_ack_pub, _json.dumps({"boot": boot, "seq": last})
             )
-        except Exception as e:
-            logger.error("Jackal: backfill failed: %s", e)
 
     def _on_battery(self, node_id: str, msg: dict) -> None:
         state = self._nodes.get(node_id)
@@ -560,6 +615,14 @@ class JackalPlugin(NodePlugin):
         except Exception as e:
             logger.warning("Jackal: waypoint publish failed: %s", e)
 
+    def _publish_string(self, topic: Any, data: str) -> None:
+        try:
+            from twisted.internet import reactor as _reactor
+            msg = roslibpy.Message({"data": data})
+            _reactor.callFromThread(lambda: topic.publish(msg))
+        except Exception as e:
+            logger.warning("Jackal: publish failed: %s", e)
+
     def _publish_stop_sentinel(self, state: _NodeState) -> None:
         self._publish_waypoint(state, '{"stop": true}')
 
@@ -575,7 +638,10 @@ class JackalPlugin(NodePlugin):
                 sub.unsubscribe()
             except Exception:
                 pass
-        for pub in filter(None, [state.cmd_vel_pub, state.waypoint_pub, state.vicon_pose_pub]):
+        for pub in filter(None, [
+            state.cmd_vel_pub, state.waypoint_pub, state.vicon_pose_pub,
+            state.heartbeat_pub, state.robot_log_ack_pub,
+        ]):
             try:
                 pub.unadvertise()
             except Exception:
@@ -764,11 +830,26 @@ class JackalPlugin(NodePlugin):
                 now = time.monotonic()
                 result_data = {"completed": tracker.completed}
 
-                if tracker.done:
-                    logger.info("Jackal [%s]: onboard controller — path complete", node.name)
-                    return CommandResult(success=True, message="Arrived", data=result_data)
-                if tracker.stop_requested or tracker.stopped:
+                if tracker.stop_requested:
                     return CommandResult(success=False, message="Stopped", data=result_data)
+                if tracker.done or tracker.stopped:
+                    # Hold the step open until the robot's own log of this path
+                    # (incl. anything it did while disconnected) has arrived.
+                    if not tracker.log_complete and node.id in _LOG_CURSORS:
+                        if tracker.finished_at is None:
+                            tracker.finished_at = now
+                            logger.info("Jackal [%s]: path ended — waiting for robot log", node.name)
+                        if now - tracker.finished_at < self.LOG_SYNC_TIMEOUT_S:
+                            continue
+                        logger.warning(
+                            "Jackal [%s]: robot log for path %s not received within %.0fs",
+                            node.name, tracker.path_id, self.LOG_SYNC_TIMEOUT_S,
+                        )
+                    note = "" if tracker.log_complete else " (robot log incomplete)"
+                    if tracker.done:
+                        logger.info("Jackal [%s]: onboard controller — path complete", node.name)
+                        return CommandResult(success=True, message="Arrived" + note, data=result_data)
+                    return CommandResult(success=False, message="Stopped" + note, data=result_data)
 
                 if not tracker.heard:
                     if now - tracker.last_heard > self.PROGRESS_ACK_TIMEOUT_S:
@@ -918,6 +999,10 @@ class JackalPlugin(NodePlugin):
             state = self._nodes[node.id]
             now = time.monotonic()
             position_source = node.config.get("position_source", "vicon")
+
+            # Heartbeat lets the robot log exactly when it loses and regains Henosync.
+            if state.heartbeat_pub:
+                self._publish_string(state.heartbeat_pub, _json.dumps({"t": time.time()}))
 
             # Publish VICON pose to robot when onboard controller is active
             if state.vicon_pose_pub:

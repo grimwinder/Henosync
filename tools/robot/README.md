@@ -9,7 +9,7 @@ robot's computer and run there:
 
 | Script                   | What it does                                                                                                                                           | Needed for                                    |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| `henosync_controller.py` | Receives waypoints (or a whole path) from Henosync and drives the robot to them with a proportional controller. Reports progress back to Henosync. | Onboard Controller capability (any mode)      |
+| `henosync_controller.py` | Receives waypoints (or a whole path) from Henosync and drives the robot to them with a proportional controller. Reports progress, and its own log of what it did (delivered after a dropout), back to Henosync. | Onboard Controller capability (any mode)      |
 | `vicon_pose_publisher.py` | Publishes the robot's own VICON position as a ROS topic for the controller (runs `vicon_stream` to read it).                                           | Onboard Controller with pose source "onboard" |
 | `vicon_stream.cpp`       | Small C++ program that reads one object's pose from the VICON PC with Vicon's SDK. Compiled on the robot.                                               | Onboard Controller with pose source "onboard" |
 
@@ -165,6 +165,43 @@ ros2 topic echo /<ns>/henosync/progress       # controller: progress while a mis
 
 The controller prints `New path …` when Henosync sends work and
 `Reached waypoint N/M` as it goes.
+
+## The robot's own log
+
+The controller logs its own account of every path: its pose and the velocity it
+commands (2 Hz), each waypoint reached, and when Henosync's heartbeat stops and
+comes back (`link_lost` / `link_restored`). Records are numbered and re-sent until
+Henosync acknowledges them. While the link is up they arrive within a second.
+After a dropout, the backlog arrives as soon as the link returns. Henosync stores
+them in the run's `robot.jsonl`, and **the mission step stays open until the
+robot's log of that path has arrived** (up to 15 s after the path ends), so the
+report always includes it.
+
+Every record is also written on the robot to `~/henosync_logs/<date>_<boot>.jsonl`.
+If the link never comes back, copy that file off and import it into the run (laptop,
+from the repo folder; the run id is the run's folder name under `~/.henosync/runs`):
+
+```bash
+python -c "import json,sys,urllib.request as u; recs=[json.loads(l) for l in open(sys.argv[1])]; print(u.urlopen(u.Request('http://127.0.0.1:8765/api/runs/'+sys.argv[2]+'/robot-log', json.dumps({'node_id':sys.argv[3],'records':recs}).encode(), {'Content-Type':'application/json'})).read())" <log.jsonl> "<run id>" <node id>
+```
+
+## Link dropout test (Test 2)
+
+1. Start the pose publisher and the controller in **"Robot reads VICON itself"**
+   mode (`--pose_topic /<ns>/henosync/onboard_pose`). In relay mode the robot
+   stops when the link drops, and the report says so.
+2. On the Mission page, run the mission (e.g. Area Navigate → Area Coverage).
+3. While it runs, press **Drop <robot>** under LINK TEST. Henosync closes its
+   rosbridge connection to the robot and won't reconnect until you press
+   **Restore <robot>**. Leaving it dropped is also valid: Henosync gives up on
+   the step after 5 minutes, and the robot's log stays on the robot (import it as above).
+4. After the run, View Report. The **Link dropouts and onboard execution**
+   section lines up Henosync's side (status went DEGRADED, VICON kept moving)
+   with the robot's side (its own link-lost time, the commands it sent, the
+   waypoints it reached offline, and when that log reached Henosync).
+
+For a dropout that isn't operator-triggered, block rosbridge on the robot instead:
+`sudo iptables -A INPUT -p tcp --dport 9090 -j DROP` (undo with `-D` in place of `-A`).
 
 ## Troubleshooting
 

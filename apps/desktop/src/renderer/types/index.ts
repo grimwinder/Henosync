@@ -158,6 +158,8 @@ export interface Node {
   local_origin: LocalOrigin | null;
   config: Record<string, unknown>;
   specs: DeviceSpecs | null;
+  /** True while an operator-simulated link dropout is in effect */
+  link_blocked?: boolean;
 }
 
 export interface NodeCreate {
