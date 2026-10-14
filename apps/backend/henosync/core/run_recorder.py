@@ -222,6 +222,58 @@ class RunRecorder:
             raise ValueError("Run is still in progress")
         shutil.rmtree(self._run_path(run_id))
 
+    async def backfill(self, run_id: str, data: dict) -> dict:
+        """
+        Merge robot-reported data into a stopped run.
+
+        Called when a robot reconnects after executing a mission autonomously
+        during a Henosync dropout. Appends entries to the run's .jsonl files,
+        regenerates summary.json, and rebuilds the report.
+
+        data keys:
+          telemetry  list of {"recv", "node_id", "timestamp", "values"} dicts
+          steps      list of {"recv", "index", "event", "outcome", "status_text"} dicts
+        """
+        if self._active and self._active.id == run_id:
+            raise ValueError("Cannot backfill an active run")
+        path = self._run_path(run_id)
+
+        tel_entries = data.get("telemetry") or []
+        if tel_entries:
+            with (path / "telemetry.jsonl").open("a", encoding="utf-8") as f:
+                for entry in tel_entries:
+                    f.write(json.dumps({**entry, "backfilled": True}, default=str) + "\n")
+
+        step_entries = data.get("steps") or []
+        if step_entries:
+            with (path / "steps.jsonl").open("a", encoding="utf-8") as f:
+                for entry in step_entries:
+                    f.write(json.dumps({**entry, "backfilled": True}, default=str) + "\n")
+
+        summary_path = path / "summary.json"
+        existing = (
+            json.loads(summary_path.read_text(encoding="utf-8"))
+            if summary_path.exists() else {}
+        )
+        ended = existing.get("ended") or time.time()
+        outcome = existing.get("outcome") or "completed"
+        meta = json.loads((path / "meta.json").read_text(encoding="utf-8"))
+        summary = {
+            "run_id": run_id,
+            "mission": meta["mission"],
+            "started": meta["started"],
+            "ended": ended,
+            "outcome": outcome,
+            "results": self._step_results(path, ended, outcome),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        logger.info(
+            f"Run {run_id} backfilled: "
+            f"{len(tel_entries)} telemetry, {len(step_entries)} steps"
+        )
+        self._start_report(run_id, path)
+        return self._describe(path)
+
     # ── Recording ─────────────────────────────────────────────────
 
     def _subscribe_once(self) -> None:

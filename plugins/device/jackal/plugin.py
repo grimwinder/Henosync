@@ -554,6 +554,9 @@ class JackalPlugin(NodePlugin):
             return False
         return True
 
+    async def is_autonomous_mission_active(self, node: Node) -> bool:
+        return node.id in _PATHS
+
     # ── Command handlers ───────────────────────────────────────────────────────
 
     async def cmd_move_to(

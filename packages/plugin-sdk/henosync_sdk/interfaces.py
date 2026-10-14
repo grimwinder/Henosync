@@ -249,3 +249,17 @@ class NodePlugin(ABC):
         arrived from the device and return False if that exceeds a threshold.
         """
         return True
+
+    async def is_autonomous_mission_active(self, node: Node) -> bool:
+        """
+        Optional: return True while the device is executing a mission
+        autonomously (i.e. it can continue without a live Henosync connection).
+
+        When True, the failsafe manager will not invoke get_safe_state(),
+        set the node to ERROR, or pause/abort the active mission on heartbeat
+        loss. A WARNING event is emitted instead.
+
+        Default returns False — the standard failsafe behaviour applies.
+        Override in plugins that support onboard mission execution.
+        """
+        return False

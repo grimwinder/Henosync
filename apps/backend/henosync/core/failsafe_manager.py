@@ -105,7 +105,15 @@ class FailsafeManager:
             if elapsed > HEARTBEAT_TIMEOUT:
                 if not self._triggered.get(node.id):
                     self._triggered[node.id] = True
-                    await self._on_node_lost(node)
+                    plugin_instance = plugin_registry.get_instance(node.id)
+                    autonomous = (
+                        plugin_instance is not None
+                        and await plugin_instance.is_autonomous_mission_active(node)
+                    )
+                    if autonomous:
+                        await self._on_autonomous_dropout(node)
+                    else:
+                        await self._on_node_lost(node)
                 continue
 
             # Node is alive — check if it was previously lost
@@ -169,6 +177,23 @@ class FailsafeManager:
         )
 
         await self._pause_active_mission(node.name)
+
+    async def _on_autonomous_dropout(self, node) -> None:
+        """
+        Handle heartbeat loss for a node executing an autonomous mission.
+        Does not invoke safe state, set ERROR, or pause the mission.
+        """
+        logger.warning(
+            f"AUTONOMOUS DROPOUT: {node.name} ({node.id}) — "
+            f"no heartbeat for {HEARTBEAT_TIMEOUT}s but autonomous mission active"
+        )
+        await telemetry_bus.publish_event(
+            title="Autonomous Dropout",
+            message=f"{node.name} has lost contact with Henosync but is "
+                    f"executing its mission autonomously. Monitoring for reconnect.",
+            severity=EventSeverity.WARNING,
+            node_id=node.id
+        )
 
     async def _on_node_recovered(self, node) -> None:
         """
