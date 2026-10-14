@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from ..models import EventSeverity, NodeStatus
+from ..models import DeviceCapability, EventSeverity, NodeStatus
 from ..plugin_system.registry import plugin_registry
 from .telemetry_bus import telemetry_bus
 
@@ -39,6 +39,8 @@ class FailsafeManager:
         # node_id -> True if failsafe already triggered
         # prevents repeated triggering for the same dropout
         self._triggered: dict[str, bool] = {}
+        # node_id -> when its link was lost (for the restored event's duration)
+        self._link_lost_at: dict[str, datetime] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -179,6 +181,49 @@ class FailsafeManager:
             message=f"{node.name} is responding again. "
                     f"Check mission status before resuming.",
             severity=EventSeverity.WARNING,
+            node_id=node.id
+        )
+
+    async def on_link_lost(self, node) -> None:
+        """
+        Called by node_registry when a node drops ONLINE → DEGRADED — its own
+        connection is down, though its position may still arrive (VICON keeps
+        last_seen fresh, so the heartbeat check above may never fire). Nothing
+        is sent to the robot: it can't be reached, and a robot running its
+        onboard controller is meant to carry on. node_registry retries the
+        connection automatically.
+        """
+        self._link_lost_at[node.id] = datetime.now(timezone.utc)
+        onboard = node.specs is not None and any(
+            c.capability == DeviceCapability.ONBOARD_CTRL for c in node.specs.capabilities
+        )
+        if onboard:
+            action = "Robot continues its mission on its onboard controller."
+            severity = EventSeverity.WARNING
+        else:
+            action = "Robot cannot be commanded until the link is restored."
+            severity = EventSeverity.CRITICAL
+        logger.warning(f"LINK LOST: {node.name} ({node.id}) — {action}")
+        await telemetry_bus.publish_event(
+            title="Link Lost — Failsafe",
+            message=f"{node.name}: connection to Henosync lost. {action} "
+                    f"Reconnecting automatically.",
+            severity=severity,
+            node_id=node.id
+        )
+
+    async def on_link_restored(self, node) -> None:
+        """Called by node_registry when a node returns DEGRADED → ONLINE."""
+        lost_at = self._link_lost_at.pop(node.id, None)
+        duration = (
+            f" after {(datetime.now(timezone.utc) - lost_at).total_seconds():.0f}s"
+            if lost_at else ""
+        )
+        logger.info(f"LINK RESTORED: {node.name} ({node.id}){duration}")
+        await telemetry_bus.publish_event(
+            title="Link Restored",
+            message=f"{node.name} reconnected{duration}.",
+            severity=EventSeverity.INFO,
             node_id=node.id
         )
 

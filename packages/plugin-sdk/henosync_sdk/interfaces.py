@@ -123,6 +123,14 @@ class NodePlugin(ABC):
                 arrival_radius_m=p.get("arrival_radius_m"),
                 max_speed=p.get("max_speed"),
             )
+        if envelope.command_type == CommandType.FOLLOW_PATH:
+            p = envelope.params
+            return await self.cmd_follow_path(
+                node,
+                waypoints=p.get("waypoints", []),
+                arrival_radius_m=p.get("arrival_radius_m"),
+                max_speed=p.get("max_speed"),
+            )
         if envelope.command_type == CommandType.STOP:
             return await self.cmd_stop(node)
         if envelope.command_type == CommandType.RETURN_HOME:
@@ -155,6 +163,25 @@ class NodePlugin(ABC):
         (or simply whether x is not None) to know which set to use.
         """
         return CommandResult(success=False, message="move_to not implemented")
+
+    async def cmd_follow_path(
+        self,
+        node: Node,
+        waypoints: list[dict[str, float]],
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
+    ) -> CommandResult:
+        """
+        Optional. Override if the device can drive a whole multi-waypoint path
+        itself (e.g. an onboard controller that keeps going if the link to
+        Henosync drops). Each waypoint uses the same keys cmd_move_to receives:
+        x/y/z for coordinate_frame="local" devices, lat/lon/alt otherwise.
+
+        Return data={"completed": n} — the number of waypoints reached — so a
+        caller can resume from where the path stopped. Callers fall back to one
+        move_to per waypoint when this returns "not implemented".
+        """
+        return CommandResult(success=False, message="follow_path not implemented")
 
     async def cmd_stop(self, node: Node) -> CommandResult:
         """Override if you declare MOVE_2D or MOVE_3D capability."""

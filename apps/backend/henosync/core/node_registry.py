@@ -31,6 +31,9 @@ FRAME_TIMEOUT = 15.0
 # Faster than the failsafe heartbeat (5 s) so we catch drops sooner.
 LIVENESS_CHECK_INTERVAL = 2.0
 
+# How often a node that dropped ONLINE → DEGRADED is reconnected automatically.
+AUTO_RECONNECT_INTERVAL = 5.0
+
 
 class NodeRegistry:
     """
@@ -57,6 +60,8 @@ class NodeRegistry:
         self._telemetry_tasks: dict[str, asyncio.Task] = {}
         # node_id -> running liveness monitor task
         self._liveness_tasks: dict[str, asyncio.Task] = {}
+        # node_id -> running auto-reconnect task (started on ONLINE → DEGRADED)
+        self._reconnect_tasks: dict[str, asyncio.Task] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -139,8 +144,16 @@ class NodeRegistry:
 
     # ── Connection Management ─────────────────────────────────────
 
-    async def _connect_node(self, node: Node, reconnect: bool = False) -> None:
-        """Attempt to connect a node via its plugin."""
+    async def _connect_node(
+        self, node: Node, reconnect: bool = False, quiet: bool = False
+    ) -> None:
+        """
+        Attempt to connect a node via its plugin.
+
+        quiet=True (auto-reconnect) leaves the status alone until it succeeds
+        — no CONNECTING, and a failure leaves the node DEGRADED with no
+        event — so vicon_manager keeps tracking it between attempts.
+        """
         plugin_class = plugin_registry.get_plugin_class(node.plugin_id)
         if not plugin_class:
             logger.error(f"No plugin class for: {node.plugin_id}")
@@ -157,8 +170,9 @@ class NodeRegistry:
         )
 
         try:
-            node.status = NodeStatus.CONNECTING
-            self._notify_listeners(node)
+            if not quiet:
+                node.status = NodeStatus.CONNECTING
+                self._notify_listeners(node)
 
             if reconnect:
                 success, reason = await plugin_instance.on_reconnect(
@@ -171,6 +185,8 @@ class NodeRegistry:
 
             if not success:
                 logger.error(f"Plugin connect() failed for {node.name}: {reason}")
+                if quiet:
+                    return
                 await self._update_status(node, NodeStatus.ERROR)
                 await telemetry_bus.publish_event(
                     title="Connection Failed",
@@ -202,12 +218,41 @@ class NodeRegistry:
 
         except Exception as e:
             logger.error(f"Error connecting node {node.name}: {e}")
-            await self._update_status(node, NodeStatus.ERROR)
+            if not quiet:
+                await self._update_status(node, NodeStatus.ERROR)
+
+    async def _auto_reconnect(self, node: Node) -> None:
+        """
+        Started when a node drops ONLINE → DEGRADED. Retries the plugin
+        connection every AUTO_RECONNECT_INTERVAL seconds while the node stays
+        DEGRADED (or ERROR, if the failsafe heartbeat fired meanwhile). Stops
+        once it's back ONLINE, or an operator disconnects/reconnects/removes it.
+        """
+        try:
+            while True:
+                await asyncio.sleep(AUTO_RECONNECT_INTERVAL)
+                if self._nodes.get(node.id) is not node or node.status not in (
+                    NodeStatus.DEGRADED, NodeStatus.ERROR
+                ):
+                    return
+                logger.info(f"{node.name}: attempting automatic reconnect")
+                old = plugin_registry.get_instance(node.id)
+                if old:
+                    try:
+                        await old.disconnect(node)
+                    except Exception as e:
+                        logger.error(f"Error disconnecting {node.name}: {e}")
+                await self._connect_node(node, reconnect=True, quiet=True)
+                if node.status == NodeStatus.ONLINE:
+                    return
+        finally:
+            if self._reconnect_tasks.get(node.id) is asyncio.current_task():
+                del self._reconnect_tasks[node.id]
 
     async def _disconnect_node(self, node: Node) -> None:
         """Disconnect a node via its plugin."""
         # Cancel background tasks first so they don't race with disconnect.
-        for task_dict in (self._telemetry_tasks, self._liveness_tasks):
+        for task_dict in (self._telemetry_tasks, self._liveness_tasks, self._reconnect_tasks):
             task = task_dict.pop(node.id, None)
             if task and not task.done():
                 task.cancel()
@@ -387,8 +432,19 @@ class NodeRegistry:
     # ── Status Management ─────────────────────────────────────────
 
     async def _update_status(self, node: Node, status: NodeStatus) -> None:
+        previous = node.status
         node.status = status
         self._notify_listeners(node)
+
+        from .failsafe_manager import failsafe_manager
+        if previous == NodeStatus.ONLINE and status == NodeStatus.DEGRADED:
+            await failsafe_manager.on_link_lost(node)
+            if node.id not in self._reconnect_tasks:
+                self._reconnect_tasks[node.id] = asyncio.create_task(
+                    self._auto_reconnect(node)
+                )
+        elif previous == NodeStatus.DEGRADED and status == NodeStatus.ONLINE:
+            await failsafe_manager.on_link_restored(node)
 
     def add_listener(self, callback: Callable) -> None:
         self._listeners.append(callback)

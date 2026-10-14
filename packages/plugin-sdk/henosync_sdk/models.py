@@ -216,6 +216,7 @@ class CommandType(str, Enum):
     TAKE_PHOTO = "take_photo"
     ACTIVATE = "activate"
     DEACTIVATE = "deactivate"
+    FOLLOW_PATH = "follow_path"
 
 
 class CommandEnvelope(BaseModel):
