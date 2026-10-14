@@ -211,3 +211,30 @@ async def test_link_lost_events_and_auto_reconnect(monkeypatch):
         await registry._disconnect_node(node)
         plugin_registry._plugins.pop("flaky-test", None)
         telemetry_bus.unsubscribe_events(on_event)
+
+
+@pytest.mark.asyncio
+async def test_backfill_scheduled_from_rosbridge_thread():
+    # rosbridge callbacks run on the Twisted thread, which has no asyncio loop.
+    import threading
+
+    received = []
+
+    class Ctx:
+        async def backfill(self, run_id, data):
+            received.append((run_id, data["path_id"]))
+
+    node = _onboard_node()
+    plugin = jackal.JackalPlugin()
+    plugin._context = Ctx()
+    plugin._loop = asyncio.get_running_loop()
+    msg = {"data": json.dumps({
+        "path_id": "p-thread", "run_id": "run-1",
+        "steps": [{"timestamp": 1.0, "waypoint_index": 0}],
+    })}
+
+    t = threading.Thread(target=plugin._on_backfill, args=(node.id, msg))
+    t.start()
+    t.join()
+    await asyncio.sleep(0.05)
+    assert received == [("run-1", "p-thread")]

@@ -182,6 +182,9 @@ class JackalPlugin(NodePlugin):
     def __init__(self):
         super().__init__()
         self._nodes: dict[str, _NodeState] = {}
+        # asyncio loop, captured in connect() — rosbridge callbacks run on the
+        # Twisted thread, which has no loop of its own.
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     # ── Topic naming ─────────────────────────────────────────────────────────
 
@@ -198,6 +201,7 @@ class JackalPlugin(NodePlugin):
             return False, "roslibpy not installed — run: pip install roslibpy"
 
         self._context = context
+        self._loop = asyncio.get_running_loop()
 
         host = config.get("host", "localhost")
         port = int(config.get("port", 9090))
@@ -433,7 +437,7 @@ class JackalPlugin(NodePlugin):
         _BACKFILLED_PATHS.add(path_id)
         # Schedule the async backfill on the asyncio event loop from the Twisted thread.
         try:
-            loop = asyncio.get_event_loop()
+            loop = self._loop
             loop.call_soon_threadsafe(
                 lambda: loop.create_task(self._do_backfill(run_id, data))
             )
@@ -739,7 +743,7 @@ class JackalPlugin(NodePlugin):
         timeout = float(node.config.get("onboard_timeout_s", 120.0))
 
         tracker = _PathTracker(uuid.uuid4().hex[:8], len(waypoints), state)
-        tracker.run_id = self._context.active_run_id() or "" if self._context else ""
+        tracker.run_id = (self._context.active_run_id() or "") if self._context else ""
         _PATHS[node.id] = tracker
         self._publish_waypoint(state, _json.dumps({
             "path_id": tracker.path_id,
