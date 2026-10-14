@@ -50,6 +50,12 @@ pnpm dev
 
 This starts Vite (renderer), compiles the Electron main process TypeScript, launches the backend Python server, and opens the desktop window.
 
+## Robot-side setup
+
+Robots connect to Henosync over rosbridge, so most features need nothing installed on the robot beyond rosbridge itself.
+
+The exception is the **Onboard Controller** capability (Jackal, TurtleBot3): the robot runs Henosync's controller script itself, and can optionally read VICON itself so it keeps driving if its link to Henosync drops. Those scripts live in [`tools/robot/`](tools/robot/README.md) and must be copied to the robot. See [tools/robot/README.md](tools/robot/README.md) for setup and run commands.
+
 ## Project Structure
 
 ```
