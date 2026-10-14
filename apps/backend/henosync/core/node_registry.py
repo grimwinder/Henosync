@@ -84,11 +84,13 @@ class NodeRegistry:
 
         new_host = node_create.config.get("host")
         new_port = node_create.config.get("port")
+        new_vehicle = node_create.config.get("vehicle_name")
         if new_host:
             for existing in self._nodes.values():
                 if (
                     existing.config.get("host") == new_host
                     and existing.config.get("port") == new_port
+                    and existing.config.get("vehicle_name") == new_vehicle
                 ):
                     raise ValueError(
                         f"A device is already connected to {new_host}:{new_port} "

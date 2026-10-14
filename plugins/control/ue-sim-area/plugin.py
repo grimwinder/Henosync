@@ -49,14 +49,9 @@ class UESimAreaPlugin(ControlPlugin):
     async def start(self, context) -> None:
         self._state = OperationState.RUNNING
 
-        # nag = number of selected devices; default to 1 if none selected
-        nag = len([
-            nid for nid in [
-                self._config.get("node_id_1", ""),
-                self._config.get("node_id_2", ""),
-                self._config.get("node_id_3", ""),
-            ] if nid
-        ]) or 1
+        # nag = number of device slots in the step (always 3); "Any available robot"
+        # stores "" which is falsy so we can't count by value — just use slot count.
+        nag = 3
 
         # coverage_fns.Agents expects ang_bounds in radians normalised to [0, 2π).
         # Whole circle: enter 0° and 359.9°, NOT 0° and 360°.
@@ -72,9 +67,10 @@ class UESimAreaPlugin(ControlPlugin):
         sim_host = self._config.get("sim_host") or "192.168.0.136"
         sim_port = int(self._config.get("sim_port") or 7000)
 
-        # Send one JSON line per agent over a single TCP connection.
-        lines = b"".join(
-            (_json.dumps({
+        # Send one TCP connection per agent, each to its own port (sim_port + ag_id - 1).
+        for i in range(nag):
+            port = sim_port + i
+            packet = (_json.dumps({
                 "angle_1": angle_1,
                 "angle_2": angle_2,
                 "radius": radius,
@@ -82,19 +78,17 @@ class UESimAreaPlugin(ControlPlugin):
                 "nag": nag,
                 "envi_type": envi_type,
             }) + "\n").encode()
-            for i in range(nag)
-        )
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(sim_host, sim_port), timeout=5.0
-            )
-            writer.write(lines)
-            await writer.drain()
-            writer.close()
-            await writer.wait_closed()
-        except Exception as e:
-            await self._fail(context, f"TCP send to {sim_host}:{sim_port} failed: {type(e).__name__}: {e}")
-            return
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(sim_host, port), timeout=5.0
+                )
+                writer.write(packet)
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+            except Exception as e:
+                await self._fail(context, f"TCP send ag_id={i+1} to {sim_host}:{port} failed: {type(e).__name__}: {e}")
+                return
 
         self._status_text = (
             f"Sent {nag} agent(s) ({envi_type}), angles ({angle_1:.4f}, {angle_2:.4f} rad), "

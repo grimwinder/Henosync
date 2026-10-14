@@ -25,6 +25,14 @@
       "placeholder": "e.g. 192.168.1.100",
       "description": "IP of the Linux machine running rosbridge_server"
     },
+    "vehicle_name": {
+      "type": "string",
+      "label": "Vehicle Name",
+      "required": true,
+      "default": "Car1",
+      "placeholder": "e.g. Car1, Car2, Car3",
+      "description": "AirSim vehicle name as defined in settings.json (e.g. Car1)"
+    },
     "port": {
       "type": "number",
       "label": "Rosbridge Port",

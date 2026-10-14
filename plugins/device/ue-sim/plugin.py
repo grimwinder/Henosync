@@ -27,9 +27,7 @@ from henosync_sdk.protocols.ros2 import ROS2NodeState, ROS2Plugin
 
 logger = logging.getLogger(__name__)
 
-GPS_TOPIC     = "/airsim_node/SUV1/global_gps"   # sensor_msgs/NavSatFix
-STATE_TOPIC   = "/airsim_node/SUV1/car_state"    # airsim_ros_pkgs/CarState
-CAR_CMD_TOPIC = "/airsim_node/SUV1/car_cmd"      # airsim_ros_pkgs/CarControls
+AIRSIM_NS = "/airsim_node"  # topic namespace prefix
 
 
 class _NodeState(ROS2NodeState):
@@ -44,6 +42,7 @@ class _NodeState(ROS2NodeState):
         self.connect_time: float = time.monotonic()
         self._no_fix_warned: bool = False
         self.car_cmd_pub: Any = None
+        self._vehicle: str = "Car1"
 
 
 class UESimPlugin(ROS2Plugin):
@@ -64,6 +63,8 @@ class UESimPlugin(ROS2Plugin):
         return _NodeState()
 
     async def setup_node(self, node: Node, state: _NodeState, config: dict) -> None:
+        vehicle = config.get("vehicle_name", "Car1").strip()
+        ns = f"{AIRSIM_NS}/{vehicle}"
         node.specs = DeviceSpecs(
             category=DeviceCategory.AGV,
             capabilities=[
@@ -72,11 +73,12 @@ class UESimPlugin(ROS2Plugin):
                 CapabilitySpec(capability=DeviceCapability.MOVE_2D),
             ],
         )
-        self.subscribe(state, GPS_TOPIC, "sensor_msgs/NavSatFix",
+        self.subscribe(state, f"{ns}/global_gps", "sensor_msgs/NavSatFix",
                        lambda msg: self._on_gps(node.id, msg))
-        self.subscribe(state, STATE_TOPIC, "airsim_ros_pkgs/CarState",
+        self.subscribe(state, f"{ns}/car_state", "airsim_ros_pkgs/CarState",
                        lambda msg: self._on_car_state(node.id, msg))
-        state.car_cmd_pub = self.advertise(state, CAR_CMD_TOPIC, "airsim_ros_pkgs/CarControls")
+        state.car_cmd_pub = self.advertise(state, f"{ns}/car_cmd", "airsim_ros_pkgs/CarControls")
+        state._vehicle = vehicle
 
     # ── Topic callbacks ────────────────────────────────────────────────────────
 
@@ -122,7 +124,7 @@ class UESimPlugin(ROS2Plugin):
                 await self._context.emit_event(
                     "No GPS data",
                     f"Connected but no GPS received after {self.POSITION_FIX_TIMEOUT:.0f}s. "
-                    f"Check that {GPS_TOPIC} is publishing.",
+                    f"Check that /airsim_node/{state._vehicle}/global_gps is publishing.",
                     EventSeverity.WARNING,
                 )
 
@@ -141,10 +143,8 @@ class UESimPlugin(ROS2Plugin):
 
     async def get_video_stream_url(self, node: Node) -> str | None:
         host = node.config.get("host", "localhost")
-        return (
-            f"http://{host}:8080/stream"
-            f"?topic=/airsim_node/SUV1/StereoCamera0_Scene/image"
-        )
+        vehicle = node.config.get("vehicle_name", "Car1").strip()
+        return f"http://{host}:8080/stream?topic=/airsim_node/{vehicle}/StereoCamera0_Scene/image"
 
     # ── Custom commands ────────────────────────────────────────────────────────
 
