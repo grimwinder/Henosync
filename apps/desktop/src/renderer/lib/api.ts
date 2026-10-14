@@ -217,10 +217,13 @@ export const startRun = (
   mission: string,
   steps: Array<Record<string, unknown>>,
 ) =>
-  apiFetch<{ run_id: string; path: string }>("/api/runs/start", {
-    method: "POST",
-    body: JSON.stringify({ mission, steps }),
-  });
+  apiFetch<{ run_id: string; path: string; csv_path: string }>(
+    "/api/runs/start",
+    {
+      method: "POST",
+      body: JSON.stringify({ mission, steps }),
+    },
+  );
 
 export const recordRunStep = (
   runId: string,
@@ -241,17 +244,6 @@ export const stopRun = (runId: string, outcome: string) =>
   apiFetch<MissionRun>(`/api/runs/${encodeURIComponent(runId)}/stop`, {
     method: "POST",
     body: JSON.stringify({ outcome }),
-  });
-
-export const exportRun = (runId: string, path: string) =>
-  apiFetch<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/export`, {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
-
-export const getRunReport = (runId: string) =>
-  apiFetch<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/report`, {
-    method: "POST",
   });
 
 export const deleteRun = (runId: string) =>

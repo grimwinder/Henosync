@@ -24,10 +24,6 @@ class StopRunRequest(BaseModel):
     outcome: str  # "completed" | "stopped" | "failed"
 
 
-class ExportRunRequest(BaseModel):
-    path: str
-
-
 @router.get("")
 async def list_runs():
     return {"runs": run_recorder.list_runs()}
@@ -63,28 +59,6 @@ async def stop_run(run_id: str, request: StopRunRequest):
         return await run_recorder.stop_run(run_id, request.outcome)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/{run_id}/export")
-async def export_run(run_id: str, request: ExportRunRequest):
-    try:
-        return {"path": run_recorder.export_csv(run_id, request.path)}
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-    except (ValueError, OSError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/{run_id}/report")
-async def run_report(run_id: str):
-    try:
-        return {"path": await run_recorder.report(run_id)}
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
 
 
 @router.delete("/{run_id}")

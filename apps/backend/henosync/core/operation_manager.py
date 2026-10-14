@@ -292,6 +292,26 @@ class OperationManager:
                 logger.error(f"Status error for {operation_id}: {e}")
         return statuses
 
+    def get_node_operation(self, node_id: str) -> dict | None:
+        """Return the operation status dict for the operation currently using node_id, or None."""
+        op_id = self._device_assignments.get(node_id)
+        if not op_id:
+            return None
+        op = self._operations.get(op_id)
+        if not op:
+            return None
+        try:
+            status = op.plugin.get_status()
+            return {
+                "operation_id": op_id,
+                "plugin_id": op.plugin_id,
+                "operation_name": op.plugin.OPERATION_NAME,
+                "status": status.model_dump(),
+            }
+        except Exception as e:
+            logger.error(f"get_node_operation error for {node_id}: {e}")
+            return None
+
     # ── Device Management ──────────────────────────────────────
 
     async def _match_devices(

@@ -21,7 +21,7 @@ import {
   Check,
   CheckCircle2,
   History,
-  FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 import MissionMap, {
   type MapBase,
@@ -43,7 +43,7 @@ import {
   recordRunStep,
   stopRun,
 } from "../lib/api";
-import RunsDialog, { openRunReport } from "../components/mission/RunsDialog";
+import RunsDialog, { openRunCsv } from "../components/mission/RunsDialog";
 import { useUIStore } from "../stores/uiStore";
 import type { ControlPluginInfo, PluginConfigField } from "../types";
 
@@ -2052,8 +2052,7 @@ function ControlsPanel({
   onStop,
   showLog,
   onClearLog,
-  onViewReport,
-  reportBusy,
+  onOpenCsv,
 }: {
   blocks: MissionBlock[];
   onClear: () => void;
@@ -2062,8 +2061,7 @@ function ControlsPanel({
   onStop: () => void;
   showLog: boolean;
   onClearLog: () => void;
-  onViewReport: (() => void) | null;
-  reportBusy: boolean;
+  onOpenCsv: (() => void) | null;
 }) {
   const hasBlocks = blocks.length > 0;
   return (
@@ -2087,11 +2085,10 @@ function ControlsPanel({
       {showLog ? (
         /* ── Log visible post-run — View Report (if recorded) + Clear ── */
         <>
-          {onViewReport && (
+          {onOpenCsv && (
             <button
-              onClick={onViewReport}
-              disabled={reportBusy}
-              title="Open this run's report in your browser"
+              onClick={onOpenCsv}
+              title="Open the run CSV in your default app"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -2102,13 +2099,13 @@ function ControlsPanel({
                 border: "1px solid #4A9EFF55",
                 backgroundColor: "#4A9EFF1A",
                 color: "#4A9EFF",
-                cursor: reportBusy ? "default" : "pointer",
+                cursor: "pointer",
                 fontSize: "11px",
                 fontWeight: 600,
               }}
             >
-              <FileText size={11} />
-              {reportBusy ? "Building report…" : "View Report"}
+              <FileSpreadsheet size={11} />
+              Open CSV
             </button>
           )}
           <button
@@ -2355,7 +2352,7 @@ export default function MissionPage() {
   // Mission log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
-  const [reportBusy, setReportBusy] = useState(false);
+  const [lastRunCsvPath, setLastRunCsvPath] = useState<string | null>(null);
 
   // Run recordings — runs are named after the saved/loaded plan
   const [missionName, setMissionName] = useState("Untitled mission");
@@ -2384,6 +2381,7 @@ export default function MissionPage() {
 
     setLogEntries([]);
     setLastRunId(null);
+    setLastRunCsvPath(null);
     addEntry(
       `Mission started · ${total} step${total !== 1 ? "s" : ""}`,
       "system",
@@ -2405,6 +2403,7 @@ export default function MissionPage() {
         })),
       );
       runId = run.run_id;
+      if (run.csv_path) setLastRunCsvPath(run.csv_path);
       addEntry(`Recording run · ${run.run_id}`, "system");
     } catch (err) {
       console.error("[Mission] Run recording unavailable:", err);
@@ -2576,32 +2575,26 @@ export default function MissionPage() {
       try {
         await stopRun(runId, outcome);
         setLastRunId(runId);
-        addEntry(
-          "Run saved — View Report opens the analysis; Runs has CSV export",
-          "system",
-        );
+        addEntry("Run saved — Open CSV button available above", "system");
       } catch (err) {
         console.error("[Mission] Failed to save run:", err);
       }
     }
   }
 
-  async function viewReport(runId: string) {
-    setReportBusy(true);
+  async function openLastRunCsv(csvPath: string) {
     try {
-      await openRunReport(runId);
+      await openRunCsv(csvPath);
     } catch (err) {
       setLogEntries((prev) => [
         ...prev,
         {
           id: `${Date.now()}-${Math.random()}`,
           time: new Date(),
-          message: `Report failed: ${(err as Error).message}`,
+          message: `Could not open CSV: ${(err as Error).message}`,
           kind: "fail",
         },
       ]);
-    } finally {
-      setReportBusy(false);
     }
   }
 
@@ -2881,9 +2874,9 @@ export default function MissionPage() {
         onClearLog={() => {
           setLogEntries([]);
           setLastRunId(null);
+          setLastRunCsvPath(null);
         }}
-        onViewReport={lastRunId ? () => viewReport(lastRunId) : null}
-        reportBusy={reportBusy}
+        onOpenCsv={lastRunCsvPath ? () => openLastRunCsv(lastRunCsvPath) : null}
       />
 
       {/* Right panel — ordered step list, full height */}

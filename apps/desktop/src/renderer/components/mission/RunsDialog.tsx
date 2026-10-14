@@ -1,14 +1,6 @@
 import { useEffect, useState } from "react";
-import {
-  X,
-  Download,
-  FolderOpen,
-  Trash2,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-} from "lucide-react";
-import { getRuns, exportRun, deleteRun, getRunReport } from "../../lib/api";
+import { X, FileSpreadsheet, FolderOpen, Trash2 } from "lucide-react";
+import { getRuns, deleteRun } from "../../lib/api";
 import type { MissionRun, RunOutcome } from "../../types";
 
 const POLL_MS = 2000;
@@ -35,14 +27,9 @@ function fmtDate(epoch: number) {
   );
 }
 
-function fmtNum(v: number | null, digits: number) {
-  return v == null ? "—" : v.toFixed(digits);
-}
-
-/** Builds the run's report.html if needed and opens it in the default browser. */
-export async function openRunReport(runId: string) {
-  const { path } = await getRunReport(runId);
-  const err = await window.henosync?.shell.openPath(path);
+/** Opens the run's CSV file directly. */
+export async function openRunCsv(csvPath: string) {
+  const err = await window.henosync?.shell.openPath(csvPath);
   if (err) throw new Error(err);
 }
 
@@ -59,14 +46,12 @@ const btn: React.CSSProperties = {
   cursor: "pointer",
 };
 
-/** Lists recorded mission runs with CSV export, open folder and delete. */
+/** Lists recorded mission runs with CSV open, open folder and delete. */
 export default function RunsDialog({ onClose }: { onClose: () => void }) {
   const [runs, setRuns] = useState<MissionRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [reportBusy, setReportBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -87,28 +72,11 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  async function handleExport(run: MissionRun) {
-    const dest = await window.henosync?.dialog.saveFile(
-      [{ name: "CSV", extensions: ["csv"] }],
-      `${run.id}.csv`,
-    );
-    if (!dest) return;
+  async function handleOpenCsv(run: MissionRun) {
     try {
-      const { path } = await exportRun(run.id, dest);
-      setNotice(`Exported to ${path}`);
+      await openRunCsv(run.csv_path);
     } catch (e) {
-      setNotice(`Export failed: ${(e as Error).message}`);
-    }
-  }
-
-  async function handleReport(run: MissionRun) {
-    setReportBusy(run.id);
-    try {
-      await openRunReport(run.id);
-    } catch (e) {
-      setNotice(`Report failed: ${(e as Error).message}`);
-    } finally {
-      setReportBusy(null);
+      setNotice(`Could not open CSV: ${(e as Error).message}`);
     }
   }
 
@@ -177,7 +145,7 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
             MISSION RUNS
           </span>
           <span style={{ flex: 1, fontSize: "10px", color: "#555555" }}>
-            Every Run Mission is recorded to ~/.henosync/runs
+            CSV logs saved to ~/Downloads
           </span>
           <button
             onClick={onClose}
@@ -224,233 +192,108 @@ export default function RunsDialog({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             runs.map((run) => {
-              const isOpen = expanded === run.id;
               const running = run.outcome === "running";
               return (
-                <div key={run.id} style={{ borderBottom: "1px solid #1F1F1F" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "9px 12px",
-                    }}
-                  >
-                    <button
-                      onClick={() => setExpanded(isOpen ? null : run.id)}
-                      title={isOpen ? "Hide steps" : "Show steps"}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        background: "none",
-                        border: "none",
-                        padding: 0,
-                        cursor: "pointer",
-                        textAlign: "left",
-                        color: "inherit",
-                      }}
-                    >
-                      {isOpen ? (
-                        <ChevronDown size={12} color="#666666" />
-                      ) : (
-                        <ChevronRight size={12} color="#666666" />
-                      )}
-                      <span style={{ minWidth: 0 }}>
-                        <span
-                          style={{
-                            display: "block",
-                            fontSize: "12px",
-                            fontWeight: 600,
-                            color: "#EFEFEF",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {run.mission}
-                        </span>
-                        <span
-                          style={{
-                            display: "block",
-                            fontSize: "10px",
-                            color: "#777777",
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {fmtDate(run.started)}
-                          {run.duration_s != null &&
-                            ` · ${run.duration_s.toFixed(0)} s`}
-                          {` · ${run.step_count} step${run.step_count !== 1 ? "s" : ""}`}
-                          {run.robots.length > 0 &&
-                            ` · ${run.robots.join(", ")}`}
-                        </span>
-                      </span>
-                    </button>
-
+                <div
+                  key={run.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "9px 12px",
+                    borderBottom: "1px solid #1F1F1F",
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 0 }}>
                     <span
                       style={{
-                        fontSize: "10px",
+                        display: "block",
+                        fontSize: "12px",
                         fontWeight: 600,
-                        padding: "2px 8px",
-                        borderRadius: "999px",
-                        color: OUTCOME_COLOR[run.outcome],
-                        backgroundColor: `${OUTCOME_COLOR[run.outcome]}1A`,
+                        color: "#EFEFEF",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {run.outcome}
+                      {run.mission}
                     </span>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: "10px",
+                        color: "#777777",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {fmtDate(run.started)}
+                      {run.duration_s != null &&
+                        ` · ${run.duration_s.toFixed(0)} s`}
+                      {` · ${run.step_count} step${run.step_count !== 1 ? "s" : ""}`}
+                      {run.robots.length > 0 && ` · ${run.robots.join(", ")}`}
+                    </span>
+                  </span>
 
-                    <button
-                      onClick={() => handleExport(run)}
-                      disabled={running}
-                      title={
-                        running
-                          ? "Available when the run finishes"
-                          : "Export step results as CSV"
-                      }
-                      style={{
-                        ...btn,
-                        opacity: running ? 0.4 : 1,
-                        cursor: running ? "default" : "pointer",
-                      }}
-                    >
-                      <Download size={11} />
-                      Export CSV
-                    </button>
-                    <button
-                      onClick={() => handleReport(run)}
-                      disabled={running || reportBusy === run.id}
-                      title={
-                        running
-                          ? "Available when the run finishes"
-                          : "Open the run report in your browser"
-                      }
-                      style={{
-                        ...btn,
-                        opacity: running ? 0.4 : 1,
-                        cursor: running ? "default" : "pointer",
-                      }}
-                    >
-                      <FileText size={11} />
-                      {reportBusy === run.id ? "Building…" : "View report"}
-                    </button>
-                    <button
-                      onClick={() => window.henosync?.shell.openPath(run.path)}
-                      title={run.path}
-                      style={btn}
-                    >
-                      <FolderOpen size={11} />
-                      Open folder
-                    </button>
-                    <button
-                      onClick={() => handleDelete(run)}
-                      onMouseLeave={() =>
-                        confirmDelete === run.id && setConfirmDelete(null)
-                      }
-                      disabled={running}
-                      title="Delete this run's recording"
-                      style={{
-                        ...btn,
-                        color: "#F05252",
-                        borderColor:
-                          confirmDelete === run.id ? "#F05252" : "#2D2D2D",
-                        opacity: running ? 0.4 : 1,
-                        cursor: running ? "default" : "pointer",
-                      }}
-                    >
-                      <Trash2 size={11} />
-                      {confirmDelete === run.id ? "Confirm" : "Delete"}
-                    </button>
-                  </div>
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: "999px",
+                      color: OUTCOME_COLOR[run.outcome],
+                      backgroundColor: `${OUTCOME_COLOR[run.outcome]}1A`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {run.outcome}
+                  </span>
 
-                  {isOpen && <StepTable run={run} />}
+                  <button
+                    onClick={() => handleOpenCsv(run)}
+                    disabled={!run.csv_path}
+                    title={run.csv_path || "No CSV path available"}
+                    style={{
+                      ...btn,
+                      opacity: run.csv_path ? 1 : 0.4,
+                      cursor: run.csv_path ? "pointer" : "default",
+                    }}
+                  >
+                    <FileSpreadsheet size={11} />
+                    Open CSV
+                  </button>
+                  <button
+                    onClick={() => window.henosync?.shell.openPath(run.path)}
+                    title={run.path}
+                    style={btn}
+                  >
+                    <FolderOpen size={11} />
+                    Open folder
+                  </button>
+                  <button
+                    onClick={() => handleDelete(run)}
+                    onMouseLeave={() =>
+                      confirmDelete === run.id && setConfirmDelete(null)
+                    }
+                    disabled={running}
+                    title="Delete this run's recording"
+                    style={{
+                      ...btn,
+                      color: "#F05252",
+                      borderColor:
+                        confirmDelete === run.id ? "#F05252" : "#2D2D2D",
+                      opacity: running ? 0.4 : 1,
+                      cursor: running ? "default" : "pointer",
+                    }}
+                  >
+                    <Trash2 size={11} />
+                    {confirmDelete === run.id ? "Confirm" : "Delete"}
+                  </button>
                 </div>
               );
             })
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function StepTable({ run }: { run: MissionRun }) {
-  if (run.results.length === 0) {
-    return (
-      <div
-        style={{
-          padding: "0 12px 12px 32px",
-          fontSize: "11px",
-          color: "#666666",
-        }}
-      >
-        {run.outcome === "running"
-          ? "Step results appear when the run finishes."
-          : "No step results recorded for this run."}
-      </div>
-    );
-  }
-  const th: React.CSSProperties = {
-    textAlign: "left",
-    padding: "4px 8px",
-    fontSize: "9px",
-    fontWeight: 700,
-    letterSpacing: "0.8px",
-    color: "#666666",
-    whiteSpace: "nowrap",
-  };
-  const td: React.CSSProperties = {
-    padding: "4px 8px",
-    fontSize: "11px",
-    color: "#CCCCCC",
-    borderTop: "1px solid #1F1F1F",
-    whiteSpace: "nowrap",
-    fontVariantNumeric: "tabular-nums",
-  };
-  return (
-    <div style={{ padding: "0 12px 12px 32px", overflowX: "auto" }}>
-      <table style={{ borderCollapse: "collapse", width: "100%" }}>
-        <thead>
-          <tr>
-            {[
-              "STEP",
-              "TYPE",
-              "ROBOT",
-              "TARGET",
-              "OUTCOME",
-              "TIME (S)",
-              "ERROR (M)",
-              "COVERAGE (%)",
-            ].map((h) => (
-              <th key={h} style={th}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {run.results.map((r, i) => (
-            <tr key={i}>
-              <td style={td}>
-                {r.step} · {r.step_name}
-              </td>
-              <td style={td}>{r.step_type}</td>
-              <td style={td}>{r.robot || "—"}</td>
-              <td style={td}>{r.target || "—"}</td>
-              <td style={td} title={r.status_text}>
-                {r.outcome}
-              </td>
-              <td style={td}>{fmtNum(r.duration_s, 1)}</td>
-              <td style={td}>{fmtNum(r.final_error_m, 3)}</td>
-              <td style={td}>{fmtNum(r.coverage_pct, 1)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
