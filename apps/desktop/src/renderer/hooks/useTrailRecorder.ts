@@ -11,7 +11,8 @@ import { useOperations } from "./useOperations";
 export function useTrailRecorder() {
   const nodes = useNodeStore((s) => s.nodes);
   const { data: operations = [] } = useOperations();
-  const { addGpsPoint, addViconPoint, clearTrails } = useTrailStore();
+  const { addGpsPoint, addViconPoint, addViconBreak, clearTrails } =
+    useTrailStore();
   const prevOpKeysRef = useRef<string>("");
   const skipRef = useRef(false);
 
@@ -35,6 +36,12 @@ export function useTrailRecorder() {
     for (const node of Object.values(nodes)) {
       if (node.status !== "online" && node.status !== "degraded") continue;
 
+      // Link dropout: Henosync can't see the robot — gap in the trail
+      if (node.link_blocked) {
+        addViconBreak(node.id);
+        continue;
+      }
+
       const t = node.telemetry as Record<string, unknown> | null;
 
       // VICON trail — uses vicon_x/vicon_y published by vicon_manager
@@ -49,5 +56,5 @@ export function useTrailRecorder() {
         addGpsPoint(node.id, node.position.lon, node.position.lat);
       }
     }
-  }, [nodes, operations, addGpsPoint, addViconPoint]);
+  }, [nodes, operations, addGpsPoint, addViconPoint, addViconBreak]);
 }

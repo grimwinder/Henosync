@@ -61,6 +61,7 @@ export default function VICONMap({
   const zones = Object.values(useZoneStore((s) => s.zones));
   const markers = Object.values(useMarkerStore((s) => s.markers));
   const viconTrails = useTrailStore((s) => s.viconTrails);
+  const viconOfflineTrails = useTrailStore((s) => s.viconOfflineTrails);
 
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -510,25 +511,52 @@ export default function VICONMap({
           })()}
 
         {/* VICON trails */}
-        {Object.entries(viconTrails).map(([nodeId, points]) => {
-          if (points.length < 2) return null;
-          const pts = points.map(([x, y]) => toSvg(x, y).join(",")).join(" ");
-          return (
-            <polyline
-              key={nodeId}
-              points={pts}
-              fill="none"
-              stroke="#4A9EFF"
-              strokeWidth={2 * s}
-              strokeOpacity={0.8}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          );
+        {Object.entries(viconTrails).flatMap(([nodeId, points]) => {
+          // null entries are link dropouts — split the trail there
+          const segments: Array<Array<[number, number]>> = [[]];
+          for (const p of points) {
+            if (p === null) segments.push([]);
+            else segments[segments.length - 1].push(p);
+          }
+          return segments
+            .filter((seg) => seg.length >= 2)
+            .map((seg, i) => (
+              <polyline
+                key={`${nodeId}-${i}`}
+                points={seg.map(([x, y]) => toSvg(x, y).join(",")).join(" ")}
+                fill="none"
+                stroke="#4A9EFF"
+                strokeWidth={2 * s}
+                strokeOpacity={0.8}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            ));
         })}
+
+        {/* Paths robots logged themselves during a link dropout */}
+        {Object.entries(viconOfflineTrails).flatMap(([nodeId, segments]) =>
+          segments
+            .filter((seg) => seg.length >= 2)
+            .map((seg, i) => (
+              <polyline
+                key={`offline-${nodeId}-${i}`}
+                points={seg.map(([x, y]) => toSvg(x, y).join(",")).join(" ")}
+                fill="none"
+                stroke="#F5A623"
+                strokeWidth={2 * s}
+                strokeOpacity={0.9}
+                strokeDasharray={`${6 * s} ${4 * s}`}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            )),
+        )}
 
         {/* Robot dots */}
         {nodes.flatMap((node) => {
+          // Link dropout: Henosync can't see the robot
+          if (node.link_blocked) return [];
           const vx = node.telemetry?.vicon_x as number | undefined;
           const vy = node.telemetry?.vicon_y as number | undefined;
           if (vx == null || vy == null) return [];

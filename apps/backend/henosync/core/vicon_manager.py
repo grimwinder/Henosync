@@ -159,6 +159,9 @@ class VICONManager:
                 if (
                     node.config.get("position_source") == "vicon"
                     and node.status in (NodeStatus.ONLINE, NodeStatus.DEGRADED)
+                    # Operator link dropout (Test 2): Henosync goes blind to the
+                    # robot too — its path comes from the robot's own log later.
+                    and not node.link_blocked
                 )
             ]
 

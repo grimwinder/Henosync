@@ -502,6 +502,27 @@ class NodeRegistry:
         except Exception as e:
             logger.error(f"Robot log for run {run_id} not recorded: {e}")
 
+        # Poses the robot logged while Henosync couldn't see it → live map,
+        # one segment per dropout
+        offline_path: list[list[list[float]]] = []
+        segment: list[list[float]] = []
+        for r in records:
+            if r.get("kind") != "sample":
+                continue
+            if r.get("link") is False:
+                if r.get("pose_ok") is not False and isinstance(r.get("x"), (int, float)) \
+                        and isinstance(r.get("y"), (int, float)):
+                    segment.append([r["x"], r["y"]])
+            elif segment:
+                offline_path.append(segment)
+                segment = []
+        if segment:
+            offline_path.append(segment)
+        if offline_path:
+            asyncio.create_task(telemetry_bus.publish_telemetry(
+                TelemetryFrame(node_id=node_id, custom={"offline_path": offline_path})
+            ))
+
     # ── Status Management ─────────────────────────────────────────
 
     async def _update_status(self, node: Node, status: NodeStatus) -> None:

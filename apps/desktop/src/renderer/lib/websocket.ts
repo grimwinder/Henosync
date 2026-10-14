@@ -1,6 +1,7 @@
 import type { WsMessage } from "../types";
 import { useNodeStore } from "../stores/nodeStore";
 import { useSystemStore } from "../stores/systemStore";
+import { useTrailStore } from "../stores/trailStore";
 
 const BACKEND_WS = "ws://127.0.0.1:8765";
 
@@ -77,7 +78,18 @@ class ManagedSocket {
 
 function handleTelemetry(msg: WsMessage) {
   if (msg.type !== "telemetry") return;
-  useNodeStore.getState().updateTelemetry(msg.node_id, msg.values);
+  // Path the robot logged during a link dropout, delivered after reconnect
+  const { offline_path, ...values } = msg.values as Record<string, unknown>;
+  if (Array.isArray(offline_path)) {
+    useTrailStore
+      .getState()
+      .addViconOfflineSegments(
+        msg.node_id,
+        offline_path as Array<Array<[number, number]>>,
+      );
+    return;
+  }
+  useNodeStore.getState().updateTelemetry(msg.node_id, values);
 }
 
 function handleEvent(msg: WsMessage) {
