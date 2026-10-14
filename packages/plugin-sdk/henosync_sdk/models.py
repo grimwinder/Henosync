@@ -339,10 +339,14 @@ class NodePluginContext:
         node_id: str,
         emit_event_fn: Callable,
         command_completed_fn: Callable,
+        active_run_id_fn: Optional[Callable] = None,
+        backfill_fn: Optional[Callable] = None,
     ):
         self._node_id = node_id
         self._emit_event_fn = emit_event_fn
         self._command_completed_fn = command_completed_fn
+        self._active_run_id_fn = active_run_id_fn
+        self._backfill_fn = backfill_fn
 
     async def emit_event(
         self,
@@ -367,3 +371,18 @@ class NodePluginContext:
         command_id comes from the CommandEnvelope passed to send_command.
         """
         await self._command_completed_fn(command_id, success, message)
+
+    def active_run_id(self) -> Optional[str]:
+        """Return the ID of the currently recording run, or None."""
+        return self._active_run_id_fn() if self._active_run_id_fn else None
+
+    async def backfill(self, run_id: str, data: dict) -> None:
+        """
+        Merge robot-reported data into a stopped run recording.
+
+        data keys:
+          telemetry  list of dicts — raw telemetry entries to append
+          steps      list of dicts — step/waypoint events to append
+        """
+        if self._backfill_fn:
+            await self._backfill_fn(run_id, data)

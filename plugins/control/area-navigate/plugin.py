@@ -1598,20 +1598,25 @@ class AutoNavigatePlugin(ControlPlugin):
 
             waypoints = vertices * laps + [vertices[0]]
             total = len(waypoints)
-            for i, (a, b) in enumerate(waypoints):
-                if self._stop_requested:
-                    self._device_status[device.name] = "Stopped"
-                    return False
-                lap_num = min(laps, i // len(vertices) + 1)
-                self._device_status[device.name] = (
-                    f"Patrolling — lap {lap_num}/{laps}, waypoint {i + 1}/{total}"
-                )
-                lat, lon = device.local_to_gps(a, b) if kind == "local" else (a, b)
-                if not await self._navigate_one_waypoint(
-                    device, lat, lon, context, arrival_radius_m, max_speed
-                ):
-                    self._device_status[device.name] = f"Patrol failed at waypoint {i + 1}/{total}"
-                    return False
+            points = [device.local_to_gps(a, b) if kind == "local" else (a, b) for a, b in waypoints]
+            followed = await self._follow_path(device, points, context, arrival_radius_m, max_speed)
+            if followed is False:
+                return False
+            if followed is None:
+                # Device can't run a whole path itself — drive one waypoint at a time.
+                for i, (lat, lon) in enumerate(points):
+                    if self._stop_requested:
+                        self._device_status[device.name] = "Stopped"
+                        return False
+                    lap_num = min(laps, i // len(vertices) + 1)
+                    self._device_status[device.name] = (
+                        f"Patrolling — lap {lap_num}/{laps}, waypoint {i + 1}/{total}"
+                    )
+                    if not await self._navigate_one_waypoint(
+                        device, lat, lon, context, arrival_radius_m, max_speed
+                    ):
+                        self._device_status[device.name] = f"Patrol failed at waypoint {i + 1}/{total}"
+                        return False
 
             self._device_status[device.name] = f"Complete — patrolled {laps} lap(s)"
             return True

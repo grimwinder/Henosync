@@ -34,6 +34,10 @@ Topics published:
                                "total", "done", "stopped"}; sent on every
                                waypoint reached and re-sent at 1 Hz so Henosync
                                catches up after a reconnect
+  /<ns>/henosync/backfill      std_msgs/String — JSON {"path_id", "run_id",
+                               "steps": [{"timestamp", "waypoint_index"}, ...]}; sent
+                               on each waypoint arrival and re-sent at 1 Hz so
+                               Henosync can record offline progress after reconnect
 
 Usage:
   python henosync_controller.py [--namespace tb2] [--unstamped]
@@ -85,6 +89,7 @@ class HenosyncController(Node):
         )
         self._arrived_pub = self.create_publisher(Bool, _ht("henosync/arrived"), 10)
         self._progress_pub = self.create_publisher(String, _ht("henosync/progress"), 10)
+        self._backfill_pub = self.create_publisher(String, _ht("henosync/backfill"), 10)
 
         if unstamped:
             self._cmd_vel_pub = self.create_publisher(Twist, cmd_vel_topic, 10)
@@ -94,11 +99,13 @@ class HenosyncController(Node):
         # Path state — a single waypoint is a path of length 1
         self._path: list[tuple[float, float]] = []
         self._path_id: str = ""
+        self._run_id: str = ""
         self._index: int = 0
         self._stopped: bool = False
         self._arrival_radius: float = 0.1
         self._max_speed: float = MAX_LINEAR_VEL
         self._active: bool = False  # True while waypoints remain
+        self._step_buffer: list[dict] = []  # [{timestamp, waypoint_index}]
 
         self._pos_x: float = 0.0
         self._pos_y: float = 0.0
@@ -135,11 +142,13 @@ class HenosyncController(Node):
 
         self._path = path
         self._path_id = str(data.get("path_id", ""))
+        self._run_id = str(data.get("run_id", ""))
         self._index = 0
         self._stopped = False
         self._arrival_radius = float(data.get("arrival_radius", 0.1))
         self._max_speed = min(float(data.get("max_speed", MAX_LINEAR_VEL)), MAX_LINEAR_VEL)
         self._active = bool(path)
+        self._step_buffer = []
         self.get_logger().info(
             f"New path '{self._path_id}': {len(path)} waypoint(s), first "
             f"({path[0][0]:.3f}, {path[0][1]:.3f}) "
@@ -176,6 +185,10 @@ class HenosyncController(Node):
         distance = math.sqrt(dx * dx + dy * dy)
 
         if distance < self._arrival_radius:
+            self._step_buffer.append({
+                "timestamp": time.time(),
+                "waypoint_index": self._index,
+            })
             self._index += 1
             self.get_logger().info(
                 f"Reached waypoint {self._index}/{len(self._path)} "
@@ -188,6 +201,7 @@ class HenosyncController(Node):
                 arrived.data = True
                 self._arrived_pub.publish(arrived)
             self._publish_progress()
+            self._publish_backfill()
             return
 
         bearing = math.atan2(dy, dx)
@@ -222,6 +236,18 @@ class HenosyncController(Node):
             "stopped": self._stopped,
         })
         self._progress_pub.publish(msg)
+        self._publish_backfill()
+
+    def _publish_backfill(self) -> None:
+        if not self._path or not self._run_id or not self._step_buffer:
+            return
+        msg = String()
+        msg.data = json.dumps({
+            "path_id": self._path_id,
+            "run_id": self._run_id,
+            "steps": self._step_buffer,
+        })
+        self._backfill_pub.publish(msg)
 
     def _publish_velocity(self, linear: float, angular: float) -> None:
         if self._unstamped:

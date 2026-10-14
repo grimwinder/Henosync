@@ -167,6 +167,8 @@ class NodeRegistry:
             node_id=node.id,
             emit_event_fn=self._emit_plugin_event,
             command_completed_fn=self._handle_command_completed,
+            active_run_id_fn=self._get_active_run_id,
+            backfill_fn=self._handle_backfill,
         )
 
         try:
@@ -428,6 +430,19 @@ class NodeRegistry:
         logger.info(
             f"Command {command_id} completed: success={success} msg={message}"
         )
+
+    def _get_active_run_id(self) -> Optional[str]:
+        """Callback used by NodePluginContext.active_run_id()."""
+        from .run_recorder import run_recorder
+        return run_recorder.active_run_id
+
+    async def _handle_backfill(self, run_id: str, data: dict) -> None:
+        """Callback used by NodePluginContext.backfill()."""
+        from .run_recorder import run_recorder
+        try:
+            await run_recorder.backfill(run_id, data)
+        except Exception as e:
+            logger.error(f"Backfill failed for run {run_id}: {e}")
 
     # ── Status Management ─────────────────────────────────────────
 

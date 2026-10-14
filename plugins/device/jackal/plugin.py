@@ -131,6 +131,7 @@ class _PathTracker:
         self.path_id = path_id
         self.total = total
         self.state = state  # live connection — swapped in by connect() after a reconnect
+        self.run_id: str = ""
         self.completed: int = 0
         self.done: bool = False
         self.stopped: bool = False
@@ -142,6 +143,7 @@ class _PathTracker:
 
 
 _PATHS: dict[str, _PathTracker] = {}
+_BACKFILLED_PATHS: set[str] = set()  # path_ids that have already been backfilled
 
 
 class JackalPlugin(NodePlugin):
@@ -335,6 +337,12 @@ class JackalPlugin(NodePlugin):
                 progress_topic.subscribe(lambda msg: self._on_progress(node.id, msg))
                 state._subscriptions.append(progress_topic)
 
+                backfill_topic = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/backfill"), "std_msgs/String"
+                )
+                backfill_topic.subscribe(lambda msg: self._on_backfill(node.id, msg))
+                state._subscriptions.append(backfill_topic)
+
                 # Reconnected mid-path: let the waiting cmd_follow_path use this connection.
                 tracker = _PATHS.get(node.id)
                 if tracker:
@@ -407,6 +415,42 @@ class JackalPlugin(NodePlugin):
             tracker.last_change = now
         tracker.done = bool(data.get("done", False))
         tracker.stopped = bool(data.get("stopped", False))
+
+    def _on_backfill(self, node_id: str, msg: dict) -> None:
+        state = self._nodes.get(node_id)
+        if state:
+            state.last_message_time = time.monotonic()
+        try:
+            data = _json.loads(msg.get("data", ""))
+        except ValueError:
+            return
+        path_id = data.get("path_id", "")
+        run_id = data.get("run_id", "")
+        if not path_id or not run_id or not data.get("steps"):
+            return
+        if path_id in _BACKFILLED_PATHS:
+            return
+        _BACKFILLED_PATHS.add(path_id)
+        # Schedule the async backfill on the asyncio event loop from the Twisted thread.
+        try:
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(
+                lambda: loop.create_task(self._do_backfill(run_id, data))
+            )
+        except Exception as e:
+            logger.error("Jackal [%s]: backfill schedule failed: %s", node_id, e)
+
+    async def _do_backfill(self, run_id: str, data: dict) -> None:
+        if not self._context:
+            return
+        try:
+            await self._context.backfill(run_id, data)
+            logger.info(
+                "Jackal: backfill %d step(s) → run %s",
+                len(data.get("steps", [])), run_id,
+            )
+        except Exception as e:
+            logger.error("Jackal: backfill failed: %s", e)
 
     def _on_battery(self, node_id: str, msg: dict) -> None:
         state = self._nodes.get(node_id)
@@ -695,9 +739,11 @@ class JackalPlugin(NodePlugin):
         timeout = float(node.config.get("onboard_timeout_s", 120.0))
 
         tracker = _PathTracker(uuid.uuid4().hex[:8], len(waypoints), state)
+        tracker.run_id = self._context.active_run_id() or "" if self._context else ""
         _PATHS[node.id] = tracker
         self._publish_waypoint(state, _json.dumps({
             "path_id": tracker.path_id,
+            "run_id": tracker.run_id,
             "path": [{"x": float(w["x"]), "y": float(w["y"])} for w in waypoints],
             "arrival_radius": threshold,
             "max_speed": speed_cap,
