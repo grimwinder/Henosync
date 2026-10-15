@@ -24,6 +24,12 @@ class StopRunRequest(BaseModel):
     outcome: str  # "completed" | "stopped" | "failed"
 
 
+
+class BackfillRequest(BaseModel):
+    telemetry: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+
+
 @router.get("")
 async def list_runs():
     return {"runs": run_recorder.list_runs()}
@@ -59,6 +65,18 @@ async def stop_run(run_id: str, request: StopRunRequest):
         return await run_recorder.stop_run(run_id, request.outcome)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+
+@router.post("/{run_id}/backfill")
+async def backfill_run(run_id: str, request: BackfillRequest):
+    try:
+        return await run_recorder.backfill(run_id, request.model_dump())
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @router.delete("/{run_id}")

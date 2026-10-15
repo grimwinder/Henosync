@@ -238,6 +238,93 @@ class RunRecorder:
             csv_p.unlink(missing_ok=True)
         shutil.rmtree(path)
 
+    async def backfill(self, run_id: str, data: dict) -> dict:
+        """
+        Append robot-reported data to a stopped run's CSV for the dropout period.
+
+        Called when a robot reconnects after executing a mission autonomously
+        during a Henosync dropout.
+
+        data keys:
+          telemetry  list of {"timestamp", "node_id", "values"} dicts
+          steps      list of {"timestamp", "index", "event", "outcome", "status_text"} dicts
+        """
+        if self._active and self._active.id == run_id:
+            raise ValueError("Cannot backfill an active run")
+        path = self._run_path(run_id)
+        meta = json.loads((path / "meta.json").read_text(encoding="utf-8"))
+
+        csv_path = Path(meta.get("csv_path", ""))
+        if not csv_path.exists():
+            raise FileNotFoundError(f"CSV not found: {csv_path}")
+
+        with csv_path.open("r", encoding="utf-8") as f:
+            fieldnames = csv.DictReader(f).fieldnames or []
+
+        node_prefix = {n["id"]: n["col"] for n in meta.get("nodes", [])}
+        started = meta["started"]
+
+        tel_entries = data.get("telemetry") or []
+        step_entries = data.get("steps") or []
+
+        step_by_ts: dict[float, dict] = {
+            float(s.get("timestamp") or s.get("recv", 0)): s for s in step_entries
+        }
+
+        rows_written = 0
+        with csv_path.open("a", newline="", encoding="utf-8", buffering=1) as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+
+            for entry in tel_entries:
+                ts = float(entry.get("timestamp") or entry.get("recv", time.time()))
+                node_id = entry.get("node_id", "")
+                values = entry.get("values") or {}
+                prefix = node_prefix.get(node_id, "")
+
+                row: dict = {
+                    "timestamp": datetime.fromtimestamp(ts).isoformat(timespec="milliseconds"),
+                    "elapsed_s": round(ts - started, 2),
+                    "mission_name": meta["mission"],
+                    "mission_status": "executing",
+                    "step_event": "backfill",
+                }
+
+                if prefix:
+                    row[f"{prefix}_lat"] = values.get("lat", "")
+                    row[f"{prefix}_lon"] = values.get("lon", "")
+                    row[f"{prefix}_vicon_x"] = values.get("vicon_x", "")
+                    row[f"{prefix}_vicon_y"] = values.get("vicon_y", "")
+                    row[f"{prefix}_speed"] = values.get("speed", "")
+                    row[f"{prefix}_heading"] = values.get("heading", "")
+                    row[f"{prefix}_battery_pct"] = values.get("battery_percent", "")
+
+                # Merge nearest step event (within 1 s)
+                closest_ts = min(step_by_ts, key=lambda t: abs(t - ts), default=None)
+                if closest_ts is not None and abs(closest_ts - ts) < 1.0:
+                    s = step_by_ts.pop(closest_ts)
+                    row["step_index"] = s.get("index", "")
+                    row["step_event"] = s.get("event", "backfill")
+
+                writer.writerow(row)
+                rows_written += 1
+
+            for ts, s in sorted(step_by_ts.items()):
+                row = {
+                    "timestamp": datetime.fromtimestamp(ts).isoformat(timespec="milliseconds"),
+                    "elapsed_s": round(ts - started, 2),
+                    "mission_name": meta["mission"],
+                    "mission_status": "executing",
+                    "step_index": s.get("index", ""),
+                    "step_event": s.get("event", "backfill"),
+                }
+                writer.writerow(row)
+                rows_written += 1
+
+        meta.setdefault("backfills", []).append({"received": time.time(), "rows": rows_written})
+        (path / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        logger.info(f"Run {run_id} backfilled: {rows_written} rows appended to CSV")
+        return self._describe(path)
+
     # ── Event subscription ────────────────────────────────────────
 
     def _subscribe_once(self) -> None:

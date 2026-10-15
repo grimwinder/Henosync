@@ -12,9 +12,14 @@ Movement (move_to):
   Two modes — selected via the optional "Onboard Controller" capability:
     Default:         proportional velocity controller in Henosync; publishes
                      geometry_msgs/Twist to platform/cmd_vel_unstamped at 10 Hz.
-    Onboard Ctrl:    Henosync publishes waypoint + VICON pose to the robot;
-                     henosync_controller.py on the robot runs the proportional
-                     controller locally and publishes arrived when done.
+    Onboard Ctrl:    Henosync publishes the waypoint (or, via follow_path, a
+                     whole path) to the robot; henosync_controller.py on the
+                     robot runs the proportional controller locally and
+                     reports progress. Its pose comes from Henosync's relay
+                     (henosync/vicon_pose) or, with onboard_pose_source=onboard,
+                     from vicon_pose_publisher.py on the robot — then the robot
+                     keeps driving its path while rosbridge is down, and
+                     Henosync picks its progress back up after reconnecting.
 
 Manual driving (cmd_vel custom command):
   For the `teleop` control plugin — normalised [-1, 1] linear/angular,
@@ -29,12 +34,12 @@ Topics subscribed (all optionally prefixed with `namespace`, e.g. a200_0000):
   platform/bms/state                  sensor_msgs/BatteryState        (battery)
   sensors/imu_0/data                  sensor_msgs/Imu                 (orientation)
   sensors/lidar2d_0/scan              sensor_msgs/LaserScan           (optional)
-  henosync/arrived                    std_msgs/Bool                   (onboard_ctrl only)
+  henosync/progress                   std_msgs/String  JSON           (onboard_ctrl only)
 
 Topics published:
   platform/cmd_vel_unstamped           geometry_msgs/Twist
   henosync/waypoint                    std_msgs/String  JSON           (onboard_ctrl only)
-  henosync/vicon_pose                  geometry_msgs/Pose2D           (onboard_ctrl only)
+  henosync/vicon_pose                  geometry_msgs/Pose2D           (onboard_ctrl + relay pose only)
 """
 
 import asyncio
@@ -42,6 +47,7 @@ import json as _json
 import logging
 import math
 import time
+import uuid
 from typing import Any, AsyncGenerator, Optional
 
 from henosync_sdk import (
@@ -81,10 +87,9 @@ class _NodeState:
         self.ros: Optional[Any] = None
         self.cmd_vel_pub: Optional[Any] = None
 
-        # Onboard controller publishers/subscriber (created only when onboard_ctrl selected)
+        # Onboard controller publishers (created only when onboard_ctrl selected)
         self.waypoint_pub: Optional[Any] = None
         self.vicon_pose_pub: Optional[Any] = None
-        self.arrived_event: Optional[asyncio.Event] = None
 
         # Position — GPS mode only, written by _on_gps.
         # VICON mode: vicon_manager sets node.position directly, nothing here.
@@ -114,6 +119,33 @@ class _NodeState:
         self._subscriptions: list = []
 
 
+class _PathTracker:
+    """
+    Progress of the path the onboard controller is driving, keyed by node id
+    in _PATHS. Module-level rather than in _NodeState because a reconnect
+    creates a new plugin instance: cmd_follow_path keeps waiting in the old
+    instance while the new instance's progress subscription updates this.
+    """
+
+    def __init__(self, path_id: str, total: int, state: _NodeState):
+        self.path_id = path_id
+        self.total = total
+        self.state = state  # live connection — swapped in by connect() after a reconnect
+        self.run_id: str = ""
+        self.completed: int = 0
+        self.done: bool = False
+        self.stopped: bool = False
+        self.stop_requested: bool = False
+        self.heard: bool = False
+        now = time.monotonic()
+        self.last_heard: float = now   # last progress message for this path
+        self.last_change: float = now  # last time a waypoint was reached
+
+
+_PATHS: dict[str, _PathTracker] = {}
+_BACKFILLED_PATHS: set[str] = set()  # path_ids that have already been backfilled
+
+
 class JackalPlugin(NodePlugin):
     """
     Clearpath Jackal UGV device plugin.
@@ -141,6 +173,11 @@ class JackalPlugin(NodePlugin):
     LINEAR_GAIN: float = 0.5
     ANGULAR_GAIN: float = 1.5
     ARRIVAL_POLL_S: float = 0.1
+
+    # Onboard controller path tracking — the robot re-sends progress at 1 Hz
+    PROGRESS_ACK_TIMEOUT_S: float = 5.0   # no progress at all → controller not running
+    LINK_LOST_S: float = 3.0              # no progress for this long → link considered down
+    LINK_LOSS_GRACE_S: float = 300.0      # give up if the link stays down this long
 
     def __init__(self):
         super().__init__()
@@ -281,28 +318,35 @@ class JackalPlugin(NodePlugin):
                 state._subscriptions.append(lidar_topic)
 
             if "onboard_ctrl" in selected:
-                # Publish waypoints and VICON pose to the robot; subscribe to arrived signal.
-                state.arrived_event = asyncio.Event()
-                _loop = asyncio.get_running_loop()
-
+                # Publish waypoints (and, in relay mode, VICON pose) to the robot;
+                # subscribe to the controller's progress reports.
                 state.waypoint_pub = roslibpy.Topic(
                     ros, self._topic(ns, "henosync/waypoint"), "std_msgs/String"
                 )
                 state.waypoint_pub.advertise()
 
-                state.vicon_pose_pub = roslibpy.Topic(
-                    ros, self._topic(ns, "henosync/vicon_pose"), "geometry_msgs/Pose2D"
-                )
-                state.vicon_pose_pub.advertise()
+                if config.get("onboard_pose_source", "relay") == "relay":
+                    state.vicon_pose_pub = roslibpy.Topic(
+                        ros, self._topic(ns, "henosync/vicon_pose"), "geometry_msgs/Pose2D"
+                    )
+                    state.vicon_pose_pub.advertise()
 
-                arrived_topic = roslibpy.Topic(
-                    ros, self._topic(ns, "henosync/arrived"), "std_msgs/Bool"
+                progress_topic = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/progress"), "std_msgs/String"
                 )
-                arrived_topic.subscribe(
-                    lambda msg: _loop.call_soon_threadsafe(state.arrived_event.set)
-                    if msg.get("data", False) else None
+                progress_topic.subscribe(lambda msg: self._on_progress(node.id, msg))
+                state._subscriptions.append(progress_topic)
+
+                backfill_topic = roslibpy.Topic(
+                    ros, self._topic(ns, "henosync/backfill"), "std_msgs/String"
                 )
-                state._subscriptions.append(arrived_topic)
+                backfill_topic.subscribe(lambda msg: self._on_backfill(node.id, msg))
+                state._subscriptions.append(backfill_topic)
+
+                # Reconnected mid-path: let the waiting cmd_follow_path use this connection.
+                tracker = _PATHS.get(node.id)
+                if tracker:
+                    tracker.state = state
 
             # Anchor liveness clock to connect time so a wrong namespace
             # (topics never publish) triggers DEGRADED within MESSAGE_TIMEOUT seconds.
@@ -348,6 +392,65 @@ class JackalPlugin(NodePlugin):
             msg.get("twist", {}).get("twist", {}).get("linear", {}).get("x", 0.0)
         )
         state.last_message_time = time.monotonic()
+
+    def _on_progress(self, node_id: str, msg: dict) -> None:
+        state = self._nodes.get(node_id)
+        if state:
+            state.last_message_time = time.monotonic()
+        tracker = _PATHS.get(node_id)
+        if not tracker:
+            return
+        try:
+            data = _json.loads(msg.get("data", ""))
+        except ValueError:
+            return
+        if data.get("path_id") != tracker.path_id:
+            return
+        now = time.monotonic()
+        tracker.heard = True
+        tracker.last_heard = now
+        completed = int(data.get("completed", 0))
+        if completed > tracker.completed:
+            tracker.completed = completed
+            tracker.last_change = now
+        tracker.done = bool(data.get("done", False))
+        tracker.stopped = bool(data.get("stopped", False))
+
+    def _on_backfill(self, node_id: str, msg: dict) -> None:
+        state = self._nodes.get(node_id)
+        if state:
+            state.last_message_time = time.monotonic()
+        try:
+            data = _json.loads(msg.get("data", ""))
+        except ValueError:
+            return
+        path_id = data.get("path_id", "")
+        run_id = data.get("run_id", "")
+        if not path_id or not run_id or not data.get("steps"):
+            return
+        if path_id in _BACKFILLED_PATHS:
+            return
+        _BACKFILLED_PATHS.add(path_id)
+        # Schedule the async backfill on the asyncio event loop from the Twisted thread.
+        try:
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(
+                lambda: loop.create_task(self._do_backfill(run_id, data))
+            )
+        except Exception as e:
+            logger.error("Jackal [%s]: backfill schedule failed: %s", node_id, e)
+
+    async def _do_backfill(self, run_id: str, data: dict) -> None:
+        if not self._context:
+            return
+        try:
+            await self._context.backfill(run_id, data)
+            logger.info(
+                "Jackal: backfill %d step(s) → run %s",
+                len(data.get("steps", [])), run_id,
+            )
+        except Exception as e:
+            logger.error("Jackal: backfill failed: %s", e)
 
     def _on_battery(self, node_id: str, msg: dict) -> None:
         state = self._nodes.get(node_id)
@@ -495,6 +598,9 @@ class JackalPlugin(NodePlugin):
             return False
         return True
 
+    async def is_autonomous_mission_active(self, node: Node) -> bool:
+        return node.id in _PATHS
+
     # ── Command handlers ───────────────────────────────────────────────────────
 
     async def cmd_move_to(
@@ -527,52 +633,11 @@ class JackalPlugin(NodePlugin):
         threshold = arrival_radius_m if (arrival_radius_m is not None and arrival_radius_m > 0) else self.ARRIVAL_THRESHOLD_M
         speed_cap = min(float(max_speed), self.MAX_LINEAR_VEL) if max_speed is not None else self.MAX_LINEAR_VEL
 
-        has_onboard = (
-            use_vicon
-            and state.arrived_event is not None
-            and node.specs
-            and any(cs.capability == DeviceCapability.ONBOARD_CTRL for cs in node.specs.capabilities)
-        )
-
-        if has_onboard:
-            # ── Onboard controller path ───────────────────────────────────────
-            # Publish waypoint JSON to the robot; henosync_controller.py runs
-            # the proportional controller locally and publishes arrived when done.
-            # Only supported in VICON mode (x/y are already in metres).
-            target_x = float(x)
-            target_y = float(y)
-            waypoint = _json.dumps({
-                "x": target_x,
-                "y": target_y,
-                "arrival_radius": threshold,
-                "max_speed": speed_cap,
-            })
-
-            timeout = float(node.config.get("onboard_timeout_s", 120.0))
-            state.stop_requested = False
-            state.arrived_event.clear()
-            self._publish_waypoint(state, waypoint)
-            logger.info(
-                "Jackal [%s]: onboard ctrl → (%.3f, %.3f) radius=%.3f speed=%.3f timeout=%.0fs",
-                node.name, target_x, target_y, threshold, speed_cap, timeout,
+        if use_vicon and self._has_onboard(node, state):
+            # ── Onboard controller path — a path of one waypoint ──────────────
+            return await self.cmd_follow_path(
+                node, [{"x": float(x), "y": float(y)}], arrival_radius_m, max_speed
             )
-
-            elapsed = 0.0
-            poll = 0.2
-            while node.id in self._nodes and not state.stop_requested:
-                try:
-                    await asyncio.wait_for(state.arrived_event.wait(), timeout=poll)
-                    logger.info("Jackal [%s]: onboard controller — arrived", node.name)
-                    return CommandResult(success=True, message="Arrived")
-                except asyncio.TimeoutError:
-                    elapsed += poll
-                    if elapsed >= timeout:
-                        self._publish_stop_sentinel(state)
-                        return CommandResult(
-                            success=False,
-                            message=f"Onboard controller timeout after {timeout:.0f}s",
-                        )
-            return CommandResult(success=False, message="Stopped")
 
         else:
             # ── Proportional velocity controller (default) ────────────────────
@@ -636,7 +701,120 @@ class JackalPlugin(NodePlugin):
             finally:
                 self._publish_zero_twist(state)
 
+    @staticmethod
+    def _has_onboard(node: Node, state: _NodeState) -> bool:
+        return (
+            state.waypoint_pub is not None
+            and node.specs is not None
+            and any(cs.capability == DeviceCapability.ONBOARD_CTRL for cs in node.specs.capabilities)
+        )
+
+    async def cmd_follow_path(
+        self,
+        node: Node,
+        waypoints: list[dict[str, float]],
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
+    ) -> CommandResult:
+        """
+        Onboard controller only (VICON mode): send the whole path to
+        henosync_controller.py and wait for its progress reports. While the
+        rosbridge link is down the robot keeps driving (given an onboard pose
+        source) and this keeps waiting; after a reconnect the controller's
+        1 Hz progress re-send tells us how far it got.
+        """
+        state = self._nodes.get(node.id)
+        if (
+            not state
+            or not self._has_onboard(node, state)
+            or not waypoints
+            or waypoints[0].get("x") is None
+        ):
+            return CommandResult(success=False, message="follow_path not implemented")
+        if not state.connected:
+            return CommandResult(success=False, message="Not connected")
+
+        threshold = arrival_radius_m if (arrival_radius_m is not None and arrival_radius_m > 0) else self.ARRIVAL_THRESHOLD_M
+        speed_cap = min(float(max_speed), self.MAX_LINEAR_VEL) if max_speed is not None else self.MAX_LINEAR_VEL
+        timeout = float(node.config.get("onboard_timeout_s", 120.0))
+
+        tracker = _PathTracker(uuid.uuid4().hex[:8], len(waypoints), state)
+        tracker.run_id = self._context.active_run_id() or "" if self._context else ""
+        _PATHS[node.id] = tracker
+        self._publish_waypoint(state, _json.dumps({
+            "path_id": tracker.path_id,
+            "run_id": tracker.run_id,
+            "path": [{"x": float(w["x"]), "y": float(w["y"])} for w in waypoints],
+            "arrival_radius": threshold,
+            "max_speed": speed_cap,
+        }))
+        logger.info(
+            "Jackal [%s]: onboard ctrl → path %s, %d waypoint(s) radius=%.3f speed=%.3f",
+            node.name, tracker.path_id, len(waypoints), threshold, speed_cap,
+        )
+
+        link_down_logged = False
+        try:
+            while True:
+                await asyncio.sleep(0.2)
+                now = time.monotonic()
+                result_data = {"completed": tracker.completed}
+
+                if tracker.done:
+                    logger.info("Jackal [%s]: onboard controller — path complete", node.name)
+                    return CommandResult(success=True, message="Arrived", data=result_data)
+                if tracker.stop_requested or tracker.stopped:
+                    return CommandResult(success=False, message="Stopped", data=result_data)
+
+                if not tracker.heard:
+                    if now - tracker.last_heard > self.PROGRESS_ACK_TIMEOUT_S:
+                        self._publish_stop_sentinel(tracker.state)
+                        return CommandResult(
+                            success=False,
+                            message="Onboard controller not responding — is henosync_controller.py running?",
+                            data=result_data,
+                        )
+                    continue
+
+                if now - tracker.last_heard > self.LINK_LOST_S:
+                    if not link_down_logged:
+                        link_down_logged = True
+                        logger.warning(
+                            "Jackal [%s]: no progress from robot — link down, robot continues onboard "
+                            "(%d/%d waypoints reached)", node.name, tracker.completed, tracker.total,
+                        )
+                    if now - tracker.last_heard > self.LINK_LOSS_GRACE_S:
+                        return CommandResult(
+                            success=False,
+                            message=f"Link to robot lost for {self.LINK_LOSS_GRACE_S:.0f}s",
+                            data=result_data,
+                        )
+                    continue
+
+                if link_down_logged:
+                    link_down_logged = False
+                    logger.info(
+                        "Jackal [%s]: progress resumed — %d/%d waypoints reached",
+                        node.name, tracker.completed, tracker.total,
+                    )
+                    # Time spent disconnected doesn't count against the waypoint timeout.
+                    tracker.last_change = now
+
+                if now - tracker.last_change > timeout:
+                    self._publish_stop_sentinel(tracker.state)
+                    return CommandResult(
+                        success=False,
+                        message=f"Onboard controller timeout — no waypoint reached in {timeout:.0f}s",
+                        data=result_data,
+                    )
+        finally:
+            if _PATHS.get(node.id) is tracker:
+                del _PATHS[node.id]
+
     async def cmd_stop(self, node: Node) -> CommandResult:
+        tracker = _PATHS.get(node.id)
+        if tracker:
+            tracker.stop_requested = True
         state = self._nodes.get(node.id)
         if not state or not state.connected:
             return CommandResult(success=False, message="Not connected")
@@ -710,6 +888,9 @@ class JackalPlugin(NodePlugin):
     # ── Safe state ─────────────────────────────────────────────────────────────
 
     async def get_safe_state(self, node: Node) -> CommandResult:
+        tracker = _PATHS.get(node.id)
+        if tracker:
+            tracker.stop_requested = True
         state = self._nodes.get(node.id)
         if state:
             state.stop_requested = True

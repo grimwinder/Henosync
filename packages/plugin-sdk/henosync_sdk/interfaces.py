@@ -123,6 +123,14 @@ class NodePlugin(ABC):
                 arrival_radius_m=p.get("arrival_radius_m"),
                 max_speed=p.get("max_speed"),
             )
+        if envelope.command_type == CommandType.FOLLOW_PATH:
+            p = envelope.params
+            return await self.cmd_follow_path(
+                node,
+                waypoints=p.get("waypoints", []),
+                arrival_radius_m=p.get("arrival_radius_m"),
+                max_speed=p.get("max_speed"),
+            )
         if envelope.command_type == CommandType.STOP:
             return await self.cmd_stop(node)
         if envelope.command_type == CommandType.RETURN_HOME:
@@ -155,6 +163,25 @@ class NodePlugin(ABC):
         (or simply whether x is not None) to know which set to use.
         """
         return CommandResult(success=False, message="move_to not implemented")
+
+    async def cmd_follow_path(
+        self,
+        node: Node,
+        waypoints: list[dict[str, float]],
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
+    ) -> CommandResult:
+        """
+        Optional. Override if the device can drive a whole multi-waypoint path
+        itself (e.g. an onboard controller that keeps going if the link to
+        Henosync drops). Each waypoint uses the same keys cmd_move_to receives:
+        x/y/z for coordinate_frame="local" devices, lat/lon/alt otherwise.
+
+        Return data={"completed": n} — the number of waypoints reached — so a
+        caller can resume from where the path stopped. Callers fall back to one
+        move_to per waypoint when this returns "not implemented".
+        """
+        return CommandResult(success=False, message="follow_path not implemented")
 
     async def cmd_stop(self, node: Node) -> CommandResult:
         """Override if you declare MOVE_2D or MOVE_3D capability."""
@@ -222,3 +249,17 @@ class NodePlugin(ABC):
         arrived from the device and return False if that exceeds a threshold.
         """
         return True
+
+    async def is_autonomous_mission_active(self, node: Node) -> bool:
+        """
+        Optional: return True while the device is executing a mission
+        autonomously (i.e. it can continue without a live Henosync connection).
+
+        When True, the failsafe manager will not invoke get_safe_state(),
+        set the node to ERROR, or pause/abort the active mission on heartbeat
+        loss. A WARNING event is emitted instead.
+
+        Default returns False — the standard failsafe behaviour applies.
+        Override in plugins that support onboard mission execution.
+        """
+        return False

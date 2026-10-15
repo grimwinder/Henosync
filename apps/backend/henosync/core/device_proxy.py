@@ -152,6 +152,44 @@ class DeviceProxy:
         envelope = CommandEnvelope(command_type=CommandType.MOVE_TO, params=params)
         return await plugin.send_command(self._node, envelope)
 
+    async def follow_path(
+        self, waypoints: list[tuple[float, float]],
+        arrival_radius_m: Optional[float] = None,
+        max_speed: Optional[float] = None,
+    ) -> CommandResult:
+        """
+        Drive a whole path of WGS84 (lat, lon) waypoints in one command, for
+        devices that can run it themselves (see NodePlugin.cmd_follow_path).
+        Returns a "not implemented" result for devices that can't — callers
+        then fall back to one move_to() per waypoint. On failure,
+        result.data["completed"] is how many waypoints were reached.
+        """
+        plugin = self._get_plugin()
+        if not plugin:
+            return CommandResult(success=False, message="No plugin instance available")
+
+        local = (
+            self._node.specs
+            and self._node.specs.coordinate_frame == "local"
+            and self._node.local_origin
+        )
+        points = []
+        for lat, lon in waypoints:
+            if local:
+                x, y = self._gps_to_local(lat, lon)
+                points.append({"x": x, "y": y, "z": 0.0})
+            else:
+                points.append({"lat": lat, "lon": lon, "alt": 0.0})
+
+        params: dict[str, Any] = {"waypoints": points}
+        if arrival_radius_m is not None:
+            params["arrival_radius_m"] = arrival_radius_m
+        if max_speed is not None:
+            params["max_speed"] = max_speed
+
+        envelope = CommandEnvelope(command_type=CommandType.FOLLOW_PATH, params=params)
+        return await plugin.send_command(self._node, envelope)
+
     async def stop(self) -> CommandResult:
         """Stop all movement immediately."""
         plugin = self._get_plugin()

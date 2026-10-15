@@ -3,35 +3,52 @@
 henosync_controller.py — onboard proportional velocity controller for Henosync.
 
 Run this ROS2 node on the robot when the "Onboard Controller" capability is
-selected in Henosync.  Henosync publishes the target waypoint and the current
-VICON position; this node runs the control loop locally and publishes `arrived`
-when the robot reaches the target.
+selected in Henosync.  Henosync publishes the target waypoint (or a whole
+path of waypoints); this node runs the control loop locally against a pose
+topic and reports progress back.
 
-This keeps the control loop on the robot side, avoiding latency from
-rosbridge round-trips in the default Henosync velocity controller.
+The pose can come from anywhere that publishes geometry_msgs/Pose2D in the
+same frame as the waypoints (--pose_topic):
+  - Henosync's relay (default): /<ns>/henosync/vicon_pose, forwarded over
+    rosbridge — the robot stops if the link to Henosync drops.
+  - vicon_pose_publisher.py running on the robot (--pose_topic
+    /<ns>/henosync/onboard_pose): the robot reads VICON itself, so it keeps
+    driving its path while the link to Henosync is down.
+
+If no pose arrives for POSE_TIMEOUT_S the robot stops and waits — it never
+drives on a stale position.
 
 Topics subscribed:
-  /<ns>/henosync/waypoint      std_msgs/String  — JSON: {"x": m, "y": m,
-                                                          "arrival_radius": m,
-                                                          "max_speed": m/s}
-                                                  OR    {"stop": true}
-  /<ns>/henosync/vicon_pose    geometry_msgs/Pose2D — x, y (m), theta (rad)
+  /<ns>/henosync/waypoint      std_msgs/String  — JSON, one of:
+                                 {"x": m, "y": m, "arrival_radius": m, "max_speed": m/s}
+                                 {"path_id": str, "path": [{"x": m, "y": m}, ...],
+                                  "arrival_radius": m, "max_speed": m/s}
+                                 {"stop": true}
+  <pose_topic>                 geometry_msgs/Pose2D — x, y (m), theta (rad)
 
 Topics published:
   <cmd_vel_topic>              geometry_msgs/TwistStamped (default)
                                geometry_msgs/Twist         (--unstamped)
-  /<ns>/henosync/arrived       std_msgs/Bool — True when within arrival_radius
+  /<ns>/henosync/arrived       std_msgs/Bool — True when the last waypoint is reached
+  /<ns>/henosync/progress      std_msgs/String — JSON {"path_id", "completed",
+                               "total", "done", "stopped"}; sent on every
+                               waypoint reached and re-sent at 1 Hz so Henosync
+                               catches up after a reconnect
+  /<ns>/henosync/backfill      std_msgs/String — JSON {"path_id", "run_id",
+                               "steps": [{"timestamp", "waypoint_index"}, ...]}; sent
+                               on each waypoint arrival and re-sent at 1 Hz so
+                               Henosync can record offline progress after reconnect
 
 Usage:
-  ros2 run <your_pkg> henosync_controller  [--namespace tb2] [--unstamped]
-  python henosync_controller.py            [--namespace tb2] [--unstamped]
-                                           [--cmd_vel_topic /tb2/cmd_vel]
+  python henosync_controller.py [--namespace tb2] [--unstamped]
+                                [--cmd_vel_topic /tb2/cmd_vel]
+                                [--pose_topic /tb2/henosync/onboard_pose]
 """
 
 import argparse
 import json
 import math
-import sys
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -47,10 +64,12 @@ LINEAR_GAIN: float = 0.5
 ANGULAR_GAIN: float = 1.2
 ANGULAR_DEADBAND: float = 0.05  # rad — ignore heading errors below this threshold
 CTRL_HZ: float = 10.0
+POSE_TIMEOUT_S: float = 1.5   # stop if no pose received for this long (relay sends at 2 Hz)
+PROGRESS_HZ: float = 1.0
 
 
 class HenosyncController(Node):
-    def __init__(self, namespace: str, cmd_vel_topic: str, unstamped: bool):
+    def __init__(self, namespace: str, cmd_vel_topic: str, pose_topic: str, unstamped: bool):
         super().__init__("henosync_controller")
 
         self._ns = namespace
@@ -60,34 +79,45 @@ class HenosyncController(Node):
         def _ht(path: str) -> str:
             return f"/{namespace}/{path}" if namespace else f"/{path}"
 
+        pose_topic = pose_topic or _ht("henosync/vicon_pose")
+
         self._waypoint_sub = self.create_subscription(
             String, _ht("henosync/waypoint"), self._on_waypoint, 10
         )
         self._pose_sub = self.create_subscription(
-            Pose2D, _ht("henosync/vicon_pose"), self._on_vicon_pose, 10
+            Pose2D, pose_topic, self._on_pose, 10
         )
         self._arrived_pub = self.create_publisher(Bool, _ht("henosync/arrived"), 10)
+        self._progress_pub = self.create_publisher(String, _ht("henosync/progress"), 10)
+        self._backfill_pub = self.create_publisher(String, _ht("henosync/backfill"), 10)
 
         if unstamped:
             self._cmd_vel_pub = self.create_publisher(Twist, cmd_vel_topic, 10)
         else:
             self._cmd_vel_pub = self.create_publisher(TwistStamped, cmd_vel_topic, 10)
 
-        # Controller state
-        self._target_x: float = 0.0
-        self._target_y: float = 0.0
+        # Path state — a single waypoint is a path of length 1
+        self._path: list[tuple[float, float]] = []
+        self._path_id: str = ""
+        self._run_id: str = ""
+        self._index: int = 0
+        self._stopped: bool = False
         self._arrival_radius: float = 0.1
         self._max_speed: float = MAX_LINEAR_VEL
-        self._active: bool = False  # True when a waypoint is pending
+        self._active: bool = False  # True while waypoints remain
+        self._step_buffer: list[dict] = []  # [{timestamp, waypoint_index}]
 
         self._pos_x: float = 0.0
         self._pos_y: float = 0.0
         self._pos_theta: float = 0.0
+        self._last_pose_time: float = 0.0
+        self._pose_stale_logged: bool = False
 
         self._timer = self.create_timer(1.0 / CTRL_HZ, self._control_tick)
+        self._progress_timer = self.create_timer(1.0 / PROGRESS_HZ, self._publish_progress)
         self.get_logger().info(
             f"henosync_controller ready — ns='{namespace}', "
-            f"cmd_vel={cmd_vel_topic}, unstamped={unstamped}"
+            f"cmd_vel={cmd_vel_topic}, pose={pose_topic}, unstamped={unstamped}"
         )
 
     def _on_waypoint(self, msg: String) -> None:
@@ -99,43 +129,79 @@ class HenosyncController(Node):
 
         if data.get("stop", False):
             self._active = False
+            self._stopped = True
             self._publish_zero()
+            self._publish_progress()
             self.get_logger().info("Stop sentinel received — stopping")
             return
 
-        self._target_x = float(data.get("x", 0.0))
-        self._target_y = float(data.get("y", 0.0))
+        if "path" in data:
+            path = [(float(p["x"]), float(p["y"])) for p in data["path"]]
+        else:
+            path = [(float(data.get("x", 0.0)), float(data.get("y", 0.0)))]
+
+        self._path = path
+        self._path_id = str(data.get("path_id", ""))
+        self._run_id = str(data.get("run_id", ""))
+        self._index = 0
+        self._stopped = False
         self._arrival_radius = float(data.get("arrival_radius", 0.1))
         self._max_speed = min(float(data.get("max_speed", MAX_LINEAR_VEL)), MAX_LINEAR_VEL)
-        self._active = True
+        self._active = bool(path)
+        self._step_buffer = []
         self.get_logger().info(
-            f"New waypoint: ({self._target_x:.3f}, {self._target_y:.3f}) "
+            f"New path '{self._path_id}': {len(path)} waypoint(s), first "
+            f"({path[0][0]:.3f}, {path[0][1]:.3f}) "
             f"radius={self._arrival_radius:.3f}m speed={self._max_speed:.3f}m/s"
         )
+        self._publish_progress()
 
-    def _on_vicon_pose(self, msg: Pose2D) -> None:
+    def _on_pose(self, msg: Pose2D) -> None:
         self._pos_x = msg.x
         self._pos_y = msg.y
         self._pos_theta = msg.theta
+        self._last_pose_time = time.monotonic()
 
     def _control_tick(self) -> None:
         if not self._active:
             return
 
-        dx = self._target_x - self._pos_x
-        dy = self._target_y - self._pos_y
+        if time.monotonic() - self._last_pose_time > POSE_TIMEOUT_S:
+            # Never drive on a stale position — hold until the pose comes back.
+            self._publish_zero()
+            if not self._pose_stale_logged:
+                self._pose_stale_logged = True
+                self.get_logger().warning(
+                    f"No pose for {POSE_TIMEOUT_S:.1f}s — holding position"
+                )
+            return
+        if self._pose_stale_logged:
+            self._pose_stale_logged = False
+            self.get_logger().info("Pose restored — resuming")
+
+        target_x, target_y = self._path[self._index]
+        dx = target_x - self._pos_x
+        dy = target_y - self._pos_y
         distance = math.sqrt(dx * dx + dy * dy)
 
         if distance < self._arrival_radius:
-            self._active = False
-            self._publish_zero()
-            arrived = Bool()
-            arrived.data = True
-            self._arrived_pub.publish(arrived)
+            self._step_buffer.append({
+                "timestamp": time.time(),
+                "waypoint_index": self._index,
+            })
+            self._index += 1
             self.get_logger().info(
-                f"Arrived at ({self._target_x:.3f}, {self._target_y:.3f}), "
-                f"dist={distance:.3f}m"
+                f"Reached waypoint {self._index}/{len(self._path)} "
+                f"({target_x:.3f}, {target_y:.3f}), dist={distance:.3f}m"
             )
+            if self._index >= len(self._path):
+                self._active = False
+                self._publish_zero()
+                arrived = Bool()
+                arrived.data = True
+                self._arrived_pub.publish(arrived)
+            self._publish_progress()
+            self._publish_backfill()
             return
 
         bearing = math.atan2(dy, dx)
@@ -157,6 +223,31 @@ class HenosyncController(Node):
             )
 
         self._publish_velocity(linear, angular)
+
+    def _publish_progress(self) -> None:
+        if not self._path:
+            return
+        msg = String()
+        msg.data = json.dumps({
+            "path_id": self._path_id,
+            "completed": self._index,
+            "total": len(self._path),
+            "done": self._index >= len(self._path),
+            "stopped": self._stopped,
+        })
+        self._progress_pub.publish(msg)
+        self._publish_backfill()
+
+    def _publish_backfill(self) -> None:
+        if not self._path or not self._run_id or not self._step_buffer:
+            return
+        msg = String()
+        msg.data = json.dumps({
+            "path_id": self._path_id,
+            "run_id": self._run_id,
+            "steps": self._step_buffer,
+        })
+        self._backfill_pub.publish(msg)
 
     def _publish_velocity(self, linear: float, angular: float) -> None:
         if self._unstamped:
@@ -185,6 +276,12 @@ def main() -> None:
         help="cmd_vel topic to publish to. Defaults to /<ns>/cmd_vel or /cmd_vel."
     )
     parser.add_argument(
+        "--pose_topic", default=None,
+        help="Pose2D topic to steer by. Defaults to Henosync's relay, /<ns>/henosync/vicon_pose. "
+             "Use /<ns>/henosync/onboard_pose with vicon_pose_publisher.py to keep "
+             "driving while the link to Henosync is down."
+    )
+    parser.add_argument(
         "--unstamped", action="store_true",
         help="Publish geometry_msgs/Twist instead of TwistStamped (e.g. for Jackal)."
     )
@@ -198,7 +295,10 @@ def main() -> None:
         cmd_vel = f"/{ns}/cmd_vel" if ns else "/cmd_vel"
 
     rclpy.init()
-    node = HenosyncController(namespace=ns, cmd_vel_topic=cmd_vel, unstamped=args.unstamped)
+    node = HenosyncController(
+        namespace=ns, cmd_vel_topic=cmd_vel, pose_topic=args.pose_topic,
+        unstamped=args.unstamped,
+    )
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -1426,17 +1426,22 @@ class AutoNavigatePlugin(ControlPlugin):
             if not waypoints:
                 self._device_status[device.name] = "No coverage area assigned"
 
-            for i, (a, b) in enumerate(waypoints):
-                if self._stop_requested:
-                    self._device_status[device.name] = "Stopped"
-                    return False
-                self._device_status[device.name] = f"Sweeping — waypoint {i + 1}/{len(waypoints)}"
-                lat, lon = device.local_to_gps(a, b) if kind == "local" else (a, b)
-                if not await self._navigate_one_waypoint(
-                    device, lat, lon, context, arrival_radius_m, max_speed
-                ):
-                    self._device_status[device.name] = f"Coverage failed at waypoint {i + 1}/{len(waypoints)}"
-                    return False
+            points = [device.local_to_gps(a, b) if kind == "local" else (a, b) for a, b in waypoints]
+            followed = await self._follow_path(device, points, context, arrival_radius_m, max_speed)
+            if followed is False:
+                return False
+            if followed is None:
+                # Device can't run a whole path itself — drive it one waypoint at a time.
+                for i, (lat, lon) in enumerate(points):
+                    if self._stop_requested:
+                        self._device_status[device.name] = "Stopped"
+                        return False
+                    self._device_status[device.name] = f"Sweeping — waypoint {i + 1}/{len(points)}"
+                    if not await self._navigate_one_waypoint(
+                        device, lat, lon, context, arrival_radius_m, max_speed
+                    ):
+                        self._device_status[device.name] = f"Coverage failed at waypoint {i + 1}/{len(points)}"
+                        return False
 
             if self._stop_requested:
                 self._device_status[device.name] = "Stopped"
@@ -1461,6 +1466,59 @@ class AutoNavigatePlugin(ControlPlugin):
             self._current_devices.pop(device.id, None)
             self._collision_paused.discard(device.id)
             self._device_target.pop(device.id, None)
+
+    async def _follow_path(
+        self, device, points: list[tuple[float, float]], context,
+        arrival_radius_m: Optional[float] = None, max_speed: Optional[float] = None,
+    ) -> Optional[bool]:
+        """
+        Hand the whole sweep to the device in one device.follow_path() call,
+        for devices that can drive a path themselves (e.g. an onboard
+        controller that keeps going if the link to Henosync drops). Returns
+        None when the device can't — the caller then falls back to one
+        move_to per waypoint. A _collision_guard() stop is retried from the
+        first waypoint not yet reached, same as _navigate_one_waypoint().
+        """
+        for lat, lon in points:
+            no_go = context.zone_manager.is_in_no_go_zone(lat, lon)
+            if no_go.inside:
+                msg = f"Coverage path enters no-go zone: {no_go.zone_name}"
+                self._device_status[device.name] = msg
+                await context.send_alert("Navigation blocked", msg, EventSeverity.WARNING)
+                return False
+
+        remaining = list(points)
+        while remaining and not self._stop_requested:
+            while device.id in self._collision_paused and not self._stop_requested:
+                self._device_status[device.name] = "Yielding to nearby robot"
+                await asyncio.sleep(SEPARATION_CHECK_PERIOD_S)
+            if self._stop_requested:
+                break
+
+            self._device_target[device.id] = remaining[0]
+            self._device_status[device.name] = (
+                f"Sweeping — {len(remaining)} waypoint(s) sent to onboard controller"
+            )
+            result = await device.follow_path(
+                remaining, arrival_radius_m=arrival_radius_m, max_speed=max_speed
+            )
+            if "not implemented" in result.message.lower():
+                return None
+            if result.success:
+                return True
+            if device.id in self._collision_paused:
+                remaining = remaining[int(result.data.get("completed", 0)):]
+                continue
+            self._device_status[device.name] = f"Coverage failed: {result.message}"
+            logger.warning(
+                "%s: follow_path failed for %s: %s", self.PLUGIN_ID, device.name, result.message
+            )
+            return False
+
+        if self._stop_requested:
+            self._device_status[device.name] = "Stopped"
+            return False
+        return True
 
     async def _execute_perimeter_patrol(self, step: NavigationStep, context) -> None:
         """
@@ -1540,20 +1598,25 @@ class AutoNavigatePlugin(ControlPlugin):
 
             waypoints = vertices * laps + [vertices[0]]
             total = len(waypoints)
-            for i, (a, b) in enumerate(waypoints):
-                if self._stop_requested:
-                    self._device_status[device.name] = "Stopped"
-                    return False
-                lap_num = min(laps, i // len(vertices) + 1)
-                self._device_status[device.name] = (
-                    f"Patrolling — lap {lap_num}/{laps}, waypoint {i + 1}/{total}"
-                )
-                lat, lon = device.local_to_gps(a, b) if kind == "local" else (a, b)
-                if not await self._navigate_one_waypoint(
-                    device, lat, lon, context, arrival_radius_m, max_speed
-                ):
-                    self._device_status[device.name] = f"Patrol failed at waypoint {i + 1}/{total}"
-                    return False
+            points = [device.local_to_gps(a, b) if kind == "local" else (a, b) for a, b in waypoints]
+            followed = await self._follow_path(device, points, context, arrival_radius_m, max_speed)
+            if followed is False:
+                return False
+            if followed is None:
+                # Device can't run a whole path itself — drive one waypoint at a time.
+                for i, (lat, lon) in enumerate(points):
+                    if self._stop_requested:
+                        self._device_status[device.name] = "Stopped"
+                        return False
+                    lap_num = min(laps, i // len(vertices) + 1)
+                    self._device_status[device.name] = (
+                        f"Patrolling — lap {lap_num}/{laps}, waypoint {i + 1}/{total}"
+                    )
+                    if not await self._navigate_one_waypoint(
+                        device, lat, lon, context, arrival_radius_m, max_speed
+                    ):
+                        self._device_status[device.name] = f"Patrol failed at waypoint {i + 1}/{total}"
+                        return False
 
             self._device_status[device.name] = f"Complete — patrolled {laps} lap(s)"
             return True
